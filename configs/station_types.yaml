@@ -1,0 +1,3378 @@
+# Auto-generated from sql/db.sql (station_types + station_goods_types)
+# by cmd/starwind-tools/convert-station-types. Do not edit by hand;
+# rerun the converter against the source dump.
+station_types:
+    - id: 0
+      name: Строящаяся станция
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 1
+      name: Электростанция
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 2
+      name: Сталелитейный завод
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 3
+      name: Завод кремния
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 4
+      name: Фабрика кристаллов
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 5
+      name: Компьютерный завод
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 6
+      name: Завод боеголовок
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 7
+      name: Завод микросхем
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 10
+      name: Ракетный завод
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 11
+      name: Ракетный завод
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 12
+      name: Ракетный завод
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 13
+      name: Ракетный завод
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 14
+      name: Ракетный завод
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 20
+      name: Завод лазерных башен
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 21
+      name: Завод боевых дронов
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 22
+      name: Завод мин сквош
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 25
+      name: Завод ловушек
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 26
+      name: Завод спутников
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 27
+      name: Фабрика Гипер-генераторов
+      race_id: 0
+      kind: 2
+      hull: 430000
+      shield: 2150000
+      sellable: 1
+    - id: 40
+      name: Завод Виски
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 60
+      name: Ранчо
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 61
+      name: Кухня кахуна
+      race_id: 0
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 62
+      name: Завод биогаза
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 63
+      name: Лаборатория Бофу
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 64
+      name: Соевая ферма
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 65
+      name: Фабрика сои
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 66
+      name: Аквариум челтов
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 67
+      name: Растарный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 68
+      name: Цветочная ферма
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 69
+      name: Завод масла ностроп
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 101
+      name: Электростанция
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 102
+      name: Сталелитейный завод
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 103
+      name: Завод кремния
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 104
+      name: Фабрика кристаллов
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 105
+      name: Компьютерный завод
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 106
+      name: Завод боеголовок
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 107
+      name: Завод микросхем
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 110
+      name: Ракетный завод
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 111
+      name: Ракетный завод
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 112
+      name: Ракетный завод
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 113
+      name: Ракетный завод
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 114
+      name: Ракетный завод
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 120
+      name: Завод лазерных башен
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 121
+      name: Завод боевых дронов
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 125
+      name: Завод ловушек
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 160
+      name: Ранчо
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 161
+      name: Кухня кахуна
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 162
+      name: Завод импульсных пушек М.1.
+      race_id: 1
+      kind: 2
+      hull: 860000
+      shield: 8000000
+      sellable: 0
+    - id: 163
+      name: Завод импульсных пушек М.2.
+      race_id: 1
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 164
+      name: Завод ускорителей частиц М.2.
+      race_id: 1
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 165
+      name: Завод плазменных пушек М.2.
+      race_id: 1
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 166
+      name: Завод фотонных пушек М.2.
+      race_id: 1
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 167
+      name: Завод фазовых импульсных лазеров
+      race_id: 1
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 168
+      name: Завод автоматических пушек
+      race_id: 1
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 169
+      name: Завод автоматических пушек МК2
+      race_id: 1
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 201
+      name: Электростанция
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 202
+      name: Сталелитейный завод
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 203
+      name: Завод кремния
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 204
+      name: Фабрика кристаллов
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 205
+      name: Компьютерный завод
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 206
+      name: Завод боеголовок
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 207
+      name: Завод микросхем
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 210
+      name: Ракетный завод
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 211
+      name: Ракетный завод
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 212
+      name: Ракетный завод
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 213
+      name: Ракетный завод
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 214
+      name: Ракетный завод
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 220
+      name: Завод лазерных башен
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 221
+      name: Завод боевых дронов
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 225
+      name: Завод ловушек
+      race_id: 2
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 226
+      name: Завод Гипер-маяков
+      race_id: 2
+      kind: 2
+      hull: 4598000
+      shield: 46598000
+      sellable: 0
+    - id: 227
+      name: Завод импульсных пушек М.1
+      race_id: 2
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 228
+      name: Завод импульсных пушек М.2
+      race_id: 2
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 229
+      name: Завод ускорителей частиц М.1
+      race_id: 2
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 230
+      name: Завод плазменных пушек М.1
+      race_id: 2
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 231
+      name: завод фотонных пушек М.2
+      race_id: 2
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 232
+      name: Завод ионных излучателей
+      race_id: 2
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 233
+      name: Завод магнито-ионных пушек
+      race_id: 2
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 301
+      name: Электростанция
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 302
+      name: Сталелитейный завод
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 303
+      name: Завод кремния
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 304
+      name: Фабрика кристаллов
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 305
+      name: Компьютерный завод
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 306
+      name: Завод боеголовок
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 307
+      name: Завод микросхем
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 310
+      name: Ракетный завод
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 311
+      name: Ракетный завод
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 312
+      name: Ракетный завод
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 313
+      name: Ракетный завод
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 314
+      name: Ракетный завод
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 320
+      name: Завод лазерных башен
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 321
+      name: Завод боевых дронов
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 322
+      name: Завод мин сквош
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 327
+      name: Фабрика Гипер-генераторов
+      race_id: 3
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 328
+      name: Завод импульсных пушек М.1
+      race_id: 3
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 329
+      name: Завод ускорителей частиц М.2
+      race_id: 3
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 330
+      name: Завод плазменных пушек  М.1
+      race_id: 3
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 331
+      name: Завод плазменных пушек М.2
+      race_id: 3
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 332
+      name: Завод фотонных пушек М.3
+      race_id: 3
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 333
+      name: Завод ударно-импульсных генераторов
+      race_id: 3
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 334
+      name: Завод ударно-импульсных орудий
+      race_id: 3
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 401
+      name: Электростанция
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 402
+      name: Сталелитейный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 403
+      name: Завод кремния
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 404
+      name: Фабрика кристаллов
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 405
+      name: Компьютерный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 406
+      name: Завод боеголовок
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 407
+      name: Завод микросхем
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 410
+      name: Ракетный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 411
+      name: Ракетный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 412
+      name: Ракетный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 413
+      name: Ракетный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 414
+      name: Ракетный завод
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 420
+      name: Завод лазерных башен
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 421
+      name: Завод боевых дронов
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 422
+      name: Завод мин сквош
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 423
+      name: Торпедная фабрика
+      race_id: 4
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 0
+    - id: 424
+      name: Завод импульсных пушек М.2
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 425
+      name: Завод ускорителей частиц М.2
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 426
+      name: Завод плазменных пушек М.2
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 427
+      name: Завод фотонных пушек М.1
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 428
+      name: Завод фотонных пушек М.3
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 429
+      name: Завод зенитных орудий
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 430
+      name: Завод сдвоенных зенитных орудий
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 431
+      name: Оружейный комплекс
+      race_id: 4
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 501
+      name: Электростанция
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 502
+      name: Сталелитейный завод
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 503
+      name: Завод кремния
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 504
+      name: Фабрика кристаллов
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 505
+      name: Компьютерный завод
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 506
+      name: Завод боеголовок
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 507
+      name: Завод микросхем
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 510
+      name: Ракетный завод
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 511
+      name: Ракетный завод
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 512
+      name: Ракетный завод
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 513
+      name: Ракетный завод
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 514
+      name: Ракетный завод
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 520
+      name: Завод лазерных башен
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 521
+      name: Завод боевых дронов
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 526
+      name: Завод спутников
+      race_id: 5
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 527
+      name: Завод импульсных пушек М.1
+      race_id: 5
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 528
+      name: Завод ускорителей частиц М.1
+      race_id: 5
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 529
+      name: Завод ускорителей частиц М.2
+      race_id: 5
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 530
+      name: Завод плазменных пушек М.1
+      race_id: 5
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 531
+      name: Завод фотонных пушек М.1
+      race_id: 5
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 532
+      name: Завод энергетических пулемётов
+      race_id: 5
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 601
+      name: Электростанция
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 602
+      name: Сталелитейный завод
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 603
+      name: Завод кремния
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 604
+      name: Фабрика кристаллов
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 605
+      name: Компьютерный завод
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 606
+      name: Завод боеголовок
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 607
+      name: Завод микросхем
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 610
+      name: Ракетный завод
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 611
+      name: Ракетный завод
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 612
+      name: Ракетный завод
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 613
+      name: Ракетный завод
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 614
+      name: Ракетный завод
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 620
+      name: Завод лазерных башен
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 621
+      name: Завод боевых дронов
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 622
+      name: Завод мин сквош
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 625
+      name: Завод ловушек
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 626
+      name: Завод спутников
+      race_id: 6
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+    - id: 627
+      name: Завод импульсных пушек М.1
+      race_id: 6
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 628
+      name: Завод ускорителей частиц М.1
+      race_id: 6
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 629
+      name: Завод  плазменных пушек М.1
+      race_id: 6
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 630
+      name: Завод фотонных пушек М.1
+      race_id: 6
+      kind: 2
+      hull: 1000000
+      shield: 10000000
+      sellable: 0
+    - id: 827
+      name: Фабрика Гипер-генераторов
+      race_id: 8
+      kind: 2
+      hull: 860000
+      shield: 4300000
+      sellable: 1
+recipes:
+    - station_type: 1
+      cycle_time: 5340s
+      inputs:
+        - type: 4
+          qty: 5
+      outputs:
+        - type: 1
+          qty: 909
+          max: 10000
+    - station_type: 2
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 584
+        - type: 8
+          qty: 240
+      outputs:
+        - type: 2
+          qty: 130
+          max: 1300
+    - station_type: 3
+      cycle_time: 3840s
+      inputs:
+        - type: 1
+          qty: 386
+        - type: 9
+          qty: 38
+      outputs:
+        - type: 3
+          qty: 21
+          max: 317
+    - station_type: 4
+      cycle_time: 11400s
+      inputs:
+        - type: 1
+          qty: 1166
+        - type: 3
+          qty: 38
+      outputs:
+        - type: 4
+          qty: 19
+          max: 95
+    - station_type: 5
+      cycle_time: 29160s
+      inputs:
+        - type: 1
+          qty: 3261
+        - type: 3
+          qty: 105
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 5
+          qty: 59
+          max: 118
+    - station_type: 6
+      cycle_time: 5280s
+      inputs:
+        - type: 1
+          qty: 528
+        - type: 2
+          qty: 68
+      outputs:
+        - type: 6
+          qty: 65
+          max: 717
+    - station_type: 7
+      cycle_time: 4920s
+      inputs:
+        - type: 1
+          qty: 474
+        - type: 3
+          qty: 16
+      outputs:
+        - type: 7
+          qty: 1
+          max: 11
+    - station_type: 10
+      cycle_time: 3120s
+      inputs:
+        - type: 1
+          qty: 315
+        - type: 2
+          qty: 42
+        - type: 6
+          qty: 24
+      outputs:
+        - type: 10
+          qty: 25
+          max: 476
+    - station_type: 11
+      cycle_time: 4440s
+      inputs:
+        - type: 1
+          qty: 462
+        - type: 2
+          qty: 60
+        - type: 6
+          qty: 33
+      outputs:
+        - type: 11
+          qty: 12
+          max: 159
+    - station_type: 12
+      cycle_time: 9720s
+      inputs:
+        - type: 1
+          qty: 1005
+        - type: 2
+          qty: 132
+        - type: 6
+          qty: 72
+      outputs:
+        - type: 12
+          qty: 13
+          max: 79
+    - station_type: 13
+      cycle_time: 11220s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 13
+          qty: 6
+          max: 31
+    - station_type: 14
+      cycle_time: 11160s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 14
+          qty: 3
+          max: 15
+    - station_type: 20
+      cycle_time: 37380s
+      inputs:
+        - type: 1
+          qty: 3789
+        - type: 2
+          qty: 492
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 20
+          qty: 1
+          max: 1
+    - station_type: 21
+      cycle_time: 18480s
+      inputs:
+        - type: 1
+          qty: 1698
+        - type: 2
+          qty: 222
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 21
+          qty: 15
+          max: 45
+    - station_type: 22
+      cycle_time: 19200s
+      inputs:
+        - type: 1
+          qty: 1848
+        - type: 2
+          qty: 279
+        - type: 6
+          qty: 135
+      outputs:
+        - type: 22
+          qty: 5
+          max: 15
+    - station_type: 25
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 393
+        - type: 2
+          qty: 57
+        - type: 4
+          qty: 3
+      outputs:
+        - type: 25
+          qty: 15
+          max: 186
+    - station_type: 26
+      cycle_time: 16800s
+      inputs:
+        - type: 1
+          qty: 1737
+        - type: 2
+          qty: 294
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 26
+          qty: 2
+          max: 6
+    - station_type: 40
+      cycle_time: 1560s
+      inputs:
+        - type: 1
+          qty: 158
+      outputs:
+        - type: 40
+          qty: 6
+          max: 222
+    - station_type: 60
+      cycle_time: 3000s
+      inputs:
+        - type: 1
+          qty: 310
+      outputs:
+        - type: 60
+          qty: 81
+          max: 1538
+    - station_type: 61
+      cycle_time: 2400s
+      inputs:
+        - type: 1
+          qty: 492
+        - type: 60
+          qty: 76
+        - type: 64
+          qty: 24
+        - type: 66
+          qty: 8
+      outputs:
+        - type: 61
+          qty: 80
+          max: 1904
+    - station_type: 62
+      cycle_time: 4080s
+      inputs:
+        - type: 1
+          qty: 421
+      outputs:
+        - type: 62
+          qty: 104
+          max: 1454
+    - station_type: 63
+      cycle_time: 4380s
+      inputs:
+        - type: 1
+          qty: 812
+        - type: 62
+          qty: 120
+        - type: 66
+          qty: 16
+        - type: 68
+          qty: 48
+      outputs:
+        - type: 63
+          qty: 59
+          max: 761
+    - station_type: 64
+      cycle_time: 2700s
+      inputs:
+        - type: 1
+          qty: 281
+      outputs:
+        - type: 64
+          qty: 254
+          max: 5333
+    - station_type: 65
+      cycle_time: 4080s
+      inputs:
+        - type: 1
+          qty: 760
+        - type: 62
+          qty: 12
+        - type: 64
+          qty: 404
+        - type: 66
+          qty: 12
+      outputs:
+        - type: 65
+          qty: 68
+          max: 952
+    - station_type: 66
+      cycle_time: 4380s
+      inputs:
+        - type: 1
+          qty: 457
+      outputs:
+        - type: 66
+          qty: 119
+          max: 1538
+    - station_type: 67
+      cycle_time: 4800s
+      inputs:
+        - type: 1
+          qty: 900
+        - type: 60
+          qty: 16
+        - type: 64
+          qty: 44
+        - type: 66
+          qty: 140
+      outputs:
+        - type: 67
+          qty: 32
+          max: 380
+    - station_type: 68
+      cycle_time: 2400s
+      inputs:
+        - type: 1
+          qty: 245
+      outputs:
+        - type: 68
+          qty: 209
+          max: 5000
+    - station_type: 69
+      cycle_time: 2700s
+      inputs:
+        - type: 1
+          qty: 504
+        - type: 60
+          qty: 8
+        - type: 62
+          qty: 8
+        - type: 68
+          qty: 252
+      outputs:
+        - type: 69
+          qty: 90
+          max: 1904
+    - station_type: 101
+      cycle_time: 5340s
+      inputs:
+        - type: 4
+          qty: 5
+      outputs:
+        - type: 1
+          qty: 909
+          max: 10000
+    - station_type: 102
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 584
+        - type: 8
+          qty: 240
+      outputs:
+        - type: 2
+          qty: 130
+          max: 1300
+    - station_type: 103
+      cycle_time: 3840s
+      inputs:
+        - type: 1
+          qty: 386
+        - type: 9
+          qty: 38
+      outputs:
+        - type: 3
+          qty: 21
+          max: 317
+    - station_type: 104
+      cycle_time: 11400s
+      inputs:
+        - type: 1
+          qty: 1166
+        - type: 3
+          qty: 38
+      outputs:
+        - type: 4
+          qty: 19
+          max: 95
+    - station_type: 105
+      cycle_time: 29160s
+      inputs:
+        - type: 1
+          qty: 3261
+        - type: 3
+          qty: 105
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 5
+          qty: 59
+          max: 118
+    - station_type: 106
+      cycle_time: 5280s
+      inputs:
+        - type: 1
+          qty: 528
+        - type: 2
+          qty: 68
+      outputs:
+        - type: 6
+          qty: 65
+          max: 717
+    - station_type: 107
+      cycle_time: 4920s
+      inputs:
+        - type: 1
+          qty: 474
+        - type: 3
+          qty: 16
+      outputs:
+        - type: 7
+          qty: 1
+          max: 11
+    - station_type: 110
+      cycle_time: 3120s
+      inputs:
+        - type: 1
+          qty: 315
+        - type: 2
+          qty: 42
+        - type: 6
+          qty: 24
+      outputs:
+        - type: 10
+          qty: 25
+          max: 476
+    - station_type: 111
+      cycle_time: 4440s
+      inputs:
+        - type: 1
+          qty: 462
+        - type: 2
+          qty: 60
+        - type: 6
+          qty: 33
+      outputs:
+        - type: 11
+          qty: 12
+          max: 159
+    - station_type: 112
+      cycle_time: 9720s
+      inputs:
+        - type: 1
+          qty: 1005
+        - type: 2
+          qty: 132
+        - type: 6
+          qty: 72
+      outputs:
+        - type: 12
+          qty: 13
+          max: 79
+    - station_type: 113
+      cycle_time: 11220s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 13
+          qty: 6
+          max: 31
+    - station_type: 114
+      cycle_time: 11160s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 14
+          qty: 3
+          max: 15
+    - station_type: 120
+      cycle_time: 37380s
+      inputs:
+        - type: 1
+          qty: 3789
+        - type: 2
+          qty: 492
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 20
+          qty: 1
+          max: 1
+    - station_type: 121
+      cycle_time: 18480s
+      inputs:
+        - type: 1
+          qty: 1698
+        - type: 2
+          qty: 222
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 21
+          qty: 15
+          max: 45
+    - station_type: 125
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 393
+        - type: 2
+          qty: 57
+        - type: 4
+          qty: 3
+      outputs:
+        - type: 25
+          qty: 15
+          max: 186
+    - station_type: 160
+      cycle_time: 3000s
+      inputs:
+        - type: 1
+          qty: 310
+      outputs:
+        - type: 60
+          qty: 81
+          max: 1538
+    - station_type: 161
+      cycle_time: 2400s
+      inputs:
+        - type: 1
+          qty: 492
+        - type: 60
+          qty: 76
+        - type: 64
+          qty: 24
+        - type: 66
+          qty: 8
+      outputs:
+        - type: 61
+          qty: 80
+          max: 1904
+    - station_type: 162
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 301
+          qty: 10
+          max: 40
+    - station_type: 163
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+      outputs:
+        - type: 302
+          qty: 6
+          max: 24
+    - station_type: 164
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 304
+          qty: 2
+          max: 8
+    - station_type: 165
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 306
+          qty: 1
+          max: 1
+    - station_type: 166
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 60000
+        - type: 2
+          qty: 7520
+        - type: 4
+          qty: 800
+        - type: 5
+          qty: 800
+        - type: 7
+          qty: 80
+      outputs:
+        - type: 308
+          qty: 1
+          max: 1
+    - station_type: 167
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 310
+          qty: 1
+          max: 1
+    - station_type: 168
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 311
+          qty: 1
+          max: 1
+    - station_type: 169
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 40000
+        - type: 2
+          qty: 5640
+        - type: 4
+          qty: 600
+        - type: 5
+          qty: 600
+        - type: 7
+          qty: 50
+      outputs:
+        - type: 312
+          qty: 1
+          max: 1
+    - station_type: 201
+      cycle_time: 5340s
+      inputs:
+        - type: 4
+          qty: 5
+      outputs:
+        - type: 1
+          qty: 909
+          max: 10000
+    - station_type: 202
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 584
+        - type: 8
+          qty: 240
+      outputs:
+        - type: 2
+          qty: 130
+          max: 1300
+    - station_type: 203
+      cycle_time: 3840s
+      inputs:
+        - type: 1
+          qty: 386
+        - type: 9
+          qty: 38
+      outputs:
+        - type: 3
+          qty: 21
+          max: 317
+    - station_type: 204
+      cycle_time: 11400s
+      inputs:
+        - type: 1
+          qty: 1166
+        - type: 3
+          qty: 38
+      outputs:
+        - type: 4
+          qty: 19
+          max: 95
+    - station_type: 205
+      cycle_time: 29160s
+      inputs:
+        - type: 1
+          qty: 3261
+        - type: 3
+          qty: 105
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 5
+          qty: 59
+          max: 118
+    - station_type: 206
+      cycle_time: 5280s
+      inputs:
+        - type: 1
+          qty: 528
+        - type: 2
+          qty: 68
+      outputs:
+        - type: 6
+          qty: 65
+          max: 717
+    - station_type: 207
+      cycle_time: 4920s
+      inputs:
+        - type: 1
+          qty: 474
+        - type: 3
+          qty: 16
+      outputs:
+        - type: 7
+          qty: 1
+          max: 11
+    - station_type: 210
+      cycle_time: 3120s
+      inputs:
+        - type: 1
+          qty: 315
+        - type: 2
+          qty: 42
+        - type: 6
+          qty: 24
+      outputs:
+        - type: 10
+          qty: 25
+          max: 476
+    - station_type: 211
+      cycle_time: 4440s
+      inputs:
+        - type: 1
+          qty: 462
+        - type: 2
+          qty: 60
+        - type: 6
+          qty: 33
+      outputs:
+        - type: 11
+          qty: 12
+          max: 159
+    - station_type: 212
+      cycle_time: 9720s
+      inputs:
+        - type: 1
+          qty: 1005
+        - type: 2
+          qty: 132
+        - type: 6
+          qty: 72
+      outputs:
+        - type: 12
+          qty: 13
+          max: 79
+    - station_type: 213
+      cycle_time: 11220s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 13
+          qty: 6
+          max: 31
+    - station_type: 214
+      cycle_time: 11160s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 14
+          qty: 3
+          max: 15
+    - station_type: 220
+      cycle_time: 37380s
+      inputs:
+        - type: 1
+          qty: 3789
+        - type: 2
+          qty: 492
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 20
+          qty: 1
+          max: 1
+    - station_type: 221
+      cycle_time: 18480s
+      inputs:
+        - type: 1
+          qty: 1698
+        - type: 2
+          qty: 222
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 21
+          qty: 15
+          max: 45
+    - station_type: 225
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 393
+        - type: 2
+          qty: 57
+        - type: 4
+          qty: 3
+      outputs:
+        - type: 25
+          qty: 15
+          max: 186
+    - station_type: 226
+      cycle_time: 432000s
+      inputs:
+        - type: 1
+          qty: 25000
+        - type: 2
+          qty: 3250
+        - type: 3
+          qty: 800
+        - type: 5
+          qty: 590
+        - type: 7
+          qty: 20
+      outputs:
+        - type: 28
+          qty: 1
+          max: 1
+    - station_type: 227
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 301
+          qty: 10
+          max: 40
+    - station_type: 228
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 302
+          qty: 6
+          max: 24
+    - station_type: 229
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 303
+          qty: 4
+          max: 16
+    - station_type: 230
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 305
+          qty: 2
+          max: 2
+    - station_type: 231
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 60000
+        - type: 2
+          qty: 7520
+        - type: 4
+          qty: 800
+        - type: 5
+          qty: 800
+        - type: 7
+          qty: 80
+      outputs:
+        - type: 308
+          qty: 1
+          max: 1
+    - station_type: 232
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 315
+          qty: 1
+          max: 1
+    - station_type: 233
+      cycle_time: 345600s
+      inputs:
+        - type: 1
+          qty: 120000
+        - type: 2
+          qty: 15040
+        - type: 4
+          qty: 1600
+        - type: 5
+          qty: 1600
+        - type: 7
+          qty: 160
+      outputs:
+        - type: 316
+          qty: 1
+          max: 1
+    - station_type: 301
+      cycle_time: 5340s
+      inputs:
+        - type: 4
+          qty: 5
+      outputs:
+        - type: 1
+          qty: 909
+          max: 10000
+    - station_type: 302
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 584
+        - type: 8
+          qty: 240
+      outputs:
+        - type: 2
+          qty: 130
+          max: 1300
+    - station_type: 303
+      cycle_time: 3840s
+      inputs:
+        - type: 1
+          qty: 386
+        - type: 9
+          qty: 38
+      outputs:
+        - type: 3
+          qty: 21
+          max: 317
+    - station_type: 304
+      cycle_time: 11400s
+      inputs:
+        - type: 1
+          qty: 1166
+        - type: 3
+          qty: 38
+      outputs:
+        - type: 4
+          qty: 19
+          max: 95
+    - station_type: 305
+      cycle_time: 29160s
+      inputs:
+        - type: 1
+          qty: 3261
+        - type: 3
+          qty: 105
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 5
+          qty: 59
+          max: 118
+    - station_type: 306
+      cycle_time: 5280s
+      inputs:
+        - type: 1
+          qty: 528
+        - type: 2
+          qty: 68
+      outputs:
+        - type: 6
+          qty: 65
+          max: 717
+    - station_type: 307
+      cycle_time: 4920s
+      inputs:
+        - type: 1
+          qty: 474
+        - type: 3
+          qty: 16
+      outputs:
+        - type: 7
+          qty: 1
+          max: 11
+    - station_type: 310
+      cycle_time: 3120s
+      inputs:
+        - type: 1
+          qty: 315
+        - type: 2
+          qty: 42
+        - type: 6
+          qty: 24
+      outputs:
+        - type: 10
+          qty: 25
+          max: 476
+    - station_type: 311
+      cycle_time: 4440s
+      inputs:
+        - type: 1
+          qty: 462
+        - type: 2
+          qty: 60
+        - type: 6
+          qty: 33
+      outputs:
+        - type: 11
+          qty: 12
+          max: 159
+    - station_type: 312
+      cycle_time: 9720s
+      inputs:
+        - type: 1
+          qty: 1005
+        - type: 2
+          qty: 132
+        - type: 6
+          qty: 72
+      outputs:
+        - type: 12
+          qty: 13
+          max: 79
+    - station_type: 313
+      cycle_time: 11220s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 13
+          qty: 6
+          max: 31
+    - station_type: 314
+      cycle_time: 11160s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 14
+          qty: 3
+          max: 15
+    - station_type: 320
+      cycle_time: 37380s
+      inputs:
+        - type: 1
+          qty: 3789
+        - type: 2
+          qty: 492
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 20
+          qty: 1
+          max: 1
+    - station_type: 321
+      cycle_time: 18480s
+      inputs:
+        - type: 1
+          qty: 1698
+        - type: 2
+          qty: 222
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 21
+          qty: 15
+          max: 45
+    - station_type: 322
+      cycle_time: 19200s
+      inputs:
+        - type: 1
+          qty: 1848
+        - type: 2
+          qty: 279
+        - type: 6
+          qty: 135
+      outputs:
+        - type: 22
+          qty: 5
+          max: 15
+    - station_type: 327
+      cycle_time: 86399s
+      inputs:
+        - type: 1
+          qty: 22895
+        - type: 2
+          qty: 1490
+        - type: 3
+          qty: 1000
+        - type: 5
+          qty: 250
+        - type: 7
+          qty: 55
+      outputs:
+        - type: 27
+          qty: 1
+          max: 1
+    - station_type: 328
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 301
+          qty: 10
+          max: 40
+    - station_type: 329
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 475
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 304
+          qty: 2
+          max: 8
+    - station_type: 330
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 305
+          qty: 2
+          max: 2
+    - station_type: 331
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 306
+          qty: 1
+          max: 1
+    - station_type: 332
+      cycle_time: 129600s
+      inputs:
+        - type: 1
+          qty: 80000
+        - type: 2
+          qty: 11280
+        - type: 4
+          qty: 1000
+        - type: 5
+          qty: 1000
+        - type: 7
+          qty: 100
+      outputs:
+        - type: 309
+          qty: 1
+          max: 1
+    - station_type: 333
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 60000
+        - type: 2
+          qty: 7520
+        - type: 4
+          qty: 800
+        - type: 5
+          qty: 800
+        - type: 7
+          qty: 80
+      outputs:
+        - type: 321
+          qty: 1
+          max: 1
+    - station_type: 334
+      cycle_time: 345600s
+      inputs:
+        - type: 1
+          qty: 120000
+        - type: 2
+          qty: 15040
+        - type: 4
+          qty: 1600
+        - type: 5
+          qty: 1600
+        - type: 7
+          qty: 160
+      outputs:
+        - type: 322
+          qty: 1
+          max: 1
+    - station_type: 401
+      cycle_time: 5340s
+      inputs:
+        - type: 4
+          qty: 5
+      outputs:
+        - type: 1
+          qty: 909
+          max: 10000
+    - station_type: 402
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 584
+        - type: 8
+          qty: 240
+      outputs:
+        - type: 2
+          qty: 130
+          max: 1300
+    - station_type: 403
+      cycle_time: 3840s
+      inputs:
+        - type: 1
+          qty: 386
+        - type: 9
+          qty: 38
+      outputs:
+        - type: 3
+          qty: 21
+          max: 317
+    - station_type: 404
+      cycle_time: 11400s
+      inputs:
+        - type: 1
+          qty: 1166
+        - type: 3
+          qty: 38
+      outputs:
+        - type: 4
+          qty: 19
+          max: 95
+    - station_type: 405
+      cycle_time: 29160s
+      inputs:
+        - type: 1
+          qty: 3261
+        - type: 3
+          qty: 105
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 5
+          qty: 59
+          max: 118
+    - station_type: 406
+      cycle_time: 5280s
+      inputs:
+        - type: 1
+          qty: 528
+        - type: 2
+          qty: 68
+      outputs:
+        - type: 6
+          qty: 65
+          max: 717
+    - station_type: 407
+      cycle_time: 4920s
+      inputs:
+        - type: 1
+          qty: 474
+        - type: 3
+          qty: 16
+      outputs:
+        - type: 7
+          qty: 1
+          max: 11
+    - station_type: 410
+      cycle_time: 3120s
+      inputs:
+        - type: 1
+          qty: 315
+        - type: 2
+          qty: 42
+        - type: 6
+          qty: 24
+      outputs:
+        - type: 10
+          qty: 25
+          max: 476
+    - station_type: 411
+      cycle_time: 4440s
+      inputs:
+        - type: 1
+          qty: 462
+        - type: 2
+          qty: 60
+        - type: 6
+          qty: 33
+      outputs:
+        - type: 11
+          qty: 12
+          max: 159
+    - station_type: 412
+      cycle_time: 9720s
+      inputs:
+        - type: 1
+          qty: 1005
+        - type: 2
+          qty: 132
+        - type: 6
+          qty: 72
+      outputs:
+        - type: 12
+          qty: 13
+          max: 79
+    - station_type: 413
+      cycle_time: 11220s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 13
+          qty: 6
+          max: 31
+    - station_type: 414
+      cycle_time: 11160s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 14
+          qty: 3
+          max: 15
+    - station_type: 420
+      cycle_time: 37380s
+      inputs:
+        - type: 1
+          qty: 3789
+        - type: 2
+          qty: 492
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 20
+          qty: 1
+          max: 1
+    - station_type: 421
+      cycle_time: 18480s
+      inputs:
+        - type: 1
+          qty: 1698
+        - type: 2
+          qty: 222
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 21
+          qty: 15
+          max: 45
+    - station_type: 422
+      cycle_time: 19200s
+      inputs:
+        - type: 1
+          qty: 1848
+        - type: 2
+          qty: 279
+        - type: 6
+          qty: 135
+      outputs:
+        - type: 22
+          qty: 5
+          max: 15
+    - station_type: 423
+      cycle_time: 28320s
+      inputs:
+        - type: 1
+          qty: 2937
+        - type: 2
+          qty: 381
+        - type: 6
+          qty: 210
+      outputs:
+        - type: 23
+          qty: 2
+          max: 2
+    - station_type: 424
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 302
+          qty: 6
+          max: 24
+    - station_type: 425
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 304
+          qty: 2
+          max: 8
+    - station_type: 426
+      cycle_time: 8640s
+      inputs:
+        - type: 1
+          qty: 6000
+        - type: 2
+          qty: 752
+        - type: 4
+          qty: 80
+        - type: 5
+          qty: 80
+        - type: 7
+          qty: 8
+      outputs:
+        - type: 306
+          qty: 1
+          max: 1
+    - station_type: 427
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 40186
+        - type: 2
+          qty: 5666
+        - type: 4
+          qty: 603
+        - type: 5
+          qty: 603
+        - type: 7
+          qty: 50
+      outputs:
+        - type: 307
+          qty: 1
+          max: 1
+    - station_type: 428
+      cycle_time: 129600s
+      inputs:
+        - type: 1
+          qty: 80000
+        - type: 2
+          qty: 11280
+        - type: 4
+          qty: 1000
+        - type: 5
+          qty: 1000
+        - type: 7
+          qty: 100
+      outputs:
+        - type: 309
+          qty: 1
+          max: 1
+    - station_type: 429
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 313
+          qty: 1
+          max: 1
+    - station_type: 430
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 60279
+        - type: 2
+          qty: 7555
+        - type: 4
+          qty: 804
+        - type: 5
+          qty: 804
+        - type: 7
+          qty: 80
+      outputs:
+        - type: 314
+          qty: 1
+          max: 1
+    - station_type: 501
+      cycle_time: 5340s
+      inputs:
+        - type: 4
+          qty: 5
+      outputs:
+        - type: 1
+          qty: 909
+          max: 10000
+    - station_type: 502
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 584
+        - type: 8
+          qty: 240
+      outputs:
+        - type: 2
+          qty: 130
+          max: 1300
+    - station_type: 503
+      cycle_time: 3840s
+      inputs:
+        - type: 1
+          qty: 386
+        - type: 9
+          qty: 38
+      outputs:
+        - type: 3
+          qty: 21
+          max: 317
+    - station_type: 504
+      cycle_time: 11400s
+      inputs:
+        - type: 1
+          qty: 1166
+        - type: 3
+          qty: 38
+      outputs:
+        - type: 4
+          qty: 19
+          max: 95
+    - station_type: 505
+      cycle_time: 29160s
+      inputs:
+        - type: 1
+          qty: 3261
+        - type: 3
+          qty: 105
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 5
+          qty: 59
+          max: 118
+    - station_type: 506
+      cycle_time: 5280s
+      inputs:
+        - type: 1
+          qty: 528
+        - type: 2
+          qty: 68
+      outputs:
+        - type: 6
+          qty: 65
+          max: 717
+    - station_type: 507
+      cycle_time: 4920s
+      inputs:
+        - type: 1
+          qty: 474
+        - type: 3
+          qty: 16
+      outputs:
+        - type: 7
+          qty: 1
+          max: 11
+    - station_type: 510
+      cycle_time: 3120s
+      inputs:
+        - type: 1
+          qty: 315
+        - type: 2
+          qty: 42
+        - type: 6
+          qty: 24
+      outputs:
+        - type: 10
+          qty: 25
+          max: 476
+    - station_type: 511
+      cycle_time: 4440s
+      inputs:
+        - type: 1
+          qty: 462
+        - type: 2
+          qty: 60
+        - type: 6
+          qty: 33
+      outputs:
+        - type: 11
+          qty: 12
+          max: 159
+    - station_type: 512
+      cycle_time: 9720s
+      inputs:
+        - type: 1
+          qty: 1005
+        - type: 2
+          qty: 132
+        - type: 6
+          qty: 72
+      outputs:
+        - type: 12
+          qty: 13
+          max: 79
+    - station_type: 513
+      cycle_time: 11220s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 13
+          qty: 6
+          max: 31
+    - station_type: 514
+      cycle_time: 11160s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 14
+          qty: 3
+          max: 15
+    - station_type: 520
+      cycle_time: 37380s
+      inputs:
+        - type: 1
+          qty: 3789
+        - type: 2
+          qty: 492
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 20
+          qty: 1
+          max: 1
+    - station_type: 521
+      cycle_time: 18480s
+      inputs:
+        - type: 1
+          qty: 1698
+        - type: 2
+          qty: 222
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 21
+          qty: 15
+          max: 45
+    - station_type: 526
+      cycle_time: 16800s
+      inputs:
+        - type: 1
+          qty: 1737
+        - type: 2
+          qty: 294
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 26
+          qty: 2
+          max: 6
+    - station_type: 527
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 301
+          qty: 10
+          max: 40
+    - station_type: 528
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 304
+          qty: 4
+          max: 16
+    - station_type: 529
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 304
+          qty: 2
+          max: 8
+    - station_type: 530
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 305
+          qty: 2
+          max: 2
+    - station_type: 531
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 40186
+        - type: 2
+          qty: 5666
+        - type: 4
+          qty: 603
+        - type: 5
+          qty: 603
+        - type: 7
+          qty: 50
+      outputs:
+        - type: 307
+          qty: 1
+          max: 1
+    - station_type: 532
+      cycle_time: 129600s
+      inputs:
+        - type: 1
+          qty: 80000
+        - type: 2
+          qty: 11280
+        - type: 4
+          qty: 1000
+        - type: 5
+          qty: 1000
+        - type: 7
+          qty: 100
+      outputs:
+        - type: 320
+          qty: 1
+          max: 1
+    - station_type: 601
+      cycle_time: 5340s
+      inputs:
+        - type: 4
+          qty: 5
+      outputs:
+        - type: 1
+          qty: 909
+          max: 10000
+    - station_type: 602
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 584
+        - type: 8
+          qty: 240
+      outputs:
+        - type: 2
+          qty: 130
+          max: 1300
+    - station_type: 603
+      cycle_time: 3840s
+      inputs:
+        - type: 1
+          qty: 386
+        - type: 9
+          qty: 38
+      outputs:
+        - type: 3
+          qty: 21
+          max: 317
+    - station_type: 604
+      cycle_time: 11400s
+      inputs:
+        - type: 1
+          qty: 1166
+        - type: 3
+          qty: 38
+      outputs:
+        - type: 4
+          qty: 19
+          max: 95
+    - station_type: 605
+      cycle_time: 29160s
+      inputs:
+        - type: 1
+          qty: 3261
+        - type: 3
+          qty: 105
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 5
+          qty: 59
+          max: 118
+    - station_type: 606
+      cycle_time: 5280s
+      inputs:
+        - type: 1
+          qty: 528
+        - type: 2
+          qty: 68
+      outputs:
+        - type: 6
+          qty: 65
+          max: 717
+    - station_type: 607
+      cycle_time: 4920s
+      inputs:
+        - type: 1
+          qty: 474
+        - type: 3
+          qty: 16
+      outputs:
+        - type: 7
+          qty: 1
+          max: 11
+    - station_type: 610
+      cycle_time: 3120s
+      inputs:
+        - type: 1
+          qty: 315
+        - type: 2
+          qty: 42
+        - type: 6
+          qty: 24
+      outputs:
+        - type: 10
+          qty: 25
+          max: 476
+    - station_type: 611
+      cycle_time: 4440s
+      inputs:
+        - type: 1
+          qty: 462
+        - type: 2
+          qty: 60
+        - type: 6
+          qty: 33
+      outputs:
+        - type: 11
+          qty: 12
+          max: 159
+    - station_type: 612
+      cycle_time: 9720s
+      inputs:
+        - type: 1
+          qty: 1005
+        - type: 2
+          qty: 132
+        - type: 6
+          qty: 72
+      outputs:
+        - type: 12
+          qty: 13
+          max: 79
+    - station_type: 613
+      cycle_time: 11220s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 13
+          qty: 6
+          max: 31
+    - station_type: 614
+      cycle_time: 11160s
+      inputs:
+        - type: 1
+          qty: 1161
+        - type: 2
+          qty: 150
+        - type: 6
+          qty: 84
+      outputs:
+        - type: 14
+          qty: 3
+          max: 15
+    - station_type: 620
+      cycle_time: 37380s
+      inputs:
+        - type: 1
+          qty: 3789
+        - type: 2
+          qty: 492
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 20
+          qty: 1
+          max: 1
+    - station_type: 621
+      cycle_time: 18480s
+      inputs:
+        - type: 1
+          qty: 1698
+        - type: 2
+          qty: 222
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 21
+          qty: 15
+          max: 45
+    - station_type: 622
+      cycle_time: 19200s
+      inputs:
+        - type: 1
+          qty: 1848
+        - type: 2
+          qty: 279
+        - type: 6
+          qty: 135
+      outputs:
+        - type: 22
+          qty: 5
+          max: 15
+    - station_type: 625
+      cycle_time: 5760s
+      inputs:
+        - type: 1
+          qty: 393
+        - type: 2
+          qty: 57
+        - type: 4
+          qty: 3
+      outputs:
+        - type: 25
+          qty: 15
+          max: 186
+    - station_type: 626
+      cycle_time: 16800s
+      inputs:
+        - type: 1
+          qty: 1737
+        - type: 2
+          qty: 294
+        - type: 7
+          qty: 3
+      outputs:
+        - type: 26
+          qty: 2
+          max: 6
+    - station_type: 627
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 301
+          qty: 10
+          max: 40
+    - station_type: 628
+      cycle_time: 21600s
+      inputs:
+        - type: 1
+          qty: 3750
+        - type: 2
+          qty: 470
+        - type: 4
+          qty: 50
+        - type: 5
+          qty: 50
+        - type: 7
+          qty: 5
+      outputs:
+        - type: 303
+          qty: 4
+          max: 16
+    - station_type: 629
+      cycle_time: 43200s
+      inputs:
+        - type: 1
+          qty: 30000
+        - type: 2
+          qty: 3760
+        - type: 4
+          qty: 400
+        - type: 5
+          qty: 400
+        - type: 7
+          qty: 40
+      outputs:
+        - type: 305
+          qty: 2
+          max: 2
+    - station_type: 630
+      cycle_time: 86400s
+      inputs:
+        - type: 1
+          qty: 40000
+        - type: 2
+          qty: 5640
+        - type: 4
+          qty: 600
+        - type: 5
+          qty: 600
+        - type: 7
+          qty: 80
+      outputs:
+        - type: 307
+          qty: 1
+          max: 1
+    - station_type: 827
+      cycle_time: 86399s
+      inputs:
+        - type: 1
+          qty: 22895
+        - type: 2
+          qty: 1490
+        - type: 3
+          qty: 1000
+        - type: 5
+          qty: 250
+        - type: 7
+          qty: 55
+      outputs:
+        - type: 27
+          qty: 1
+          max: 1

@@ -1,0 +1,31 @@
+goods_types:
+  - id: 1
+    name: Батарейки
+    min_war_rate: 0
+    min_trade_rate: 0
+    min_race_rate: 0
+    avg_price: 16
+    max_price: 96
+    production_std: 1
+    space: 1
+    object_type_id: 10
+  - id: 2
+    name: Железо
+    min_war_rate: 0
+    min_trade_rate: 0
+    min_race_rate: 0
+    avg_price: 123
+    max_price: 738
+    production_std: 1
+    space: 2
+    object_type_id: 10
+  - id: 323
+    name: Рабы
+    min_war_rate: 0
+    min_trade_rate: 0
+    min_race_rate: 0
+    avg_price: 0
+    max_price: 0
+    production_std: 1
+    space: 1
+    object_type_id: 10

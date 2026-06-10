@@ -1,0 +1,808 @@
+# Auto-generated from includes/types_prod.php by cmd/starwind-tools/convert-balance.
+# Do not edit by hand; rerun the converter against the source PHP file.
+goods_types:
+    - id: 1
+      name: Батарейки
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 16
+      max_price: 96
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 2
+      name: Железо
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 123
+      max_price: 738
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 3
+      name: Кремниевые пластины
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 504
+      max_price: 3024
+      production_std: 1
+      space: 5
+      object_type_id: 10
+    - id: 4
+      name: Кристаллы
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1680
+      max_price: 10080
+      production_std: 1
+      space: 3
+      object_type_id: 10
+    - id: 5
+      name: Компьютерные компоненты
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1350
+      max_price: 8100
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 6
+      name: Боеголовки
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 223
+      max_price: 1338
+      production_std: 1
+      space: 5
+      object_type_id: 10
+    - id: 7
+      name: Микросхемы
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 13480
+      max_price: 80880
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 8
+      name: Железная руда
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 39
+      max_price: 234
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 9
+      name: Кремний
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 161
+      max_price: 966
+      production_std: 1
+      space: 9
+      object_type_id: 10
+    - id: 10
+      name: Ракета Москит
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 336
+      max_price: 2016
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 11
+      name: Ракета Оса
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1005
+      max_price: 6030
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 12
+      name: Ракета Стрекоза
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 2020
+      max_price: 12120
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 13
+      name: Ракета Шелкопряд
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 5055
+      max_price: 30330
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 14
+      name: Ракета Шершень
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 10100
+      max_price: 60600
+      production_std: 1
+      space: 3
+      object_type_id: 10
+    - id: 20
+      name: Лазерная башня
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 97060
+      max_price: 582360
+      production_std: 1
+      space: 590
+      object_type_id: 10
+    - id: 21
+      name: Боевой дрон
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 3530
+      max_price: 21180
+      production_std: 1
+      space: 290
+      object_type_id: 10
+    - id: 22
+      name: Мина "СКВОШ"
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 10400
+      max_price: 62400
+      production_std: 1
+      space: 10
+      object_type_id: 10
+    - id: 23
+      name: Торпеда "Огненная Буря"
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 80657
+      max_price: 483942
+      production_std: 1
+      space: 70
+      object_type_id: 10
+    - id: 24
+      name: Святая Торпеда
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1000000
+      max_price: 6000000
+      production_std: 1
+      space: 10
+      object_type_id: 10
+    - id: 25
+      name: Ложная цель
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 861
+      max_price: 5166
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 26
+      name: Навигационный спутник
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 28621
+      max_price: 171726
+      production_std: 1
+      space: 375
+      object_type_id: 10
+    - id: 27
+      name: Генератор гипер-помех
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1134216
+      max_price: 1805296
+      production_std: 1
+      space: 535
+      object_type_id: 10
+    - id: 28
+      name: Гипер-маяк
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 2846088
+      max_price: 4269132
+      production_std: 1
+      space: 1280
+      object_type_id: 10
+    - id: 31
+      name: Каркас станции
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 5713242
+      max_price: 5713242
+      production_std: 1
+      space: 7500
+      object_type_id: 4
+    - id: 32
+      name: Каркас торговой станции
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 17250645
+      max_price: 17250645
+      production_std: 1
+      space: 8500
+      object_type_id: 3
+    - id: 33
+      name: Каркас врат
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 45721642
+      max_price: 45721642
+      production_std: 1
+      space: 8500
+      object_type_id: 1
+    - id: 34
+      name: Каркас верфи
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 114926451
+      max_price: 114926451
+      production_std: 1
+      space: 9500
+      object_type_id: 2
+    - id: 35
+      name: Модуль расширения станции
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 3700
+      object_type_id: 13
+    - id: 36
+      name: Модуль расширения торговой станции
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 4200
+      object_type_id: 13
+    - id: 37
+      name: Модуль расширения верфи
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 4600
+      object_type_id: 13
+    - id: 38
+      name: Стыковочный модуль станции
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 7500
+      object_type_id: 13
+    - id: 40
+      name: Космическое топливо
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 720
+      max_price: 4320
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 60
+      name: Мясо аргну
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 104
+      max_price: 624
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 61
+      name: Бифштексы кахуна
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 84
+      max_price: 504
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 62
+      name: Биогаз
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 110
+      max_price: 660
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 63
+      name: БоФу
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 210
+      max_price: 1260
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 64
+      name: Соевые бобы
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 30
+      max_price: 180
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 65
+      name: Соевая мука
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 168
+      max_price: 1008
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 66
+      name: Мясо челтов
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 104
+      max_price: 624
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 67
+      name: Растарное масло
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 420
+      max_price: 2520
+      production_std: 1
+      space: 3
+      object_type_id: 10
+    - id: 68
+      name: Солнечные цветы
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 32
+      max_price: 192
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 69
+      name: Масло ностроп
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 84
+      max_price: 504
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 70
+      name: Гипер-топливо
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 84
+      max_price: 504
+      production_std: 1
+      space: 5
+      object_type_id: 10
+    - id: 100
+      name: Космическая роза
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 5
+      object_type_id: 10
+    - id: 101
+      name: Жезл маршала
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 10000000
+      max_price: 10000000
+      production_std: 0
+      space: 1000
+      object_type_id: 10
+    - id: 102
+      name: Красный Плащ Храбрости
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1
+      max_price: 1
+      production_std: 0
+      space: 5
+      object_type_id: 10
+    - id: 103
+      name: Компас "Алмазная Звезда"
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 15
+      max_price: 15
+      production_std: 0
+      space: 3
+      object_type_id: 10
+    - id: 104
+      name: Поцелуй Evening
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1
+      max_price: 1
+      production_std: 0
+      space: 1
+      object_type_id: 10
+    - id: 105
+      name: Алый Клеймор
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 1
+      max_price: 1
+      production_std: 0
+      space: 3
+      object_type_id: 10
+    - id: 106
+      name: Космическая ромашка
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 0
+      object_type_id: 10
+    - id: 112
+      name: Уши пилотские
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 861
+      max_price: 5116
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 113
+      name: Снежинка
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 61
+      max_price: 366
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 114
+      name: Gold ring with diamonds "charm"
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 61
+      max_price: 366
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 115
+      name: Эдельвейс Барностра
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 116
+      name: Артефакт
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 1
+      object_type_id: 10
+    - id: 200
+      name: Оборудование
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 5
+      object_type_id: 10
+    - id: 201
+      name: Вооружение
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 0
+      space: 10
+      object_type_id: 10
+    - id: 301
+      name: Импульсная пушка М.1.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 3
+      avg_price: 1011
+      max_price: 1125
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 302
+      name: Импульсная пушка М.2.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 3
+      avg_price: 1617
+      max_price: 1815
+      production_std: 1
+      space: 1
+      object_type_id: 10
+    - id: 303
+      name: Ускоритель частиц М.1.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 3
+      avg_price: 6826
+      max_price: 7025
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 304
+      name: Ускоритель частиц М.2.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 3
+      avg_price: 17100
+      max_price: 19125
+      production_std: 1
+      space: 2
+      object_type_id: 10
+    - id: 305
+      name: Плазменная пушка М.1.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      avg_price: 40625
+      max_price: 47525
+      production_std: 1
+      space: 10
+      object_type_id: 10
+    - id: 306
+      name: Плазменная пушка М.2.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      avg_price: 181250
+      max_price: 192500
+      production_std: 1
+      space: 20
+      object_type_id: 10
+    - id: 307
+      name: Фотонная пушка М.1.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 7
+      avg_price: 290230
+      max_price: 315221
+      production_std: 1
+      space: 50
+      object_type_id: 10
+    - id: 308
+      name: Фотонная пушка М.2.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 787660
+      max_price: 800052
+      production_std: 1
+      space: 100
+      object_type_id: 10
+    - id: 309
+      name: Фотонная пушка М.3.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 1095880
+      max_price: 11125580
+      production_std: 1
+      space: 150
+      object_type_id: 10
+    - id: 310
+      name: Фазовый импульсный лазер
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 226628
+      max_price: 240001
+      production_std: 1
+      space: 20
+      object_type_id: 10
+    - id: 311
+      name: Автоматическая пушка
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 463122
+      max_price: 482560
+      production_std: 1
+      space: 20
+      object_type_id: 10
+    - id: 312
+      name: Автоматическая пушка МК2
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 10
+      avg_price: 1080460
+      max_price: 1110222
+      production_std: 1
+      space: 45
+      object_type_id: 10
+    - id: 313
+      name: 'Зенитное орудие '
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 463122
+      max_price: 480200
+      production_std: 1
+      space: 500
+      object_type_id: 10
+    - id: 314
+      name: Сдвоенное зенитное орудие
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 10
+      avg_price: 1080460
+      max_price: 1125452
+      production_std: 1
+      space: 120
+      object_type_id: 10
+    - id: 315
+      name: Ионный излучатель
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 90631
+      max_price: 1125452
+      production_std: 1
+      space: 30
+      object_type_id: 10
+    - id: 316
+      name: Магнито-ионная пушка
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 10
+      avg_price: 10958852
+      max_price: 1125452
+      production_std: 1
+      space: 1000
+      object_type_id: 10
+    - id: 317
+      name: Кионный эмиттер М.1.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 3
+      avg_price: 20000
+      max_price: 22000
+      production_std: 1
+      space: 5
+      object_type_id: 10
+    - id: 318
+      name: Кионный эмиттер М.2.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      avg_price: 500000
+      max_price: 520000
+      production_std: 1
+      space: 20
+      object_type_id: 10
+    - id: 319
+      name: Кионный эмиттер М.3.
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 10
+      avg_price: 10958852
+      max_price: 1125452
+      production_std: 1
+      space: 100
+      object_type_id: 10
+    - id: 320
+      name: Энергетический  пулемёт
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 5800463
+      max_price: 6125523
+      production_std: 1
+      space: 100
+      object_type_id: 10
+    - id: 321
+      name: Ударно импульсный генератор
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      avg_price: 1958053
+      max_price: 2075231
+      production_std: 1
+      space: 100
+      object_type_id: 10
+    - id: 322
+      name: Ударно-импульсное орудие
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 10
+      avg_price: 18958053
+      max_price: 19658993
+      production_std: 1
+      space: 1000
+      object_type_id: 10
+    - id: 323
+      name: Рабы
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      avg_price: 0
+      max_price: 0
+      production_std: 1
+      space: 1
+      object_type_id: 10
+# Production recipes moved to configs/station_types.yaml (phase 8.15): they are
+# generated from station_goods_types by convert-station-types, while this file
+# is regenerated from types_prod.php by convert-balance (which writes only
+# goods_types). Keeping them on separate files avoids one generator clobbering
+# the other's section.

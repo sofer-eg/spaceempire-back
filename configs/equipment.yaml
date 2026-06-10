@@ -1,0 +1,2227 @@
+# Auto-generated from sql/db.sql (ct_updates) by cmd/starwind-tools/convert-equipment.
+# Do not edit by hand; rerun the converter against the source dump.
+equipment:
+    - id: 1
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 5
+      race: 0
+      class: 1
+      price: 52768
+      price_per_level: 5000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 2
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 5
+      race: 0
+      class: 2
+      price: 52768
+      price_per_level: 5000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 3
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 5
+      race: 0
+      class: 3
+      price: 22440
+      price_per_level: 2000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 4
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 4
+      race: 0
+      class: 4
+      price: 13641
+      price_per_level: 1000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 5
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 2
+      race: 0
+      class: 5
+      price: 2123
+      price_per_level: 500
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 6
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 5
+      race: 0
+      class: 6
+      price: 52768
+      price_per_level: 5000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 7
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 5
+      race: 0
+      class: 7
+      price: 52768
+      price_per_level: 5000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 8
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 5
+      race: 0
+      class: 8
+      price: 1000
+      price_per_level: 200
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 9
+      type: up_launcher
+      description: Ракетно-пусковая система
+      max_level: 5
+      race: 0
+      class: 9
+      price: 13641
+      price_per_level: 2000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 10
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 5
+      race: 0
+      class: 1
+      price: 252117
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 11
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 5
+      race: 0
+      class: 2
+      price: 188423
+      price_per_level: 40000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 12
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 5
+      race: 0
+      class: 3
+      price: 12341
+      price_per_level: 2000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 13
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 4
+      race: 0
+      class: 4
+      price: 2157
+      price_per_level: 1000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 14
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 4
+      race: 0
+      class: 5
+      price: 2157
+      price_per_level: 1000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 15
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 5
+      race: 0
+      class: 6
+      price: 57862
+      price_per_level: 15000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 16
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 4
+      race: 0
+      class: 7
+      price: 188533
+      price_per_level: 40000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 17
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 5
+      race: 0
+      class: 8
+      price: 2000
+      price_per_level: 1000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 18
+      type: up_pro
+      description: Помехопостановочная противоракетная система
+      max_level: 2
+      race: 0
+      class: 9
+      price: 6474
+      price_per_level: 2000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 19
+      type: up_docking
+      description: Стыковочная система
+      max_level: 3
+      race: 0
+      class: 1
+      price: 287655
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 20
+      type: up_docking
+      description: Стыковочная система
+      max_level: 3
+      race: 0
+      class: 2
+      price: 287655
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 21
+      type: up_docking
+      description: Стыковочная система
+      max_level: 1
+      race: 0
+      class: 3
+      price: 22134
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 22
+      type: up_docking
+      description: Стыковочная система
+      max_level: 1
+      race: 0
+      class: 4
+      price: 22134
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 23
+      type: up_docking
+      description: Стыковочная система
+      max_level: 1
+      race: 0
+      class: 5
+      price: 22134
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 24
+      type: up_docking
+      description: Стыковочная система
+      max_level: 2
+      race: 0
+      class: 6
+      price: 143211
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 25
+      type: up_docking
+      description: Стыковочная система
+      max_level: 3
+      race: 0
+      class: 7
+      price: 281655
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 26
+      type: up_docking
+      description: Стыковочная система
+      max_level: 3
+      race: 0
+      class: 8
+      price: 80000
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 27
+      type: up_docking
+      description: Стыковочная система
+      max_level: 1
+      race: 0
+      class: 9
+      price: 22134
+      price_per_level: 80000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 28
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 1
+      price: 927645
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 29
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 2
+      price: 927645
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 30
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 3
+      price: 112365
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 31
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 4
+      price: 112365
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 32
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 5
+      price: 112365
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 33
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 6
+      price: 927645
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 34
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 7
+      price: 927645
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 35
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 8
+      price: 112365
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 36
+      type: up_hide
+      description: Маскировочная система
+      max_level: 1
+      race: 0
+      class: 9
+      price: 112365
+      price_per_level: 100000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 37
+      type: up_lb
+      description: Система управления ЛБ
+      max_level: 1
+      race: 0
+      class: 0
+      price: 287132
+      price_per_level: 280000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 38
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 1
+      price: 4719812
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 39
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 2
+      price: 2653706
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 40
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 3
+      price: 43959
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 41
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 4
+      price: 17001
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 42
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 5
+      price: 6806
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 43
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 6
+      price: 679815
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 44
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 7
+      price: 2473898
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 45
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 8
+      price: 50000
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 46
+      type: up_shield
+      description: Проектор защитного поля
+      max_level: 1
+      race: 0
+      class: 9
+      price: 22680
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 47
+      type: up_capture
+      description: Система захвата кораблей
+      max_level: 1
+      race: 0
+      class: 0
+      price: 2513642
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 48
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 5
+      race: 0
+      class: 1
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 49
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 5
+      race: 0
+      class: 2
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 50
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 3
+      race: 0
+      class: 3
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 51
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 0
+      race: 0
+      class: 4
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 52
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 0
+      race: 0
+      class: 5
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 53
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 5
+      race: 0
+      class: 6
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 54
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 5
+      race: 0
+      class: 7
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 55
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 5
+      race: 0
+      class: 8
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 56
+      type: up_drone_control
+      description: Модуль управления БПЛА
+      max_level: 5
+      race: 0
+      class: 9
+      price: 182500
+      price_per_level: 76245
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 57
+      type: trade_up
+      description: Торговая система
+      max_level: 4
+      race: 0
+      class: 0
+      price: 256500
+      price_per_level: 487265
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 58
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 1
+      price: 1619842
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 59
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 2
+      price: 1453706
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 60
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 3
+      price: 42741
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 61
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 4
+      price: 16424
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 62
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 5
+      price: 4875
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 63
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 6
+      price: 664242
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 64
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 7
+      price: 843214
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 65
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 8
+      price: 50000
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 66
+      type: up_engine
+      description: Двигатель
+      max_level: 1
+      race: 0
+      class: 9
+      price: 15120
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 67
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 1
+      price: 432252
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 68
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 2
+      price: 432252
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 69
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 3
+      price: 2862
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 70
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 4
+      price: 2862
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 71
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 5
+      price: 2862
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 72
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 6
+      price: 432252
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 73
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 7
+      price: 432252
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 74
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 1
+      race: 0
+      class: 8
+      price: 122122
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 75
+      type: up_weapon_control
+      description: Система управления вооружением
+      max_level: 0
+      race: 0
+      class: 9
+      price: 24000
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 76
+      type: up_autopilot
+      description: Автопилот
+      max_level: 1
+      race: 0
+      class: 0
+      price: 521423
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 77
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 1
+      price: 2112345
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 78
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 2
+      price: 1587943
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 79
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 3
+      price: 63214
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 80
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 4
+      price: 14324
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 81
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 5
+      price: 2462
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 82
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 6
+      price: 564132
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 83
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 7
+      price: 1123452
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 84
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 8
+      price: 200000
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 85
+      type: up_generator
+      description: Генератор энергии
+      max_level: 1
+      race: 0
+      class: 9
+      price: 213456
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 1
+      dependance: none
+      energy_use_type: reverse
+      energy_usage: 100
+    - id: 86
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 1
+      price: 221460
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 87
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 2
+      price: 156432
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 88
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 3
+      price: 14241
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 89
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 4
+      price: 2123
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 90
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 5
+      price: 786
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 91
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 6
+      price: 87862
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 92
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 7
+      price: 112320
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 93
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 8
+      price: 20000
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 94
+      type: up_accumulator
+      description: Аккумулятор энергии
+      max_level: 1
+      race: 0
+      class: 9
+      price: 4456
+      price_per_level: 200000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 1
+      position: 1
+      dependance: up_generator
+      energy_use_type: hold
+      energy_usage: 100
+    - id: 95
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 1
+      race: 0
+      class: 1
+      price: 1440000
+      price_per_level: 8640000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 96
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 1
+      race: 0
+      class: 2
+      price: 540000
+      price_per_level: 3240000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 97
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 1
+      race: 0
+      class: 3
+      price: 24000
+      price_per_level: 144000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 5
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 98
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 0
+      race: 0
+      class: 4
+      price: 12000
+      price_per_level: 72000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 99
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 0
+      race: 0
+      class: 5
+      price: 6000
+      price_per_level: 36000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 100
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 2
+      race: 0
+      class: 6
+      price: 144000
+      price_per_level: 864000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 101
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 2
+      race: 0
+      class: 7
+      price: 960000
+      price_per_level: 5760000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 102
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 2
+      race: 0
+      class: 8
+      price: 360000
+      price_per_level: 2160000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 103
+      type: up_drill
+      description: Установка для добычи руды
+      max_level: 2
+      race: 0
+      class: 9
+      price: 300000
+      price_per_level: 1800000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 104
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 1
+      race: 0
+      class: 1
+      price: 151345
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 105
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 1
+      race: 0
+      class: 2
+      price: 151345
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 106
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 1
+      race: 0
+      class: 3
+      price: 72312
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 4
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 107
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 1
+      race: 0
+      class: 4
+      price: 72312
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 4
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 108
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 1
+      race: 0
+      class: 5
+      price: 72312
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 4
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 109
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 1
+      race: 0
+      class: 6
+      price: 151345
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 4
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 110
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 0
+      race: 0
+      class: 7
+      price: 151345
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 111
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 1
+      race: 0
+      class: 8
+      price: 72312
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 4
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 112
+      type: up_scanner
+      description: Сканирующее устройство
+      max_level: 0
+      race: 0
+      class: 9
+      price: 72312
+      price_per_level: 20000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 4
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 113
+      type: up_turret_control
+      description: Устройство управления орудийными башнями
+      max_level: 3
+      race: 0
+      class: 1
+      price: 586485
+      price_per_level: 487255
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 9
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 114
+      type: up_turret_control
+      description: Устройство управления орудийными башнями
+      max_level: 3
+      race: 0
+      class: 2
+      price: 586485
+      price_per_level: 487255
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 8
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 115
+      type: up_turret_control
+      description: Устройство управления орудийными башнями
+      max_level: 0
+      race: 0
+      class: 3
+      price: 58485
+      price_per_level: 487255
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 116
+      type: up_turret_control
+      description: Устройство управления орудийными башнями
+      max_level: 3
+      race: 0
+      class: 6
+      price: 586485
+      price_per_level: 487255
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 117
+      type: up_turret_control
+      description: Устройство управления орудийными башнями
+      max_level: 1
+      race: 0
+      class: 7
+      price: 586485
+      price_per_level: 487255
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 118
+      type: up_exdocking
+      description: Модуль внешней стыковки
+      max_level: 0
+      race: 0
+      class: 1
+      price: 6375926
+      price_per_level: 2000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 119
+      type: up_exdocking
+      description: Модуль внешней стыковки
+      max_level: 0
+      race: 0
+      class: 2
+      price: 6375926
+      price_per_level: 2000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 120
+      type: up_exdocking
+      description: Модуль внешней стыковки
+      max_level: 0
+      race: 0
+      class: 6
+      price: 6375926
+      price_per_level: 2000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 121
+      type: up_exdocking
+      description: Модуль внешней стыковки
+      max_level: 1
+      race: 0
+      class: 7
+      price: 6375926
+      price_per_level: 2000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 122
+      type: up_hack
+      description: Модуль взлома
+      max_level: 2
+      race: 6
+      class: 0
+      price: 500000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 123
+      type: up_torpedo_launcher
+      description: Торпедная установка
+      max_level: 1
+      race: 0
+      class: 1
+      price: 2000000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 124
+      type: up_torpedo_launcher
+      description: Торпедная установка
+      max_level: 1
+      race: 0
+      class: 2
+      price: 1500000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 125
+      type: up_torpedo_launcher
+      description: Торпедная установка
+      max_level: 1
+      race: 0
+      class: 3
+      price: 750000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 126
+      type: up_torpedo_launcher
+      description: Торпедная установка
+      max_level: 1
+      race: 0
+      class: 6
+      price: 1000000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 127
+      type: up_torpedo_launcher
+      description: Торпедная установка
+      max_level: 1
+      race: 0
+      class: 7
+      price: 2500000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 128
+      type: up_torpedo_launcher
+      description: Торпедная установка
+      max_level: 1
+      race: 0
+      class: 8
+      price: 1500000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 2
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 129
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 1
+      price: 10000000
+      price_per_level: 50000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 130
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 2
+      price: 5000000
+      price_per_level: 15000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 131
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 3
+      price: 1000000
+      price_per_level: 5000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 132
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 4
+      price: 500000
+      price_per_level: 1000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 133
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 5
+      price: 100000
+      price_per_level: 500000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 134
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 6
+      price: 1500000
+      price_per_level: 4000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 135
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 7
+      price: 2500000
+      price_per_level: 10000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 136
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 8
+      price: 1500000
+      price_per_level: 15000000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 137
+      type: up_jump_drive
+      description: Прыжковый двигатель
+      max_level: 2
+      race: 0
+      class: 9
+      price: 250000
+      price_per_level: 1500000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100
+    - id: 138
+      type: up_turret_control
+      description: Устройство управления орудийными башнями
+      max_level: 3
+      race: 0
+      class: 8
+      price: 586485
+      price_per_level: 487255
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 6
+      is_base: 1
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: always
+      energy_usage: 100
+    - id: 139
+      type: up_antijump
+      description: Генератор гипер-помех, портативный
+      max_level: 2
+      race: 0
+      class: 0
+      price: 250000
+      price_per_level: 1500000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 2
+      is_base: 0
+      position: 1
+      dependance: up_accumulator
+      energy_use_type: action
+      energy_usage: 100

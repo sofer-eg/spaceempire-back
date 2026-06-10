@@ -1,0 +1,19 @@
+# Binaries
+/bin/
+*.test
+*.out
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Coverage
+coverage.out
+coverage.html
+
+# Local config overrides
+configs/local.yaml

@@ -1,0 +1,7 @@
+goods_types:
+  - id: 1
+    name: A
+    space: 1
+  - id: 1
+    name: B
+    space: 1

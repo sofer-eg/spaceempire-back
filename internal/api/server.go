@@ -140,9 +140,13 @@ type Server struct {
 	// built once from shipClasses at construction (phase 10.13). Read by
 	// hullCategoryOf to stamp each ship DTO's HullCategory. Reading a missing /
 	// nil-map key yields "" — the client then falls back to its heuristic.
-	hullCategories   map[domain.ShipClassID]string
-	stationTypes     StationTypeCatalog
-	equipment        EquipmentCatalog
+	hullCategories map[domain.ShipClassID]string
+	stationTypes   StationTypeCatalog
+	equipment      EquipmentCatalog
+	// launchEnergyCost is the "action" energy a missile launch spends (phase
+	// 10.3.1), resolved once from the up_launcher catalog row. 0 when no catalog
+	// is wired (tests) — the worker's gate is then a no-op.
+	launchEnergyCost int
 	handoffBus       bus.Subscriber
 	eventBus         bus.Publisher
 	missileCargo     MissileCargo
@@ -192,6 +196,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 		fleet:             cfg.Fleet,
 	}
 	s.hullCategories = buildHullCategoryIndex(cfg.ShipClasses)
+	s.launchEnergyCost = launchActionEnergyCost(cfg.Equipment)
 
 	s.mux.HandleFunc("GET /healthz", handleHealthz)
 	s.mux.Handle("POST /api/cmd/move", s.protect(http.HandlerFunc(s.handleMove)))

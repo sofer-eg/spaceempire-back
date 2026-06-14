@@ -67,6 +67,31 @@ func ApplyEquipmentEffects(base ShipStats, eq []domain.InstalledEquipment) ShipS
 	return out
 }
 
+// EnergyDelta returns the net per-tick energy change the installed modules
+// contribute (phase 10.3.1): Σ energy_usage of "reverse" modules (generators,
+// which feed the pool) minus Σ energy_usage of "always" modules (which drain it
+// continuously). "hold" and "action" modes do not enter the steady per-tick
+// delta — hold capability is gated when the pool runs dry, and action is a
+// one-off debit charged at the action site. Magnitudes are a balance decision
+// (configs/equipment.yaml), not scaled by install level. Equipment ids absent
+// from the catalog are skipped. See back/docs/specs/equipment_effects.md.
+func (c *Equipments) EnergyDelta(eq []domain.InstalledEquipment) int {
+	delta := 0
+	for _, m := range eq {
+		row, ok := c.byID[m.EquipmentID]
+		if !ok {
+			continue
+		}
+		switch row.EnergyUseType {
+		case "reverse":
+			delta += row.EnergyUsage
+		case "always":
+			delta -= row.EnergyUsage
+		}
+	}
+	return delta
+}
+
 // InstallPrice is the credit cost of fitting an equipment row at the given
 // level: price + level*price_per_level (matches the task spec / original
 // pricing). level is clamped to >=1.

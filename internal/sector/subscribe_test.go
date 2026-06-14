@@ -254,10 +254,11 @@ func TestUnit_Worker_Stealth_HidesCloakedFromHostile(t *testing.T) {
 		clock.NewRealClock(), nil, nil,
 		map[domain.SectorID][]domain.Ship{testSector: {
 			{ID: 1, PlayerID: 7, Pos: domain.Vec2{X: 0, Y: 0}, MaxSpeed: 1, RadarRange: 5000},
-			{ID: 2, PlayerID: 8, Pos: domain.Vec2{X: 1000, Y: 0}, MaxSpeed: 1, Equipment: cloak}, // cloaked enemy, far → hidden
-			{ID: 3, PlayerID: 8, Pos: domain.Vec2{X: 200, Y: 0}, MaxSpeed: 1, Equipment: cloak},  // cloaked enemy, within detect 400 → visible
-			{ID: 4, PlayerID: 9, Pos: domain.Vec2{X: 1500, Y: 0}, MaxSpeed: 1, Equipment: cloak}, // cloaked ally, far → visible
-			{ID: 5, PlayerID: 8, Pos: domain.Vec2{X: 1200, Y: 0}, MaxSpeed: 1},                   // normal enemy → visible
+			// Cloaked ships carry energy: an "always" cloak surfaces at Energy<=0 (10.3.1).
+			{ID: 2, PlayerID: 8, Pos: domain.Vec2{X: 1000, Y: 0}, MaxSpeed: 1, Equipment: cloak, Energy: 100, MaxEnergy: 100}, // cloaked enemy, far → hidden
+			{ID: 3, PlayerID: 8, Pos: domain.Vec2{X: 200, Y: 0}, MaxSpeed: 1, Equipment: cloak, Energy: 100, MaxEnergy: 100},  // cloaked enemy, within detect 400 → visible
+			{ID: 4, PlayerID: 9, Pos: domain.Vec2{X: 1500, Y: 0}, MaxSpeed: 1, Equipment: cloak, Energy: 100, MaxEnergy: 100}, // cloaked ally, far → visible
+			{ID: 5, PlayerID: 8, Pos: domain.Vec2{X: 1200, Y: 0}, MaxSpeed: 1},                                                // normal enemy → visible
 		}},
 		sector.WithRelations(rel),
 	)
@@ -270,6 +271,35 @@ func TestUnit_Worker_Stealth_HidesCloakedFromHostile(t *testing.T) {
 	ids := readInitialAddedIDs(t, sub7.Patch)
 	assert.ElementsMatch(t, []domain.ShipID{1, 3, 4, 5}, ids,
 		"cloaked far enemy (2) hidden; own (1), close cloaked enemy (3), cloaked ally (4), normal enemy (5) visible")
+}
+
+// Phase 10.3.1: a cloaked ship whose energy ran dry (Energy<=0) surfaces — the
+// up_hide module is an "always" energy consumer and an unpowered cloak fails.
+func TestUnit_Worker_Stealth_SurfacesWhenEnergyZero(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cloak := []domain.InstalledEquipment{{Type: "up_hide", Level: 1}}
+	w := sector.NewWorker(0,
+		sector.Config{TickInterval: 5 * time.Millisecond, InboxCapacity: 64, AOIRadius: 5000, StealthDetectRange: 400},
+		clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {
+			{ID: 1, PlayerID: 7, Pos: domain.Vec2{X: 0, Y: 0}, MaxSpeed: 1, RadarRange: 5000},
+			{ID: 2, PlayerID: 8, Pos: domain.Vec2{X: 1000, Y: 0}, MaxSpeed: 1, Equipment: cloak, Energy: 100, MaxEnergy: 100}, // powered cloak, far → hidden
+			{ID: 3, PlayerID: 8, Pos: domain.Vec2{X: 1100, Y: 0}, MaxSpeed: 1, Equipment: cloak, Energy: 0, MaxEnergy: 100},   // dry cloak, far → surfaced
+		}},
+	)
+	go func() { _ = w.Run(ctx) }()
+
+	sub7, unsub7, err := w.Subscribe(ctx, testSector, 7)
+	require.NoError(t, err)
+	defer unsub7()
+
+	ids := readInitialAddedIDs(t, sub7.Patch)
+	assert.ElementsMatch(t, []domain.ShipID{1, 3}, ids,
+		"powered cloak (2) hidden; dry-energy cloak (3) surfaces; own ship (1) visible")
 }
 
 // Phase 10.20a: a cloaked ship that fires a missile is revealed for exactly
@@ -287,7 +317,8 @@ func TestUnit_Stealth_RevealOnMissileLaunch(t *testing.T) {
 			{ID: 1, PlayerID: 7, Pos: domain.Vec2{X: 0, Y: 0}, MaxSpeed: 1, RadarRange: 5000, HP: 200, MaxHP: 200, Shield: 50, MaxShield: 50},
 			// ship 2 cloaked, at 1000 — beyond stealthDetect 400 → hidden from player 7.
 			// up_launcher so it can fire the reveal missile (phase 10.14b gate).
-			{ID: 2, PlayerID: 8, Pos: domain.Vec2{X: 1000, Y: 0}, MaxSpeed: 1, Equipment: []domain.InstalledEquipment{{Type: "up_hide", Level: 1}, {Type: "up_launcher", Level: 1}}, HP: 200, MaxHP: 200, Shield: 50, MaxShield: 50},
+			// Energy>0 keeps the "always" cloak powered so it stays hidden (10.3.1).
+			{ID: 2, PlayerID: 8, Pos: domain.Vec2{X: 1000, Y: 0}, MaxSpeed: 1, Equipment: []domain.InstalledEquipment{{Type: "up_hide", Level: 1}, {Type: "up_launcher", Level: 1}}, HP: 200, MaxHP: 200, Shield: 50, MaxShield: 50, Energy: 100, MaxEnergy: 100},
 		}},
 	)
 	go func() { _ = w.Run(ctx) }()

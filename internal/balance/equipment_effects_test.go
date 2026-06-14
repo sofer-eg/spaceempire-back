@@ -78,6 +78,42 @@ func TestUnit_InstallPrice_ScalesWithLevel(t *testing.T) {
 	require.Equal(t, int64(1600), balance.InstallPrice(e, 3))
 }
 
+func energyCatalog(t *testing.T) *balance.Equipments {
+	t.Helper()
+	c, err := balance.NewEquipments([]balance.Equipment{
+		{ID: 1, Type: "up_generator", EnergyUseType: "reverse", EnergyUsage: 100},
+		{ID: 2, Type: "up_pro", EnergyUseType: "always", EnergyUsage: 80},
+		{ID: 3, Type: "up_hide", EnergyUseType: "always", EnergyUsage: 30},
+		{ID: 4, Type: "up_accumulator", EnergyUseType: "hold", EnergyUsage: 100},
+		{ID: 5, Type: "up_launcher", EnergyUseType: "action", EnergyUsage: 100},
+	})
+	require.NoError(t, err)
+	return c
+}
+
+func TestUnit_EnergyDelta(t *testing.T) {
+	c := energyCatalog(t)
+
+	// reverse generator adds, always consumers drain; hold/action contribute 0.
+	require.Equal(t, 100, c.EnergyDelta([]domain.InstalledEquipment{{EquipmentID: 1, Type: "up_generator"}}))
+	require.Equal(t, -80, c.EnergyDelta([]domain.InstalledEquipment{{EquipmentID: 2, Type: "up_pro"}}))
+
+	// generator (+100) − pro (80) − hide (30) = −10; accumulator (hold) and
+	// launcher (action) do not enter the steady delta.
+	got := c.EnergyDelta([]domain.InstalledEquipment{
+		{EquipmentID: 1, Type: "up_generator"},
+		{EquipmentID: 2, Type: "up_pro"},
+		{EquipmentID: 3, Type: "up_hide"},
+		{EquipmentID: 4, Type: "up_accumulator"},
+		{EquipmentID: 5, Type: "up_launcher"},
+	})
+	require.Equal(t, -10, got)
+
+	// unknown ids and an empty list are skipped (0).
+	require.Equal(t, 0, c.EnergyDelta(nil))
+	require.Equal(t, 0, c.EnergyDelta([]domain.InstalledEquipment{{EquipmentID: 999, Type: "up_pro"}}))
+}
+
 func equipCatalog(t *testing.T) *balance.Equipments {
 	t.Helper()
 	c, err := balance.NewEquipments([]balance.Equipment{

@@ -90,6 +90,61 @@ func TestUnit_LaunchMissile_OK(t *testing.T) {
 	require.Equal(t, domain.EntityKindShip, snap.Missiles[0].Target.Kind)
 }
 
+// TestUnit_LaunchMissile_ActionEnergy: a launch is an "action" energy expense
+// (phase 10.3.1). The first shot debits EnergyCost from the launcher's pool;
+// once the pool can no longer cover the cost the next shot is refused with
+// ErrNotEnoughEnergy and no energy is spent.
+func TestUnit_LaunchMissile_ActionEnergy(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := missileShip(1, 100, domain.Vec2{X: 0, Y: 0})
+	a.Energy = 50
+	a.MaxEnergy = 1000
+	b := missileShip(2, 200, domain.Vec2{X: 100, Y: 0})
+	w := newSingleSectorWorker(t,
+		sector.Config{TickInterval: time.Second, AOIRadius: 1000},
+		clock.NewRealClock(), nil, []domain.Ship{a, b})
+
+	// First launch: 50 >= 30 → succeeds, energy debited to 20.
+	reply := make(chan sector.LaunchMissileResult, 1)
+	require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
+		PlayerID:   100,
+		ShipID:     1,
+		Target:     domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+		EnergyCost: 30,
+		Reply:      reply,
+	}))
+	w.Tick(ctx)
+	require.NoError(t, (<-reply).Err)
+	require.Len(t, w.Snapshot(testSector).Missiles, 1)
+	require.Equal(t, 20, shipEnergyByID(t, w, 1), "first launch debits EnergyCost")
+
+	// Second launch: 20 < 30 → rejected, energy unchanged.
+	reply2 := make(chan sector.LaunchMissileResult, 1)
+	require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
+		PlayerID:   100,
+		ShipID:     1,
+		Target:     domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+		EnergyCost: 30,
+		Reply:      reply2,
+	}))
+	w.Tick(ctx)
+	require.ErrorIs(t, (<-reply2).Err, sector.ErrNotEnoughEnergy)
+	require.Equal(t, 20, shipEnergyByID(t, w, 1), "rejected launch spends no energy")
+}
+
+// shipEnergyByID reads a ship's current Energy from the sector snapshot.
+func shipEnergyByID(t *testing.T, w *sector.Worker, id domain.ShipID) int {
+	t.Helper()
+	for _, s := range w.Snapshot(testSector).Ships {
+		if s.ID == id {
+			return s.Energy
+		}
+	}
+	t.Fatalf("ship %d not found in snapshot", id)
+	return 0
+}
+
 // TestUnit_LaunchMissile_HitsTarget runs enough ticks for the missile
 // to traverse the gap and land — expects a non-Expired impact and target
 // HP/Shield reduced.

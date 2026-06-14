@@ -17,6 +17,23 @@ import (
 // Mirrors `app.MissileGoodsType` (seeded by migration 0017).
 const MissileGoodsType domain.GoodsTypeID = 50
 
+// launchActionEnergyCost resolves the "action" energy a missile launch spends
+// (phase 10.3.1) from the up_launcher catalog row. energy_usage is uniform
+// across the per-class launcher rows, so the first match is representative. A
+// nil catalog or a launcher with no energy_usage yields 0, which disables the
+// worker's energy gate.
+func launchActionEnergyCost(cat EquipmentCatalog) int {
+	if cat == nil {
+		return 0
+	}
+	for _, e := range cat.AllEquipment() {
+		if e.Type == "up_launcher" {
+			return e.EnergyUsage
+		}
+	}
+	return 0
+}
+
 // MissileCargo is the slice of cargo.Service the launch handler needs.
 // Declared here per ISP so handler tests can stub it without dragging in
 // the full *cargo.Service surface.
@@ -93,10 +110,11 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 
 	reply := make(chan sector.LaunchMissileResult, 1)
 	err := s.router.Send(sectorID, sector.LaunchMissileCommand{
-		PlayerID: playerID,
-		ShipID:   domain.ShipID(req.ShipID),
-		Target:   target,
-		Reply:    reply,
+		PlayerID:   playerID,
+		ShipID:     domain.ShipID(req.ShipID),
+		Target:     target,
+		EnergyCost: s.launchEnergyCost,
+		Reply:      reply,
 	})
 	if err != nil {
 		s.refundMissile(r.Context(), shipRef)
@@ -124,6 +142,8 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "ship is docked")
 			case errors.Is(res.Err, sector.ErrEquipmentRequired):
 				writeError(w, http.StatusUnprocessableEntity, "ship has no missile launcher")
+			case errors.Is(res.Err, sector.ErrNotEnoughEnergy):
+				writeError(w, http.StatusUnprocessableEntity, "not enough energy to launch")
 			case errors.Is(res.Err, sector.ErrInvalidAttackTarget):
 				writeError(w, http.StatusBadRequest, "invalid missile target")
 			default:

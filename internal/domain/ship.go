@@ -71,6 +71,13 @@ type Ship struct {
 	Energy         int
 	MaxEnergy      int
 	EnergyRecharge int
+	// EnergyDelta is the net per-tick energy change contributed by installed
+	// equipment (phase 10.3.1): Σ energy_usage of "reverse" modules (generators,
+	// +) minus Σ energy_usage of "always" modules (constant consumers, −). It is
+	// folded with EnergyRecharge by combat.ChargeEnergy each tick. Cached at
+	// install/uninstall via balance.Equipments.EnergyDelta (like the effective
+	// stats) and persisted as a derived column; 0 for ships with no equipment.
+	EnergyDelta int
 	// LaserDamage/LaserRange/LaserEnergyCost describe the ship's
 	// laser turret as a single fixed weapon. Per-tick damage on hit.
 	// LaserDamage==0 = no laser equipped — FireLaser early-returns.

@@ -237,9 +237,10 @@ func (s *outfitServer) handleInstall(w http.ResponseWriter, r *http.Request) {
 		EquipmentID: row.ID, Type: row.Type, Level: level,
 	})
 	eff := balance.ApplyEquipmentEffects(baseShipStats(cls, s.cfg), newEquip)
+	energyDelta := s.equipment.EnergyDelta(newEquip)
 	price := balance.InstallPrice(row, level)
 
-	newCash, err := s.persistOutfit(r.Context(), player, target.ID, newEquip, eff, price)
+	newCash, err := s.persistOutfit(r.Context(), player, target.ID, newEquip, eff, energyDelta, price)
 	if err != nil {
 		if errors.Is(err, errInsufficientCash) {
 			writeJSONError(w, http.StatusConflict, "недостаточно кредитов")
@@ -289,13 +290,14 @@ func (s *outfitServer) handleUninstall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	eff := balance.ApplyEquipmentEffects(baseShipStats(cls, s.cfg), newEquip)
-	updated := outfitShip(target.ID, newEquip, eff)
+	energyDelta := s.equipment.EnergyDelta(newEquip)
+	updated := outfitShip(target.ID, newEquip, eff, energyDelta)
 	if err := s.ships.SaveEquipment(r.Context(), updated); err != nil {
 		s.logger.Error("uninstall-equipment: save", "err", err, "player", int64(player), "ship", req.ShipID)
 		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
 		return
 	}
-	s.mirrorEquipment(player, target.ID, newEquip, eff)
+	s.mirrorEquipment(player, target.ID, newEquip, eff, energyDelta)
 
 	cash, _ := s.players.GetCash(r.Context(), player)
 	writeJSON(w, outfitResponse{OK: true, Cash: cash, Equipment: toInstalledResp(newEquip)})
@@ -304,7 +306,7 @@ func (s *outfitServer) handleUninstall(w http.ResponseWriter, r *http.Request) {
 // persistOutfit debits price and saves the new equipment + folded stats in one
 // transaction, then mirrors the change into the worker's RAM copy. Returns the
 // new cash balance, or errInsufficientCash.
-func (s *outfitServer) persistOutfit(ctx context.Context, player domain.PlayerID, shipID domain.ShipID, eq []domain.InstalledEquipment, eff balance.ShipStats, price int64) (int64, error) {
+func (s *outfitServer) persistOutfit(ctx context.Context, player domain.PlayerID, shipID domain.ShipID, eq []domain.InstalledEquipment, eff balance.ShipStats, energyDelta int, price int64) (int64, error) {
 	var newCash int64
 	err := s.tx.Do(ctx, func(ctx context.Context, txx pgx.Tx) error {
 		cash, err := s.players.WithExecutor(txx).AdjustCash(ctx, player, -price)
@@ -315,12 +317,12 @@ func (s *outfitServer) persistOutfit(ctx context.Context, player domain.PlayerID
 			return err
 		}
 		newCash = cash
-		return s.ships.WithExecutor(txx).SaveEquipment(ctx, outfitShip(shipID, eq, eff))
+		return s.ships.WithExecutor(txx).SaveEquipment(ctx, outfitShip(shipID, eq, eff, energyDelta))
 	})
 	if err != nil {
 		return 0, err
 	}
-	s.mirrorEquipment(player, shipID, eq, eff)
+	s.mirrorEquipment(player, shipID, eq, eff, energyDelta)
 	return newCash, nil
 }
 
@@ -461,7 +463,7 @@ func (s *outfitServer) mirrorAddShip(sectorID domain.SectorID, ship domain.Ship)
 }
 
 // mirrorEquipment pushes the recomputed fit into the worker's RAM ship.
-func (s *outfitServer) mirrorEquipment(player domain.PlayerID, shipID domain.ShipID, eq []domain.InstalledEquipment, eff balance.ShipStats) {
+func (s *outfitServer) mirrorEquipment(player domain.PlayerID, shipID domain.ShipID, eq []domain.InstalledEquipment, eff balance.ShipStats, energyDelta int) {
 	reply := make(chan sector.CmdResult, 1)
 	_, sectorID, found := s.pool.LookupPrimaryShipByPlayer(player)
 	if !found {
@@ -477,6 +479,7 @@ func (s *outfitServer) mirrorEquipment(player domain.PlayerID, shipID domain.Shi
 		ShieldRecharge: eff.ShieldRecharge,
 		MaxEnergy:      eff.MaxEnergy,
 		EnergyRecharge: eff.EnergyRecharge,
+		EnergyDelta:    energyDelta,
 		LaserDamage:    eff.LaserDamage,
 		RadarRange:     eff.RadarRange,
 		Reply:          reply,
@@ -505,7 +508,7 @@ func (s *outfitServer) isDependedOn(typ string, installed []domain.InstalledEqui
 
 // outfitShip builds the minimal domain.Ship SaveEquipment / the RAM command
 // read: the id, the new equipment list and the folded stat fields.
-func outfitShip(id domain.ShipID, eq []domain.InstalledEquipment, eff balance.ShipStats) domain.Ship {
+func outfitShip(id domain.ShipID, eq []domain.InstalledEquipment, eff balance.ShipStats, energyDelta int) domain.Ship {
 	return domain.Ship{
 		ID:             id,
 		Equipment:      eq,
@@ -515,6 +518,7 @@ func outfitShip(id domain.ShipID, eq []domain.InstalledEquipment, eff balance.Sh
 		ShieldRecharge: eff.ShieldRecharge,
 		MaxEnergy:      eff.MaxEnergy,
 		EnergyRecharge: eff.EnergyRecharge,
+		EnergyDelta:    energyDelta,
 		LaserDamage:    eff.LaserDamage,
 		RadarRange:     eff.RadarRange,
 	}

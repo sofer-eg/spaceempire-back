@@ -69,6 +69,33 @@
 `up_scanner`/`up_hide`). Фабриковать им ТТХ-дельты было бы недостоверно, так
 что в 10.14 они install-only.
 
+### Энергомодель (phase 10.3.1)
+
+`ct_updates_energy` из оригинала не портируется по величинам — `energy_use_type`
+(`always`/`hold`/`reverse`/`action`) и `energy_usage` берутся из
+`configs/equipment.yaml`, магнитуды — баланс-решение Go-версии. Модель:
+
+- **Per-tick дельта.** `balance.Equipments.EnergyDelta(eq)` =
+  `Σ reverse(energy_usage) − Σ always(energy_usage)`: `reverse`-модули
+  (генераторы) пополняют пул, `always`-модули (постоянные потребители) его
+  истощают. `hold`/`action` в стабильную дельту не входят. Не скейлится по
+  уровню установки. Кэшируется на корабле (`domain.Ship.EnergyDelta`) при
+  install/uninstall, как effective-статы, и персистится (колонка
+  `ships.energy_delta`, миграция 0053).
+- **Заряд за тик.** `combat.ChargeEnergy` двигает `Energy` на
+  `EnergyRecharge + EnergyDelta`, клампит в `[0, MaxEnergy]`. Отрицательная
+  нетто-ставка осушает пул до нуля.
+- **Обесточивание модуля.** При `Energy<=0` capability-модуль `always` считается
+  выключённым; конкретно стелс `up_hide` всплывает (`hideStealthed` в
+  `sector/snapshot.go`). Прочие `always`/`hold`-модули получат свой гейт
+  «выключен при нуле энергии», когда их подсистема будет проведена.
+- **`action`-расход.** Разовое списание при действии. Пуск ракеты тратит
+  `energy_usage` ленчера: HTTP-handler берёт цену из каталога
+  (`launchActionEnergyCost`), кладёт в `LaunchMissileCommand.EnergyCost`, воркер
+  при `Energy < cost` отклоняет пуск `ErrNotEnoughEnergy` (HTTP 422), иначе
+  списывает. Дрон/бур/прыжок проводятся тем же паттерном по мере появления
+  механики.
+
 ## Валидация установки
 
 Проверяется (данные есть в каталоге):

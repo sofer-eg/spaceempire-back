@@ -356,12 +356,14 @@ func playerShip(ships map[domain.ShipID]*domain.Ship, playerID domain.PlayerID) 
 // is hidden from other players, except: the owner (own ships always visible),
 // allies (relations Friend), and hostiles within stealthDetect of the
 // subscriber's centre (close detection). A cloaked ship that is firing
-// (AttackTarget set) is surfaced. Deleting from the map mid-range is safe in Go.
+// (AttackTarget set) is surfaced. So is a cloaked ship whose energy ran dry
+// (Energy<=0): up_hide is an "always" energy consumer, and an unpowered cloak
+// fails (phase 10.3.1). Deleting from the map mid-range is safe in Go.
 func hideStealthed(visible map[domain.ShipID]struct{}, ships map[domain.ShipID]*domain.Ship, sub *Subscription, relations Relations, stealthDetect float64) {
 	d2 := stealthDetect * stealthDetect
 	for id := range visible {
 		ship := ships[id]
-		if ship == nil || !ship.IsHidden || ship.AttackTarget != nil || ship.MissileJustFired {
+		if ship == nil || !ship.IsHidden || ship.AttackTarget != nil || ship.MissileJustFired || ship.Energy <= 0 {
 			continue
 		}
 		if ship.PlayerID == sub.PlayerID {

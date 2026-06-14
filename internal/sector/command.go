@@ -42,6 +42,10 @@ var (
 	// ErrDroneCapReached is reported by LaunchDroneCommand when the ship already
 	// flies as many live drones as its up_drone_control level allows (10.14b).
 	ErrDroneCapReached = errors.New("sector: drone control capacity reached")
+	// ErrNotEnoughEnergy is reported when an "action" energy module cannot fire
+	// because the ship's Energy is below the action's cost (phase 10.3.1):
+	// launching a missile spends the launcher's energy_usage. HTTP maps it to 422.
+	ErrNotEnoughEnergy = errors.New("sector: not enough energy")
 )
 
 // shipEquipmentLevel returns the install level of the first module of the given
@@ -254,6 +258,7 @@ type UpdateShipEquipmentCommand struct {
 	ShieldRecharge int
 	MaxEnergy      int
 	EnergyRecharge int
+	EnergyDelta    int
 	LaserDamage    int
 	RadarRange     float64
 	Reply          chan<- CmdResult
@@ -276,6 +281,7 @@ func (c UpdateShipEquipmentCommand) apply(_ *Worker, s *sectorState) {
 		ship.ShieldRecharge = c.ShieldRecharge
 		ship.MaxEnergy = c.MaxEnergy
 		ship.EnergyRecharge = c.EnergyRecharge
+		ship.EnergyDelta = c.EnergyDelta
 		ship.LaserDamage = c.LaserDamage
 		ship.RadarRange = c.RadarRange
 		if ship.Shield > ship.MaxShield {
@@ -370,8 +376,13 @@ type LaunchMissileCommand struct {
 	// it zero and the worker substitutes its own clock.Now(). Keeping the
 	// resolved time on the command (instead of reading w.clock inside apply)
 	// makes the unit test path independent of any clock plumbing.
-	Now   time.Time
-	Reply chan<- LaunchMissileResult
+	Now time.Time
+	// EnergyCost is the "action" energy a launch spends (phase 10.3.1), sourced
+	// from the launcher's catalog energy_usage by the HTTP handler. The worker
+	// rejects the launch with ErrNotEnoughEnergy when Energy < EnergyCost and
+	// otherwise debits it. Zero (the test/legacy default) disables the gate.
+	EnergyCost int
+	Reply      chan<- LaunchMissileResult
 }
 
 func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
@@ -412,6 +423,19 @@ func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
 		res.Err = ErrInvalidAttackTarget
 		replyLaunchMissile(c.Reply, res)
 		return
+	}
+
+	// Phase 10.3.1: a launch is an "action" energy expense. Reject when the
+	// pool cannot cover the launcher's cost; debit it on success so repeated
+	// fire drains the ship until it recharges. Cost 0 disables the gate (tests).
+	if ship.Energy < c.EnergyCost {
+		res.Err = ErrNotEnoughEnergy
+		replyLaunchMissile(c.Reply, res)
+		return
+	}
+	if c.EnergyCost > 0 {
+		ship.Energy -= c.EnergyCost
+		s.markDirty(c.ShipID)
 	}
 
 	now := c.Now

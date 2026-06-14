@@ -47,7 +47,7 @@ SELECT id, player_id, race, sector_id, pos_x, pos_y, vel_x, vel_y,
        final_target_sector, final_target_x, final_target_y,
        final_target_dock_kind, final_target_dock_id,
        hp, max_hp, shield, max_shield, shield_recharge,
-       energy, max_energy, energy_recharge,
+       energy, max_energy, energy_recharge, energy_delta,
        laser_damage, laser_range, laser_energy_cost,
        attack_kind, attack_id,
        docked_kind, docked_id,
@@ -82,6 +82,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			finalApproachID                   *int64
 			hp, maxHP, shield, maxShield, sch int
 			energy, maxEnergy, energyRch      int
+			energyDelta                       int
 			laserDmg, laserCost               int
 			laserRange                        float64
 			attackKind                        *int16
@@ -104,7 +105,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			&finalSector, &finalX, &finalY,
 			&finalApproachKind, &finalApproachID,
 			&hp, &maxHP, &shield, &maxShield, &sch,
-			&energy, &maxEnergy, &energyRch,
+			&energy, &maxEnergy, &energyRch, &energyDelta,
 			&laserDmg, &laserRange, &laserCost,
 			&attackKind, &attackID,
 			&dockedKind, &dockedID,
@@ -138,6 +139,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			Energy:          energy,
 			MaxEnergy:       maxEnergy,
 			EnergyRecharge:  energyRch,
+			EnergyDelta:     energyDelta,
 			LaserDamage:     laserDmg,
 			LaserRange:      laserRange,
 			LaserEnergyCost: laserCost,
@@ -290,6 +292,7 @@ SET
     energy_recharge = $8,
     laser_damage    = $9,
     radar_range     = $10,
+    energy_delta    = $11,
     shield          = LEAST(shield, $5),
     energy          = LEAST(energy, $7),
     updated_at      = NOW()
@@ -299,8 +302,8 @@ WHERE id = $1
 // SaveEquipment immediately persists a ship's installed-equipment list and the
 // stat columns it folds into (phase 10.14/10.20): max_speed/acceleration,
 // max_shield/shield_recharge, max_energy/energy_recharge, laser_damage,
-// radar_range (up_scanner). Current
-// shield/energy are clamped down to the (possibly lowered) maxima so an
+// radar_range (up_scanner), energy_delta (per-tick equipment energy, 10.3.1).
+// Current shield/energy are clamped down to the (possibly lowered) maxima so an
 // uninstall cannot leave a pool above its cap. Caller passes a domain.Ship with
 // those fields already recomputed (base class stats + equipment effects).
 // Returns ErrShipNotFound when no row matches.
@@ -315,6 +318,7 @@ func (r *Repository) SaveEquipment(ctx context.Context, s domain.Ship) error {
 		s.MaxShield, s.ShieldRecharge,
 		s.MaxEnergy, s.EnergyRecharge,
 		s.LaserDamage, s.RadarRange,
+		s.EnergyDelta,
 	)
 	if err != nil {
 		return fmt.Errorf("update ship equipment: %w", err)

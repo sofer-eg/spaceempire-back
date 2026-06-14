@@ -144,7 +144,6 @@ func (s *stubRepo) AddReputation(_ context.Context, playerID domain.PlayerID, de
 	cur := s.reputation[playerID]
 	cur.War += delta.War
 	cur.Trade += delta.Trade
-	cur.Race += delta.Race
 	s.reputation[playerID] = cur
 	return cur, nil
 }

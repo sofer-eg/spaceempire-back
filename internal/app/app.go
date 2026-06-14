@@ -474,7 +474,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// install/remove ct_updates modules on a docked ship. Shares the spawn
 	// config (base stats), the ship-class/equipment catalogs and authRepo (race
 	// reader) with the spawner; runs cash debit + persist in a tx via txManager.
-	newOutfitServer(sectorPool, shipRepo, playersRepoPersistence, txManager, shipClasses, equipment, authRepo, spawnCfg, logger).
+	newOutfitServer(sectorPool, shipRepo, playersRepoPersistence, txManager, shipClasses, equipment, authRepo, standingSvc, spawnCfg, logger).
 		RegisterRoutes(srv.Mux(), authSrv.RequireAuth)
 
 	// EVA (10.23): exit ship into a spacesuit, ship access toggle, board / ride

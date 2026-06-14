@@ -120,23 +120,24 @@ func (r *Repository) SetActiveShip(ctx context.Context, playerID domain.PlayerID
 	return nil
 }
 
-// Reputation is a player's standing across the three rating axes StarWind
-// gates equipment ranks on (phase 10.3.3). All default to 0 (lowest rank).
+// Reputation is a player's standing on the two single-value rating axes ported
+// from StarWind (phase 10.3.3). Both default to 0 (lowest rank). There is no
+// aggregate race rating (phase 10.3.14): per-race relations live in
+// player_race_standing, and the install rank gate reads the player's standing
+// with the shipyard's race directly.
 type Reputation struct {
 	War   int // combat reputation (kills); StarWind users.warstatus
 	Trade int // trade reputation (deals); StarWind users.tradestatus
-	Race  int // standing with the NPC races
 }
 
-const getReputationSQL = `SELECT war_rate, trade_rate, race_rate FROM players WHERE id = $1`
+const getReputationSQL = `SELECT war_rate, trade_rate FROM players WHERE id = $1`
 
-// GetReputation returns the player's war/trade/race reputation. The install
-// rank gate (phase 10.3.4) reads these to compare against a module's
-// min_war_rate / min_trade_rate / min_race_rate. ErrPlayerNotFound when the
-// row is missing.
+// GetReputation returns the player's war/trade reputation. The install rank gate
+// (phase 10.3.4) reads these to compare against a module's min_war_rate /
+// min_trade_rate. ErrPlayerNotFound when the row is missing.
 func (r *Repository) GetReputation(ctx context.Context, playerID domain.PlayerID) (Reputation, error) {
 	var rep Reputation
-	err := r.exec.QueryRow(ctx, getReputationSQL, int64(playerID)).Scan(&rep.War, &rep.Trade, &rep.Race)
+	err := r.exec.QueryRow(ctx, getReputationSQL, int64(playerID)).Scan(&rep.War, &rep.Trade)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Reputation{}, ErrPlayerNotFound
 	}
@@ -148,19 +149,18 @@ func (r *Repository) GetReputation(ctx context.Context, playerID domain.PlayerID
 
 const addReputationSQL = `
 UPDATE players
-SET war_rate = war_rate + $2, trade_rate = trade_rate + $3, race_rate = race_rate + $4
+SET war_rate = war_rate + $2, trade_rate = trade_rate + $3
 WHERE id = $1
-RETURNING war_rate, trade_rate, race_rate
+RETURNING war_rate, trade_rate
 `
 
 // AddReputation applies the deltas atomically and returns the new standing
-// (phase 10.3.3). Accrual sources (kills -> War, deals -> Trade, race relations
-// -> Race) call this; mirrors AdjustCash. ErrPlayerNotFound when the row is
-// missing.
+// (phase 10.3.3). Accrual sources (kills -> War, deals -> Trade) call this;
+// mirrors AdjustCash. ErrPlayerNotFound when the row is missing.
 func (r *Repository) AddReputation(ctx context.Context, playerID domain.PlayerID, delta Reputation) (Reputation, error) {
 	var rep Reputation
-	err := r.exec.QueryRow(ctx, addReputationSQL, int64(playerID), delta.War, delta.Trade, delta.Race).
-		Scan(&rep.War, &rep.Trade, &rep.Race)
+	err := r.exec.QueryRow(ctx, addReputationSQL, int64(playerID), delta.War, delta.Trade).
+		Scan(&rep.War, &rep.Trade)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Reputation{}, ErrPlayerNotFound
 	}

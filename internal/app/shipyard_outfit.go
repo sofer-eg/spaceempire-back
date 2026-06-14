@@ -24,6 +24,13 @@ import (
 // handler can map it to 409 after the transaction rolls back.
 var errInsufficientCash = errors.New("outfit: insufficient cash")
 
+// raceStandingReader is the slice of racestanding.Service the install rank gate
+// needs (phase 10.3.14): the player's standing with the shipyard's race feeds
+// the module's min_race_rate threshold. *racestanding.Service satisfies it.
+type raceStandingReader interface {
+	Get(player domain.PlayerID, race domain.RaceID) int
+}
+
 // outfitServer serves the shipyard buy-ship and equipment install/uninstall
 // endpoints (phase 10.14). Buying spawns a fresh class ship docked at the
 // shipyard (the player keeps flying their active ship — there is no active-ship
@@ -37,11 +44,12 @@ type outfitServer struct {
 	classes    *balance.ShipClasses
 	equipment  *balance.Equipments
 	raceReader playerRaceReader
+	standing   raceStandingReader
 	cfg        ShipSpawnerConfig
 	logger     *slog.Logger
 }
 
-func newOutfitServer(pool shipyardLocator, ships *shipsrepo.Repository, players *playersrepo.Repository, tx *database.TxManager, classes *balance.ShipClasses, equipment *balance.Equipments, raceReader playerRaceReader, cfg ShipSpawnerConfig, logger *slog.Logger) *outfitServer {
+func newOutfitServer(pool shipyardLocator, ships *shipsrepo.Repository, players *playersrepo.Repository, tx *database.TxManager, classes *balance.ShipClasses, equipment *balance.Equipments, raceReader playerRaceReader, standing raceStandingReader, cfg ShipSpawnerConfig, logger *slog.Logger) *outfitServer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -53,6 +61,7 @@ func newOutfitServer(pool shipyardLocator, ships *shipsrepo.Repository, players 
 		classes:    classes,
 		equipment:  equipment,
 		raceReader: raceReader,
+		standing:   standing,
 		cfg:        cfg.withDefaults(),
 		logger:     logger,
 	}
@@ -213,8 +222,8 @@ func (s *outfitServer) handleInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := s.equipment.ResolveInstall(domain.EquipmentID(req.EquipmentID), cls.Class, int(target.Race), req.Level, target.Equipment,
-		balance.Reputation{War: rep.War, Trade: rep.Trade, Race: rep.Race})
+	row, err := s.gatedInstall(domain.EquipmentID(req.EquipmentID), cls.Class, int(target.Race), req.Level,
+		target.Equipment, player, rep, s.shipyardRace(player, shipyardID))
 	if err != nil {
 		writeBalanceError(w, err)
 		return
@@ -316,6 +325,40 @@ func (s *outfitServer) persistOutfit(ctx context.Context, player domain.PlayerID
 }
 
 // --- helpers ---------------------------------------------------------------
+
+// gatedInstall resolves the catalog row for an install, sourcing the race-rank
+// axis from the player's standing with the shipyard's race (phase 10.3.14) —
+// there is no aggregate race_rate. war/trade come from the player's single
+// ratings. Split out so the per-race gate is unit-testable without the DB/pool.
+func (s *outfitServer) gatedInstall(id domain.EquipmentID, shipClass, shipRace, level int, installed []domain.InstalledEquipment, player domain.PlayerID, rep playersrepo.Reputation, shipyardRace int) (balance.Equipment, error) {
+	raceStanding := 0
+	if s.standing != nil {
+		raceStanding = s.standing.Get(player, domain.RaceID(shipyardRace))
+	}
+	return s.equipment.ResolveInstall(id, shipClass, shipRace, level, installed,
+		balance.Reputation{War: rep.War, Trade: rep.Trade, Race: raceStanding})
+}
+
+// shipyardRace returns the race of the shipyard the player is docked at (0 when
+// the player has no primary ship or the shipyard is not found — the gate then
+// reads standing with the neutral race, i.e. the lowest bar).
+func (s *outfitServer) shipyardRace(player domain.PlayerID, shipyardID int64) int {
+	_, sectorID, found := s.pool.LookupPrimaryShipByPlayer(player)
+	if !found {
+		return 0
+	}
+	return findShipyardRace(s.pool.Snapshot(sectorID), shipyardID)
+}
+
+// findShipyardRace looks up a shipyard's race in a sector snapshot's statics.
+func findShipyardRace(snap sector.Snapshot, shipyardID int64) int {
+	for i := range snap.Statics.Shipyards {
+		if int64(snap.Statics.Shipyards[i].ID) == shipyardID {
+			return snap.Statics.Shipyards[i].Race
+		}
+	}
+	return 0
+}
 
 func (s *outfitServer) authAndShipyard(w http.ResponseWriter, r *http.Request) (domain.PlayerID, int64, bool) {
 	player, ok := auth.PlayerIDFromContext(r.Context())

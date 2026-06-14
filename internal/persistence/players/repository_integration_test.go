@@ -186,13 +186,13 @@ func TestIntegration_PlayersRepository_AddReputation_RoundTrip(t *testing.T) {
 
 	pid := seedPlayer(t, pool)
 
-	got, err := repo.AddReputation(ctx, pid, players.Reputation{War: 10, Trade: 5, Race: 3})
+	got, err := repo.AddReputation(ctx, pid, players.Reputation{War: 10, Trade: 5})
 	require.NoError(t, err)
-	assert.Equal(t, players.Reputation{War: 10, Trade: 5, Race: 3}, got)
+	assert.Equal(t, players.Reputation{War: 10, Trade: 5}, got)
 
 	got, err = repo.AddReputation(ctx, pid, players.Reputation{War: -4, Trade: 1})
 	require.NoError(t, err)
-	assert.Equal(t, players.Reputation{War: 6, Trade: 6, Race: 3}, got)
+	assert.Equal(t, players.Reputation{War: 6, Trade: 6}, got)
 
 	persisted, err := repo.GetReputation(ctx, pid)
 	require.NoError(t, err)

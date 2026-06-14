@@ -89,9 +89,10 @@ func (w *Worker) killShip(ctx context.Context, s *sectorState, ship *domain.Ship
 	}
 	// War reputation (10.3.13): the attributed killer's war_rate grows when they
 	// destroy a ship. LastAttacker is the same player bounties/standing use; the
-	// awarder skips NPC/zero killers. Immediate write inside the tick, like the
-	// police standing drop above.
-	if w.reputation != nil && ship.LastAttacker != 0 {
+	// awarder skips NPC/zero killers. A self-kill (LastAttacker == owner) earns
+	// nothing — the same own-kill exclusion bounties.OnKill applies. Immediate
+	// write inside the tick, like the police standing drop above.
+	if w.reputation != nil && ship.LastAttacker != 0 && ship.LastAttacker != ship.PlayerID {
 		if err := w.reputation.OnShipKilled(ctx, ship.LastAttacker); err != nil {
 			w.logger.ErrorContext(ctx, "reputation: war on kill",
 				"err", err, "killer", int64(ship.LastAttacker), "victim", int64(ship.ID))

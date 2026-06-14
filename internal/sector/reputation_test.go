@@ -73,3 +73,27 @@ func TestUnit_Worker_Reputation_NoAwardWhenUnattributed(t *testing.T) {
 
 	assert.Empty(t, awarder.killers, "an unattributed death awards no war_rate")
 }
+
+// TestUnit_Worker_Reputation_NoAwardOnSelfKill proves a ship killed by its own
+// owner (LastAttacker == PlayerID) earns no war_rate — the same own-kill
+// exclusion the bounty payout applies.
+func TestUnit_Worker_Reputation_NoAwardOnSelfKill(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	awarder := &fakeReputationAwarder{}
+	dead := laserShip(1, 100, domain.Vec2{X: 0, Y: 0})
+	dead.HP = 0
+	dead.LastAttacker = 100 // same player that owns the ship
+
+	w := sector.NewWorker(0,
+		sector.Config{TickInterval: time.Second, AOIRadius: 2000},
+		clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {dead}},
+		sector.WithReputation(awarder),
+	)
+
+	w.Tick(ctx)
+
+	assert.Empty(t, awarder.killers, "a self-kill awards no war_rate")
+}

@@ -78,8 +78,10 @@ func InstallPrice(e Equipment, level int) int64 {
 }
 
 // Reputation is the player's standing on the three rating axes a module may
-// gate on (phase 10.3.4). The app maps players.Reputation onto it so the pure
-// catalog layer stays free of the persistence import.
+// gate on (phase 10.3.4). War and Trade come from players.Reputation; Race is
+// the player's standing with the shipyard's race (racestanding.Service), not an
+// aggregate (phase 10.3.14). Keeping it a plain struct lets the catalog layer
+// stay free of both persistence imports.
 type Reputation struct {
 	War   int
 	Trade int

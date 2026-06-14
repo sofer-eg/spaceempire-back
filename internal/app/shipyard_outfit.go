@@ -339,9 +339,12 @@ func (s *outfitServer) gatedInstall(id domain.EquipmentID, shipClass, shipRace, 
 		balance.Reputation{War: rep.War, Trade: rep.Trade, Race: raceStanding})
 }
 
-// shipyardRace returns the race of the shipyard the player is docked at (0 when
-// the player has no primary ship or the shipyard is not found — the gate then
-// reads standing with the neutral race, i.e. the lowest bar).
+// shipyardRace returns the race of the shipyard the player is docked at. It is
+// 0 only when the player has no primary ship or the shipyard is absent from the
+// snapshot; every seeded shipyard carries a main race (1-8). A 0 here makes the
+// gate read standing with the neutral race (always 0), which blocks any module
+// whose min_race_rate > 0 — relevant only if neutral / player-built shipyards
+// ever appear (a future-phase policy decision, not reachable on the current map).
 func (s *outfitServer) shipyardRace(player domain.PlayerID, shipyardID int64) int {
 	_, sectorID, found := s.pool.LookupPrimaryShipByPlayer(player)
 	if !found {

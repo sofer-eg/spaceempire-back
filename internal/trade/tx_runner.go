@@ -66,6 +66,11 @@ func (r *PoolRepo) AdjustCash(ctx context.Context, playerID domain.PlayerID, del
 	return r.players.AdjustCash(ctx, playerID, delta)
 }
 
+// AddReputation proxies to persistence/players (phase 10.3.13).
+func (r *PoolRepo) AddReputation(ctx context.Context, playerID domain.PlayerID, delta playersrepo.Reputation) (playersrepo.Reputation, error) {
+	return r.players.AddReputation(ctx, playerID, delta)
+}
+
 // GoodsType proxies to persistence/cargo.
 func (r *PoolRepo) GoodsType(ctx context.Context, id domain.GoodsTypeID) (domain.GoodsType, error) {
 	return r.cargo.GoodsType(ctx, id)

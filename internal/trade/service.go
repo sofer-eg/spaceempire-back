@@ -25,6 +25,7 @@ type Repo interface {
 
 	GetCash(ctx context.Context, playerID domain.PlayerID) (int64, error)
 	AdjustCash(ctx context.Context, playerID domain.PlayerID, delta int64) (int64, error)
+	AddReputation(ctx context.Context, playerID domain.PlayerID, delta playersrepo.Reputation) (playersrepo.Reputation, error)
 
 	GoodsType(ctx context.Context, id domain.GoodsTypeID) (domain.GoodsType, error)
 	Capacity(ctx context.Context, owner domain.EntityRef) (float64, error)
@@ -179,6 +180,10 @@ func (s *Service) Buy(ctx context.Context, playerID domain.PlayerID, shipID doma
 			return fmt.Errorf("add cargo: %w", err)
 		}
 
+		if err := awardTradeReputation(ctx, txRepo, playerID, total); err != nil {
+			return err
+		}
+
 		result = BuyResult{
 			NewCash:     newCash,
 			NewStock:    newStock,
@@ -257,6 +262,10 @@ func (s *Service) Sell(ctx context.Context, playerID domain.PlayerID, shipID dom
 			return fmt.Errorf("credit player: %w", err)
 		}
 
+		if err := awardTradeReputation(ctx, txRepo, playerID, total); err != nil {
+			return err
+		}
+
 		result = SellResult{
 			NewCash:     newCash,
 			NewStock:    newStock,
@@ -269,6 +278,26 @@ func (s *Service) Sell(ctx context.Context, playerID domain.PlayerID, shipID dom
 		return SellResult{}, err
 	}
 	return result, nil
+}
+
+// tradeRateShift mirrors StarWind update_user_cash_and_rating (db.sql): the
+// trade reputation gained on a deal is cash_sum >> 8 — one point per 256 credits
+// of turnover, in either direction (phase 10.3.13).
+const tradeRateShift = 8
+
+// awardTradeReputation grows the player's trade_rate by total>>8 inside the
+// trade transaction so the accrual is atomic with the deal. A sub-256-credit
+// deal yields 0 and is skipped to avoid a no-op UPDATE (parity: the original
+// integer shift gives 0 for such deals too).
+func awardTradeReputation(ctx context.Context, txRepo Repo, playerID domain.PlayerID, total int64) error {
+	delta := int(total >> tradeRateShift)
+	if delta <= 0 {
+		return nil
+	}
+	if _, err := txRepo.AddReputation(ctx, playerID, playersrepo.Reputation{Trade: delta}); err != nil {
+		return fmt.Errorf("award trade reputation: %w", err)
+	}
+	return nil
 }
 
 // authorizeDocked guards every mutation: the ship must exist, belong to

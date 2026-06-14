@@ -204,6 +204,12 @@ type Worker struct {
 	policeRaces map[domain.RaceID]bool
 	policeCfg   PoliceConfig
 
+	// reputation grants war_rate to a kill's attributed player (phase 10.3.13).
+	// Nil disables the accrual. Wired via WithReputation. The app implementation
+	// applies the delta via players.AddReputation and skips NPC/zero killers,
+	// mirroring the PoliceScanner split.
+	reputation ReputationAwarder
+
 	// Handoff dependencies — both nil disables JumpCommand handling and
 	// intake subscriptions. Wired in via WithHandoff option.
 	topology *world.Topology

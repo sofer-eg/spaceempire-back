@@ -39,6 +39,7 @@ type stubRepo struct {
 
 	ships      map[domain.ShipID]traderepo.ShipDock
 	cash       map[domain.PlayerID]int64
+	reputation map[domain.PlayerID]playersrepo.Reputation
 	goodsTypes map[domain.GoodsTypeID]domain.GoodsType
 	capacities map[domain.EntityRef]float64
 	stacks     map[domain.EntityRef]map[domain.GoodsTypeID]int64
@@ -49,6 +50,7 @@ func newStubRepo() *stubRepo {
 	return &stubRepo{
 		ships:      make(map[domain.ShipID]traderepo.ShipDock),
 		cash:       make(map[domain.PlayerID]int64),
+		reputation: make(map[domain.PlayerID]playersrepo.Reputation),
 		goodsTypes: make(map[domain.GoodsTypeID]domain.GoodsType),
 		capacities: make(map[domain.EntityRef]float64),
 		stacks:     make(map[domain.EntityRef]map[domain.GoodsTypeID]int64),
@@ -134,6 +136,17 @@ func (s *stubRepo) AdjustCash(_ context.Context, playerID domain.PlayerID, delta
 	v += delta
 	s.cash[playerID] = v
 	return v, nil
+}
+
+func (s *stubRepo) AddReputation(_ context.Context, playerID domain.PlayerID, delta playersrepo.Reputation) (playersrepo.Reputation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := s.reputation[playerID]
+	cur.War += delta.War
+	cur.Trade += delta.Trade
+	cur.Race += delta.Race
+	s.reputation[playerID] = cur
+	return cur, nil
 }
 
 func (s *stubRepo) GoodsType(_ context.Context, id domain.GoodsTypeID) (domain.GoodsType, error) {
@@ -451,6 +464,44 @@ func TestUnit_TradeService_Sell_HappyPath(t *testing.T) {
 	assert.EqualValues(t, 11600, f.repo.cash[f.player])
 	assert.EqualValues(t, 120, f.repo.market[f.station][1].Stock)
 	assert.EqualValues(t, 5, f.repo.stacks[f.shipRef][1])
+}
+
+// TestUnit_TradeService_Buy_GrowsTradeReputation proves a buy grows the
+// player's trade_rate by total>>8 (phase 10.3.13): total 1600 -> 1600>>8 = 6.
+func TestUnit_TradeService_Buy_GrowsTradeReputation(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+
+	res, err := f.svc.Buy(context.Background(), f.player, f.ship, f.station, 1, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1600, res.TotalAmount)
+	assert.Equal(t, 6, f.repo.reputation[f.player].Trade, "trade_rate grows by total>>8")
+}
+
+// TestUnit_TradeService_Sell_GrowsTradeReputation proves a sell grows the
+// player's trade_rate by total>>8 too — the same direction as a buy.
+func TestUnit_TradeService_Sell_GrowsTradeReputation(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	require.NoError(t, f.repo.AddCargo(context.Background(), f.shipRef, 1, 25))
+
+	res, err := f.svc.Sell(context.Background(), f.player, f.ship, f.station, 1, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1600, res.TotalAmount)
+	assert.Equal(t, 6, f.repo.reputation[f.player].Trade, "trade_rate grows by total>>8")
+}
+
+// TestUnit_TradeService_SmallDeal_NoTradeReputation proves a sub-256-credit deal
+// (total 80 -> 80>>8 = 0) leaves trade_rate untouched — parity with the original
+// integer shift, and no no-op UPDATE.
+func TestUnit_TradeService_SmallDeal_NoTradeReputation(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+
+	res, err := f.svc.Buy(context.Background(), f.player, f.ship, f.station, 1, 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 80, res.TotalAmount)
+	assert.Zero(t, f.repo.reputation[f.player].Trade, "a deal below 256 credits yields no trade_rate")
 }
 
 func TestUnit_TradeService_Sell_StationDoesNotBuy(t *testing.T) {

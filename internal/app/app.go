@@ -398,6 +398,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			policeScanner{cargo: cargoSvc, standing: standingSvc, npc: npcPlayerID, cfg: PoliceScanConfig{}.withDefaults()},
 			sector.PoliceConfig{Races: policeRaces()},
 		),
+		// 10.3.13: combat reputation — destroying a ship grows the attributed
+		// killer's war_rate (the rank gate in 10.3.4 reads it). NPC kills are
+		// skipped inside the awarder.
+		sector.WithReputation(reputationAwarder{players: playersRepoPersistence, npc: npcPlayerID}),
 	)
 
 	// spawnCfg was materialised above (with defaults applied) so the player

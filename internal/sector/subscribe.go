@@ -41,6 +41,7 @@ type Subscription struct {
 	lastSentMissile   map[domain.MissileID]domain.Missile
 	lastSentDrone     map[domain.DroneID]domain.Drone
 	lastSentContainer map[domain.ContainerID]domain.Container
+	lastSentAsteroid  map[domain.AsteroidID]domain.Asteroid
 	// lastSentStatics is the set of static refs the subscriber currently has
 	// (phase 10.20 L2). Seeded at subscribe with every live static (the welcome
 	// StaticsMessage sends them all); the per-tick big-radar diff then adds /

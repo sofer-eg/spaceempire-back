@@ -16,9 +16,13 @@ type Snapshot struct {
 	TimeScale float64        `json:"timeScale,omitempty"`
 	Ships     []Ship         `json:"ships,omitempty"`
 	Statics   *SectorStatics `json:"statics,omitempty"`
-	Added     []Ship         `json:"added,omitempty"`
-	Updated   []Ship         `json:"updated,omitempty"`
-	Removed   []int64        `json:"removed,omitempty"`
+	// Asteroids is the full minable ore-body set, returned by the /api/state
+	// snapshot (mirrors Ships). WS deltas use the Added/Updated/Removed
+	// buckets below instead. Phase 10.3.6.
+	Asteroids []Asteroid `json:"asteroids,omitempty"`
+	Added     []Ship     `json:"added,omitempty"`
+	Updated   []Ship     `json:"updated,omitempty"`
+	Removed   []int64    `json:"removed,omitempty"`
 	// LaserEffects holds one-frame laser shots that fired this tick.
 	// The SPA draws each beam for one frame and discards it on the
 	// next snapshot. Absent or empty between ticks. Phase 4.2.
@@ -49,6 +53,14 @@ type Snapshot struct {
 	// "updated"). Phase 4.6.
 	ContainersAdded   []Container `json:"containersAdded,omitempty"`
 	ContainersRemoved []int64     `json:"containersRemoved,omitempty"`
+
+	// AsteroidsAdded / AsteroidsUpdated / AsteroidsRemoved is the asteroid diff
+	// against the subscriber's previous tick view. Added carries full bodies,
+	// Updated carries bodies whose Mass changed (mining), Removed is the id
+	// list of asteroids that depleted or left view. Phase 10.3.6.
+	AsteroidsAdded   []Asteroid `json:"asteroidsAdded,omitempty"`
+	AsteroidsUpdated []Asteroid `json:"asteroidsUpdated,omitempty"`
+	AsteroidsRemoved []int64    `json:"asteroidsRemoved,omitempty"`
 
 	// StaticsUpdated carries the new HP/Shield of statics that took damage
 	// or recharged this tick; StaticsRemoved is the ref list of statics

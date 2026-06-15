@@ -55,6 +55,13 @@ type Snapshot struct {
 	// set (containers are immutable, so no "updated"). Phase 4.6.
 	Containers []domain.Container
 
+	// Asteroids is the live minable ore-body set at the end of this tick.
+	// Patches deliver an added/updated/removed delta against the previous
+	// tick's set: Pos/OreType are fixed, only Mass changes (mining) so the
+	// "updated" bucket carries mass changes, "removed" carries depletion.
+	// Phase 10.3.6.
+	Asteroids []domain.Asteroid
+
 	// Destructibles is the live combat state (HP/Shield) of every static
 	// object in the sector. Patches deliver an updated/removed delta against
 	// the previous tick. Phase 6.2b.
@@ -206,6 +213,11 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 		cAdded, cRemoved := diffContainers(sub.lastSentContainer, currContainers)
 		patch.ContainersAdded = cAdded
 		patch.ContainersRemoved = cRemoved
+		currAsteroids := asteroidsInRadius(s.asteroids, sub.Center, sub.Radius)
+		aAdded, aUpdated, aRemoved := diffAsteroids(sub.lastSentAsteroid, currAsteroids)
+		patch.AsteroidsAdded = aAdded
+		patch.AsteroidsUpdated = aUpdated
+		patch.AsteroidsRemoved = aRemoved
 		patch.StaticsUpdated = staticUpdates
 		// Big-object radar (phase 10.20 L2): large statics are visible within
 		// RadarRange × bigMult. Diff this window against what the subscriber
@@ -233,6 +245,7 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 			sub.lastSentMissile = currMissiles
 			sub.lastSentDrone = currDrones
 			sub.lastSentContainer = currContainers
+			sub.lastSentAsteroid = currAsteroids
 			sub.lastSentStatics = currStatics
 		default:
 			logger.Warn("ws patch dropped (slow consumer)",

@@ -869,6 +869,7 @@ func publishSnapshotFor(s *sectorState, elapsed time.Duration) {
 		Drones:           snapshotDrones(s.drones),
 		DroneImpacts:     dImpacts,
 		Containers:       snapshotContainers(s.containers),
+		Asteroids:        s.snapshotAsteroids(),
 		Destructibles:    s.snapshotDestructibles(),
 	}
 	s.snap.Store(snap)

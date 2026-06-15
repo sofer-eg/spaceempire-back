@@ -489,6 +489,18 @@ func (s *Server) buildSnapshotDTO(patch sector.Patch, sectorID int64) dto.Snapsh
 			out.ContainersRemoved[i] = int64(id)
 		}
 	}
+	if len(patch.AsteroidsAdded) > 0 {
+		out.AsteroidsAdded = dto.AsteroidsFromDomain(patch.AsteroidsAdded)
+	}
+	if len(patch.AsteroidsUpdated) > 0 {
+		out.AsteroidsUpdated = dto.AsteroidsFromDomain(patch.AsteroidsUpdated)
+	}
+	if len(patch.AsteroidsRemoved) > 0 {
+		out.AsteroidsRemoved = make([]int64, len(patch.AsteroidsRemoved))
+		for i, id := range patch.AsteroidsRemoved {
+			out.AsteroidsRemoved[i] = int64(id)
+		}
+	}
 	if len(patch.StaticsUpdated) > 0 {
 		out.StaticsUpdated = make([]dto.DestructibleStatic, len(patch.StaticsUpdated))
 		for i, d := range patch.StaticsUpdated {

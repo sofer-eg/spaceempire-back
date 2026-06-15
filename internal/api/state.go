@@ -21,5 +21,8 @@ func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 		statics := dto.StaticsFromDomain(snap.Statics)
 		out.Statics = &statics
 	}
+	if len(snap.Asteroids) > 0 {
+		out.Asteroids = dto.AsteroidsFromDomain(snap.Asteroids)
+	}
 	writeJSON(w, http.StatusOK, out)
 }

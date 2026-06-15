@@ -42,6 +42,16 @@ type Patch struct {
 	ContainersAdded   []domain.Container
 	ContainersRemoved []domain.ContainerID
 
+	// Asteroid delta against the subscriber's previous frame within AOI.
+	// Asteroids are static (Pos/OreType fixed), so AsteroidsAdded carries the
+	// full Asteroid (the SPA has no prior record), AsteroidsUpdated carries
+	// bodies whose Mass changed this tick (mining), and AsteroidsRemoved is the
+	// id-only list of asteroids that disappeared (depleted or left AOI). Phase
+	// 10.3.6.
+	AsteroidsAdded   []domain.Asteroid
+	AsteroidsUpdated []domain.Asteroid
+	AsteroidsRemoved []domain.AsteroidID
+
 	// Static-combat delta (phase 6.2b): statics whose HP/Shield changed this
 	// tick (StaticsUpdated) and statics destroyed this tick (StaticsRemoved,
 	// ref-only). Statics ship once via StaticsMessage, so these patch their
@@ -74,6 +84,8 @@ func (p Patch) IsEmpty() bool {
 		len(p.DronesAdded) == 0 && len(p.DronesUpdated) == 0 &&
 		len(p.DronesRemoved) == 0 && len(p.DroneImpacts) == 0 &&
 		len(p.ContainersAdded) == 0 && len(p.ContainersRemoved) == 0 &&
+		len(p.AsteroidsAdded) == 0 && len(p.AsteroidsUpdated) == 0 &&
+		len(p.AsteroidsRemoved) == 0 &&
 		len(p.StaticsUpdated) == 0 && len(p.StaticsRemoved) == 0 &&
 		p.StaticsAdded.IsEmpty()
 }

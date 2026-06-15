@@ -2225,3 +2225,19 @@ equipment:
       dependance: up_accumulator
       energy_use_type: action
       energy_usage: 100
+    - id: 140
+      type: up_rudder
+      description: Оптимизация рулей
+      max_level: 3
+      race: 0
+      class: 0
+      price: 200000
+      price_per_level: 150000
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: none
+      energy_use_type: hold
+      energy_usage: 0

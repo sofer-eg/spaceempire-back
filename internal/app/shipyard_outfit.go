@@ -165,7 +165,7 @@ func (s *outfitServer) buildPurchasedShip(player domain.PlayerID, cls balance.Sh
 		Direction:       domain.Vec2{X: 1, Y: 0},
 		MaxSpeed:        base.MaxSpeed,
 		Acceleration:    base.Acceleration,
-		TurnRate:        s.cfg.StartTurnRate,
+		TurnRate:        base.TurnRate, // phase 10.3.15: from baseShipStats, consistent with the up_rudder recompute baseline
 		HP:              hp,
 		MaxHP:           hp,
 		Shield:          base.MaxShield,
@@ -482,6 +482,7 @@ func (s *outfitServer) mirrorEquipment(player domain.PlayerID, shipID domain.Shi
 		EnergyDelta:    energyDelta,
 		LaserDamage:    eff.LaserDamage,
 		RadarRange:     eff.RadarRange,
+		TurnRate:       eff.TurnRate,
 		Reply:          reply,
 	}
 	if err := s.pool.Send(sectorID, cmd); err != nil {
@@ -521,6 +522,7 @@ func outfitShip(id domain.ShipID, eq []domain.InstalledEquipment, eff balance.Sh
 		EnergyDelta:    energyDelta,
 		LaserDamage:    eff.LaserDamage,
 		RadarRange:     eff.RadarRange,
+		TurnRate:       eff.TurnRate,
 	}
 }
 

@@ -293,6 +293,7 @@ SET
     laser_damage    = $9,
     radar_range     = $10,
     energy_delta    = $11,
+    turn_rate       = $12,
     shield          = LEAST(shield, $5),
     energy          = LEAST(energy, $7),
     updated_at      = NOW()
@@ -302,7 +303,8 @@ WHERE id = $1
 // SaveEquipment immediately persists a ship's installed-equipment list and the
 // stat columns it folds into (phase 10.14/10.20): max_speed/acceleration,
 // max_shield/shield_recharge, max_energy/energy_recharge, laser_damage,
-// radar_range (up_scanner), energy_delta (per-tick equipment energy, 10.3.1).
+// radar_range (up_scanner), energy_delta (per-tick equipment energy, 10.3.1),
+// turn_rate (up_rudder manoeuvrability, 10.3.15).
 // Current shield/energy are clamped down to the (possibly lowered) maxima so an
 // uninstall cannot leave a pool above its cap. Caller passes a domain.Ship with
 // those fields already recomputed (base class stats + equipment effects).
@@ -318,7 +320,7 @@ func (r *Repository) SaveEquipment(ctx context.Context, s domain.Ship) error {
 		s.MaxShield, s.ShieldRecharge,
 		s.MaxEnergy, s.EnergyRecharge,
 		s.LaserDamage, s.RadarRange,
-		s.EnergyDelta,
+		s.EnergyDelta, s.TurnRate,
 	)
 	if err != nil {
 		return fmt.Errorf("update ship equipment: %w", err)

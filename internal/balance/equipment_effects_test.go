@@ -13,6 +13,7 @@ func base() balance.ShipStats {
 	return balance.ShipStats{
 		MaxSpeed:       100,
 		Acceleration:   10,
+		TurnRate:       2,
 		MaxShield:      1000,
 		ShieldRecharge: 100,
 		MaxEnergy:      200,
@@ -29,6 +30,17 @@ func TestUnit_ApplyEquipmentEffects_ScannerWidensRadar(t *testing.T) {
 	})
 	require.InDelta(t, 3000+3000*0.4*2, got.RadarRange, 0.001) // 5400
 	require.Equal(t, base().MaxSpeed, got.MaxSpeed, "scanner touches only radar")
+}
+
+func TestUnit_ApplyEquipmentEffects_RudderBoostsTurnRate(t *testing.T) {
+	// up_rudder widens manoeuvrability +5% per level (phase 10.3.15, the X-BTF
+	// "Rudder Optimisation"), pairing with up_engine for speed.
+	got := balance.ApplyEquipmentEffects(base(), []domain.InstalledEquipment{
+		{Type: "up_rudder", Level: 3},
+	})
+	require.InDelta(t, 2+2*0.05*3, got.TurnRate, 0.001) // 2.3
+	require.Equal(t, base().MaxSpeed, got.MaxSpeed, "rudder touches only turn rate")
+	require.Equal(t, base().Acceleration, got.Acceleration, "rudder touches only turn rate")
 }
 
 func TestUnit_ApplyEquipmentEffects_EngineAndShieldBoostStats(t *testing.T) {

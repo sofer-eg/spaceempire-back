@@ -13,8 +13,12 @@ import (
 // here (pure, no DB) makes the effect model unit-testable. See
 // back/docs/specs/equipment_effects.md.
 type ShipStats struct {
-	MaxSpeed       float64
-	Acceleration   float64
+	MaxSpeed     float64
+	Acceleration float64
+	// TurnRate is the ship's max heading change per second (radians). Base
+	// comes from the spawn config (StartTurnRate); up_rudder widens it via
+	// ApplyEquipmentEffects (phase 10.3.15, the X-BTF "Rudder Optimisation").
+	TurnRate       float64
 	MaxShield      int
 	ShieldRecharge int
 	MaxEnergy      int
@@ -46,6 +50,11 @@ func ApplyEquipmentEffects(base ShipStats, eq []domain.InstalledEquipment) ShipS
 		case "up_engine":
 			out.MaxSpeed += base.MaxSpeed * 0.08 * l
 			out.Acceleration += base.Acceleration * 0.08 * l
+		case "up_rudder":
+			// Rudder Optimisation (phase 10.3.15): manoeuvrability tuning,
+			// raises TurnRate +5 %/level. Pairs with up_engine (speed) as the
+			// second basic hull-tuning upgrade ported from X-BTF.
+			out.TurnRate += base.TurnRate * 0.05 * l
 		case "up_shield":
 			out.MaxShield += int(math.Round(float64(base.MaxShield) * 0.15 * l))
 			out.ShieldRecharge += int(math.Round(float64(base.ShieldRecharge) * 0.10 * l))

@@ -283,6 +283,7 @@ func baseShipStats(cls balance.ShipClass, cfg ShipSpawnerConfig) balance.ShipSta
 	return balance.ShipStats{
 		MaxSpeed:       cls.Speed,
 		Acceleration:   cls.Acceleration,
+		TurnRate:       cfg.StartTurnRate, // phase 10.3.15: base turn rate, widened by up_rudder
 		MaxShield:      cls.Shield,
 		ShieldRecharge: cls.ShieldCharge,
 		MaxEnergy:      cfg.StartEnergy,

@@ -80,6 +80,9 @@ func newDockWorker(t *testing.T, statics domain.SectorStatics, shipPos domain.Ve
 		map[domain.SectorID][]domain.Ship{testSector: {{
 			ID: 1, PlayerID: 7, SectorID: testSector,
 			Pos: shipPos, MaxSpeed: 0,
+			// up_autopilot so the SetCourseCommand gate (10.3.11) passes;
+			// the module is inert for dock/undock/move tests.
+			Equipment: []domain.InstalledEquipment{{Type: "up_autopilot", Level: 1}},
 		}}},
 		sector.WithStatics(map[domain.SectorID]domain.SectorStatics{testSector: statics}),
 	)
@@ -252,6 +255,46 @@ func TestUnit_SetCourseCommand_AutoUndocksDockedShip(t *testing.T) {
 	require.NoError(t, err)
 	snap := w.Snapshot(testSector)
 	require.Nil(t, snap.Ships[0].Docked, "ship must be undocked after set-course command")
+}
+
+// TestUnit_SetCourseCommand_RequiresAutopilotModule gates the player autopilot
+// on an installed up_autopilot module (phase 10.3.11): arming a course without
+// the module is rejected and leaves FinalTarget unset, with the module it
+// succeeds, and clearing the course (nil) is always allowed.
+func TestUnit_SetCourseCommand_RequiresAutopilotModule(t *testing.T) {
+	t.Parallel()
+
+	armCourse := func(reply chan<- sector.CmdResult) sector.Command {
+		return sector.SetCourseCommand{
+			PlayerID: 7, ShipID: 1,
+			Course: &domain.Course{Sector: testSector, Pos: domain.Vec2{X: 1, Y: 1}},
+			Reply:  reply,
+		}
+	}
+
+	// No module → rejected, course not armed.
+	wNoMod := newSingleSectorWorker(t,
+		sector.Config{TickInterval: time.Second}, clock.NewRealClock(), nil,
+		[]domain.Ship{{ID: 1, PlayerID: 7, SectorID: testSector, MaxSpeed: 1}},
+	)
+	require.ErrorIs(t, sendAndWait(t, wNoMod, armCourse), sector.ErrEquipmentRequired)
+	require.Nil(t, wNoMod.Snapshot(testSector).Ships[0].FinalTarget,
+		"course must not be armed without up_autopilot")
+
+	// With module → accepted, course armed.
+	wMod := newSingleSectorWorker(t,
+		sector.Config{TickInterval: time.Second}, clock.NewRealClock(), nil,
+		[]domain.Ship{{ID: 1, PlayerID: 7, SectorID: testSector, MaxSpeed: 1,
+			Equipment: []domain.InstalledEquipment{{Type: "up_autopilot", Level: 1}}}},
+	)
+	require.NoError(t, sendAndWait(t, wMod, armCourse))
+	require.NotNil(t, wMod.Snapshot(testSector).Ships[0].FinalTarget,
+		"course must be armed with up_autopilot")
+
+	// Clearing the course (nil) is allowed even without the module.
+	require.NoError(t, sendAndWait(t, wNoMod, func(reply chan<- sector.CmdResult) sector.Command {
+		return sector.SetCourseCommand{PlayerID: 7, ShipID: 1, Course: nil, Reply: reply}
+	}))
 }
 
 func TestUnit_DockedShip_DoesNotMove(t *testing.T) {

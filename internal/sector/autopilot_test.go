@@ -222,7 +222,8 @@ func TestUnit_SetCourseCommand_ArmsAutopilotAndClearsTarget(t *testing.T) {
 		nil, nil,
 		map[domain.SectorID][]domain.Ship{1: {{
 			ID: 1, PlayerID: 7, SectorID: 1,
-			Target: &domain.Vec2{X: 999, Y: 999}, // leftover from MoveCommand
+			Target:    &domain.Vec2{X: 999, Y: 999}, // leftover from MoveCommand
+			Equipment: []domain.InstalledEquipment{{Type: "up_autopilot", Level: 1}},
 		}}},
 	)
 

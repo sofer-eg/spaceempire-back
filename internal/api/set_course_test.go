@@ -53,7 +53,9 @@ func newSetCourseServer(t *testing.T, initial []domain.Ship, router api.PathRout
 func TestUnit_SetCourse_Success(t *testing.T) {
 	t.Parallel()
 
-	srv, w := newSetCourseServer(t, []domain.Ship{{ID: 1, SectorID: 1, MaxSpeed: 1}}, fakePathRouter{hops: 3, reachable: true})
+	srv, w := newSetCourseServer(t, []domain.Ship{{ID: 1, SectorID: 1, MaxSpeed: 1,
+		Equipment: []domain.InstalledEquipment{{Type: "up_autopilot", Level: 1}}}},
+		fakePathRouter{hops: 3, reachable: true})
 	runWorker(t, w)
 
 	rec := setCourseRequest(t, srv, dto.SetCourseRequest{ShipID: 1, SectorID: 5, X: 100, Y: 200})
@@ -62,6 +64,19 @@ func TestUnit_SetCourse_Success(t *testing.T) {
 	var resp dto.SetCourseResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, 3, resp.Hops)
+}
+
+func TestUnit_SetCourse_NoAutopilotModule_Returns422(t *testing.T) {
+	t.Parallel()
+
+	// Ship without up_autopilot → SetCourseCommand gate (10.3.11) rejects
+	// with ErrEquipmentRequired, surfaced as 422.
+	srv, w := newSetCourseServer(t, []domain.Ship{{ID: 1, SectorID: 1, MaxSpeed: 1}}, fakePathRouter{hops: 3, reachable: true})
+	runWorker(t, w)
+
+	rec := setCourseRequest(t, srv, dto.SetCourseRequest{ShipID: 1, SectorID: 5, X: 100, Y: 200})
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, "body=%s", rec.Body.String())
 }
 
 func TestUnit_SetCourse_Unreachable_Returns400(t *testing.T) {

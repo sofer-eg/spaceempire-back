@@ -65,7 +65,8 @@ func TestUnit_SetCourseCommand_MirrorsApproachIntoCurrentTargetRef(t *testing.T)
 		sector.Config{TickInterval: time.Second},
 		clock.NewRealClock(),
 		nil,
-		[]domain.Ship{{ID: 1, Pos: domain.Vec2{}, MaxSpeed: 1}},
+		[]domain.Ship{{ID: 1, Pos: domain.Vec2{}, MaxSpeed: 1,
+			Equipment: []domain.InstalledEquipment{{Type: "up_autopilot", Level: 1}}}},
 	)
 
 	approach := &domain.EntityRef{Kind: domain.EntityKindShipyard, ID: 7}

@@ -75,6 +75,8 @@ func (s *Server) handleSetCourse(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "ship belongs to another player")
 		case errors.Is(res.Err, sector.ErrShipDocked):
 			writeError(w, http.StatusConflict, "ship is docked")
+		case errors.Is(res.Err, sector.ErrEquipmentRequired):
+			writeError(w, http.StatusUnprocessableEntity, "autopilot module required")
 		case res.Err != nil:
 			writeError(w, http.StatusInternalServerError, res.Err.Error())
 		default:

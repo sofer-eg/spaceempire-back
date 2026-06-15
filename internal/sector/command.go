@@ -36,8 +36,9 @@ var (
 	// ship is farther than PickupRange from the container.
 	ErrContainerOutOfRange = errors.New("sector: container out of range")
 	// ErrEquipmentRequired is reported when a command needs a capability module
-	// the ship has not installed (phase 10.14b): up_launcher for missiles,
-	// up_drone_control for drones. HTTP maps it to 422.
+	// the ship has not installed: up_launcher for missiles (phase 10.14b),
+	// up_drone_control for drones (phase 10.14b), up_autopilot for SetCourseCommand
+	// (phase 10.3.11). HTTP maps it to 422.
 	ErrEquipmentRequired = errors.New("sector: required equipment not installed")
 	// ErrDroneCapReached is reported by LaunchDroneCommand when the ship already
 	// flies as many live drones as its up_drone_control level allows (10.14b).
@@ -133,6 +134,13 @@ func (c SetCourseCommand) apply(w *Worker, s *sectorState) {
 		res.Err = ErrShipNotFound
 	case ship.PlayerID != c.PlayerID:
 		res.Err = ErrForbidden
+	case c.Course != nil && shipEquipmentLevel(ship, "up_autopilot") < 1:
+		// Player autopilot is gated on an installed up_autopilot module
+		// (phase 10.3.11). NPC ships arm their course directly in ai.go,
+		// bypassing this command, so they keep flying without a module.
+		// Clearing the course (Course == nil) is always allowed — a ship
+		// can stop regardless of its fit.
+		res.Err = ErrEquipmentRequired
 	default:
 		if ship.Docked != nil {
 			if err := executeUndock(w, s, ship); err != nil {

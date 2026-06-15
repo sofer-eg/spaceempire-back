@@ -27,6 +27,10 @@ type ShipStats struct {
 	// RadarRange is the personal radar radius (phase 10.20). Base comes from the
 	// ship class; up_scanner widens it via ApplyEquipmentEffects (L3).
 	RadarRange float64
+	// CargoBay is the cargo hold capacity in space units. Base comes from the
+	// ship class (phase 10.3.17); up_cargobay widens it via ApplyEquipmentEffects
+	// (phase 10.3.16, the X-BTF "Cargo Bay Extension").
+	CargoBay float64
 }
 
 // ApplyEquipmentEffects returns base with every stat module's additive boost

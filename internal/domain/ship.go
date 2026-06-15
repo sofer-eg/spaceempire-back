@@ -94,6 +94,12 @@ type Ship struct {
 	// the subscription then falls back to cfg.AOIRadius. Large objects use
 	// RadarRange × cfg.RadarBigMultiplier (L2). Persisted as ships.radar_range.
 	RadarRange float64
+	// CargoBay is the ship's cargo hold capacity in space units. Sourced from the
+	// ship class (balance.ShipClass.CargoBay) at spawn — before phase 10.3.17 the
+	// ships.cargobay column was left at its 100-unit default, ignoring the class —
+	// and folded with up_cargobay via the equipment-effect pipeline (phase
+	// 10.3.16). Persisted as ships.cargobay; read back as cargo Capacity.
+	CargoBay float64
 	// IsHidden marks a cloaked ship (phase 10.20 L4, ported from up_hide): it is
 	// cached "has an up_hide module fitted", refreshed whenever the equipment
 	// list changes (install/uninstall, cold-start, add). The sector worker

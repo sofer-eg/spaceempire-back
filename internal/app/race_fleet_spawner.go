@@ -187,7 +187,8 @@ func buildWarship(owner domain.PlayerID, race domain.RaceID, class balance.ShipC
 		LaserDamage:     laser,
 		LaserRange:      shipCfg.StartLaserRange,
 		LaserEnergyCost: shipCfg.StartLaserECost,
-		RadarRange:      float64(class.Radar), // phase 10.20 L1
+		RadarRange:      float64(class.Radar),    // phase 10.20 L1
+		CargoBay:        float64(class.CargoBay), // phase 10.3.17: hold capacity from class
 	}
 }
 

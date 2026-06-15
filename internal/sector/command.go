@@ -270,6 +270,7 @@ type UpdateShipEquipmentCommand struct {
 	LaserDamage    int
 	RadarRange     float64
 	TurnRate       float64
+	CargoBay       float64
 	Reply          chan<- CmdResult
 }
 
@@ -294,6 +295,7 @@ func (c UpdateShipEquipmentCommand) apply(_ *Worker, s *sectorState) {
 		ship.LaserDamage = c.LaserDamage
 		ship.RadarRange = c.RadarRange
 		ship.TurnRate = c.TurnRate
+		ship.CargoBay = c.CargoBay
 		if ship.Shield > ship.MaxShield {
 			ship.Shield = ship.MaxShield
 		}

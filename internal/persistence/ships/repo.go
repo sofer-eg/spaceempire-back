@@ -52,7 +52,7 @@ SELECT id, player_id, race, sector_id, pos_x, pos_y, vel_x, vel_y,
        attack_kind, attack_id,
        docked_kind, docked_id,
        passengers, is_spacesuit, name, ship_class_id, equipment, radar_range,
-       is_open
+       is_open, cargobay
 FROM ships
 WHERE sector_id = $1
 ORDER BY id
@@ -96,6 +96,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			equipmentRaw                      []byte
 			radarRange                        float64
 			isOpen                            bool
+			cargoBay                          float64
 		)
 		if err := rows.Scan(
 			&id, &playerID, &raceVal, &sectorIDRow,
@@ -110,7 +111,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			&attackKind, &attackID,
 			&dockedKind, &dockedID,
 			&passengers, &isSpacesuit, &name, &shipClassID, &equipmentRaw, &radarRange,
-			&isOpen,
+			&isOpen, &cargoBay,
 		); err != nil {
 			return nil, fmt.Errorf("scan ship: %w", err)
 		}
@@ -147,6 +148,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			IsSpacesuit:     isSpacesuit,
 			Equipment:       equipment,
 			RadarRange:      radarRange,
+			CargoBay:        cargoBay,
 			IsOpen:          isOpen,
 		}
 		if attackKind != nil && attackID != nil {
@@ -197,9 +199,9 @@ INSERT INTO ships (
     laser_damage, laser_range, laser_energy_cost,
     attack_kind, attack_id,
     docked_kind, docked_id,
-    is_spacesuit, name, ship_class_id, equipment, radar_range, is_open
+    is_spacesuit, name, ship_class_id, equipment, radar_range, is_open, cargobay
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
 RETURNING id
 `
 
@@ -228,6 +230,7 @@ func (r *Repository) Create(ctx context.Context, s domain.Ship) (domain.ShipID, 
 		attackKind, attackID,
 		dockedKind, dockedID,
 		s.IsSpacesuit, s.Name, int64(s.ShipClassID), equipmentRaw, s.RadarRange, s.IsOpen,
+		s.CargoBay,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert ship: %w", err)
@@ -294,6 +297,7 @@ SET
     radar_range     = $10,
     energy_delta    = $11,
     turn_rate       = $12,
+    cargobay        = $13,
     shield          = LEAST(shield, $5),
     energy          = LEAST(energy, $7),
     updated_at      = NOW()
@@ -304,7 +308,8 @@ WHERE id = $1
 // stat columns it folds into (phase 10.14/10.20): max_speed/acceleration,
 // max_shield/shield_recharge, max_energy/energy_recharge, laser_damage,
 // radar_range (up_scanner), energy_delta (per-tick equipment energy, 10.3.1),
-// turn_rate (up_rudder manoeuvrability, 10.3.15).
+// turn_rate (up_rudder manoeuvrability, 10.3.15), cargobay (class hold capacity
+// 10.3.17, widened by up_cargobay 10.3.16).
 // Current shield/energy are clamped down to the (possibly lowered) maxima so an
 // uninstall cannot leave a pool above its cap. Caller passes a domain.Ship with
 // those fields already recomputed (base class stats + equipment effects).
@@ -320,7 +325,7 @@ func (r *Repository) SaveEquipment(ctx context.Context, s domain.Ship) error {
 		s.MaxShield, s.ShieldRecharge,
 		s.MaxEnergy, s.EnergyRecharge,
 		s.LaserDamage, s.RadarRange,
-		s.EnergyDelta, s.TurnRate,
+		s.EnergyDelta, s.TurnRate, s.CargoBay,
 	)
 	if err != nil {
 		return fmt.Errorf("update ship equipment: %w", err)

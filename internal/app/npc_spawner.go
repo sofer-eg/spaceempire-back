@@ -291,9 +291,11 @@ func (s *npcSpawner) spawnMinersFor(
 // station's faction — set on the ship so the client can colour/label it.
 func (s *npcSpawner) newNPCShip(owner domain.PlayerID, sector domain.SectorID, pos domain.Vec2, race, idx int) domain.Ship {
 	var radar float64 // phase 10.20 L1 — from the TS class (NPCs don't subscribe, kept for parity)
+	cargoBay := 100.0 // phase 10.3.17: class hold capacity; 100 fallback if the TS class is missing
 	if s.classes != nil {
 		if sc, ok := s.classes.TSForRace(race); ok {
 			radar = float64(sc.Radar)
+			cargoBay = float64(sc.CargoBay)
 		}
 	}
 	return domain.Ship{
@@ -319,6 +321,7 @@ func (s *npcSpawner) newNPCShip(owner domain.PlayerID, sector domain.SectorID, p
 		LaserRange:      s.ship.StartLaserRange,
 		LaserEnergyCost: s.ship.StartLaserECost,
 		RadarRange:      radar,
+		CargoBay:        cargoBay,
 	}
 }
 

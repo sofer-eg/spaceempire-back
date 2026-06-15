@@ -178,6 +178,7 @@ func (s *outfitServer) buildPurchasedShip(player domain.PlayerID, cls balance.Sh
 		LaserRange:      s.cfg.StartLaserRange,
 		LaserEnergyCost: s.cfg.StartLaserECost,
 		RadarRange:      base.RadarRange, // phase 10.20: bought ships get the class radar too
+		CargoBay:        base.CargoBay,   // phase 10.3.17: hold capacity from class
 		Docked:          &domain.EntityRef{Kind: domain.EntityKindShipyard, ID: shipyardID},
 	}
 }
@@ -483,6 +484,7 @@ func (s *outfitServer) mirrorEquipment(player domain.PlayerID, shipID domain.Shi
 		LaserDamage:    eff.LaserDamage,
 		RadarRange:     eff.RadarRange,
 		TurnRate:       eff.TurnRate,
+		CargoBay:       eff.CargoBay,
 		Reply:          reply,
 	}
 	if err := s.pool.Send(sectorID, cmd); err != nil {
@@ -523,6 +525,7 @@ func outfitShip(id domain.ShipID, eq []domain.InstalledEquipment, eff balance.Sh
 		LaserDamage:    eff.LaserDamage,
 		RadarRange:     eff.RadarRange,
 		TurnRate:       eff.TurnRate,
+		CargoBay:       eff.CargoBay,
 	}
 }
 

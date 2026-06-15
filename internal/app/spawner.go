@@ -289,7 +289,8 @@ func baseShipStats(cls balance.ShipClass, cfg ShipSpawnerConfig) balance.ShipSta
 		MaxEnergy:      cfg.StartEnergy,
 		EnergyRecharge: cfg.StartEnergyChrg,
 		LaserDamage:    laser,
-		RadarRange:     float64(cls.Radar), // phase 10.20: base radar, widened by up_scanner (L3)
+		RadarRange:     float64(cls.Radar),    // phase 10.20: base radar, widened by up_scanner (L3)
+		CargoBay:       float64(cls.CargoBay), // phase 10.3.17: hold capacity from class, widened by up_cargobay (10.3.16)
 	}
 }
 
@@ -306,6 +307,7 @@ func (s *shipSpawner) spawnStarter(ctx context.Context, playerID domain.PlayerID
 	laserDmg := s.cfg.StartLaserDamage
 	var classID domain.ShipClassID
 	var radarRange float64 // 0 → subscription falls back to cfg.AOIRadius
+	cargoBay := 100.0      // phase 10.3.17: class overrides below; 100 keeps the legacy hold for classless ships
 
 	if cls, ok := s.starterClass(race); ok && cls.Hull > 0 {
 		maxSpeed = cls.Speed
@@ -318,7 +320,8 @@ func (s *shipSpawner) spawnStarter(ctx context.Context, playerID domain.PlayerID
 			laserDmg = s.cfg.StartLaserDamage
 		}
 		classID = cls.ID
-		radarRange = float64(cls.Radar) // phase 10.20 L1
+		radarRange = float64(cls.Radar)  // phase 10.20 L1
+		cargoBay = float64(cls.CargoBay) // phase 10.3.17: hold capacity from class
 	}
 
 	ship := domain.Ship{
@@ -344,6 +347,7 @@ func (s *shipSpawner) spawnStarter(ctx context.Context, playerID domain.PlayerID
 		LaserRange:      s.cfg.StartLaserRange,
 		LaserEnergyCost: s.cfg.StartLaserECost,
 		RadarRange:      radarRange,
+		CargoBay:        cargoBay,
 	}
 	id, err := s.repo.Create(ctx, ship)
 	if err != nil {

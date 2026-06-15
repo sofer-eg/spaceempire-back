@@ -170,6 +170,7 @@ func shipsMapSubset(src map[domain.ShipID]*domain.Ship, ids map[domain.ShipID]st
 		cp.Docked = cloneEntityRef(s.Docked)
 		cp.AttackTarget = cloneEntityRef(s.AttackTarget)
 		cp.CurrentTargetRef = cloneEntityRef(s.CurrentTargetRef)
+		cp.MiningTarget = cloneAsteroidID(s.MiningTarget)
 		out[id] = cp
 	}
 	return out

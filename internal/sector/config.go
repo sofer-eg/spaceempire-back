@@ -53,6 +53,19 @@ type Config struct {
 	// the whole sector from any interior point (both the ship AOI window and,
 	// via RadarBigMultiplier, the big-object static window).
 	SatelliteRevealRadius float64
+	// MineRange is how close a player ship must be to an asteroid to keep
+	// sustained mining (phase 10.3.6). Matches the NPC miner's MineRange so
+	// players and NPC drill within the same window. Default 12.
+	MineRange float64
+	// MineRate is the ore a player ship drills per tick (phase 10.3.6). Matches
+	// the NPC miner's DrillRate=5 so the world's mining magnitude is uniform.
+	// Default 5.
+	MineRate int64
+	// MineEnergyCost is the per-tick "action" energy a player ship spends to
+	// drill (phase 10.3.1/10.3.6), resolved from the up_drill catalog row at
+	// build time. Below this the ship cannot drill this tick. 0 disables the
+	// gate (unit tests / a catalog with no up_drill energy_usage).
+	MineEnergyCost int
 }
 
 func (c Config) withDefaults() Config {
@@ -91,6 +104,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SatelliteRevealRadius <= 0 {
 		c.SatelliteRevealRadius = 10000
+	}
+	if c.MineRange <= 0 {
+		c.MineRange = 12
+	}
+	if c.MineRate <= 0 {
+		c.MineRate = 5
 	}
 	return c
 }

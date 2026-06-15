@@ -35,6 +35,12 @@ var (
 	// ErrContainerOutOfRange is reported by PickupContainerCommand when the
 	// ship is farther than PickupRange from the container.
 	ErrContainerOutOfRange = errors.New("sector: container out of range")
+	// ErrAsteroidNotFound is reported by MineCommand when the target asteroid
+	// id is not in the ship's sector (already depleted or wrong sector).
+	ErrAsteroidNotFound = errors.New("sector: asteroid not found")
+	// ErrAsteroidOutOfRange is reported by MineCommand when the ship is farther
+	// than MineRange from the asteroid it tries to start mining.
+	ErrAsteroidOutOfRange = errors.New("sector: asteroid out of range")
 	// ErrEquipmentRequired is reported when a command needs a capability module
 	// the ship has not installed: up_launcher for missiles (phase 10.14b),
 	// up_drone_control for drones (phase 10.14b), up_autopilot for SetCourseCommand
@@ -110,6 +116,9 @@ func (c MoveCommand) apply(w *Worker, s *sectorState) {
 		target := c.Target
 		ship.Target = &target
 		ship.CurrentTargetRef = cloneEntityRef(c.TargetRef)
+		// A fresh move order ends any sustained mining (phase 10.3.6): the
+		// player is flying the ship off station, so it can no longer drill.
+		ship.MiningTarget = nil
 		s.markDirty(c.ShipID)
 	}
 	replyOnce(c.Reply, res)
@@ -200,6 +209,7 @@ func (c AddShipCommand) apply(w *Worker, s *sectorState) {
 	ship.Docked = cloneEntityRef(ship.Docked)
 	ship.AttackTarget = cloneEntityRef(ship.AttackTarget)
 	ship.CurrentTargetRef = cloneEntityRef(ship.CurrentTargetRef)
+	ship.MiningTarget = cloneAsteroidID(ship.MiningTarget)
 	ship.Equipment = cloneEquipment(ship.Equipment)
 	ship.PassengerPlayers = clonePlayerIDs(ship.PassengerPlayers) // phase 10.23
 	ship.IsHidden = cloakEngagedFromEquipment(ship.Equipment)     // phase 10.20 L4
@@ -357,8 +367,12 @@ func (c CeaseFireCommand) apply(w *Worker, s *sectorState) {
 	case ship.PlayerID != c.PlayerID:
 		res.Err = ErrForbidden
 	default:
-		if ship.AttackTarget != nil {
+		// Cease-fire is the "stop what this ship is doing" command: it clears
+		// both the combat target and any sustained mining (phase 10.3.6), so the
+		// SPA's stop button works for a drilling ship too.
+		if ship.AttackTarget != nil || ship.MiningTarget != nil {
 			ship.AttackTarget = nil
+			ship.MiningTarget = nil
 			s.markDirty(c.ShipID)
 			w.immediateSave(ship)
 		}
@@ -655,6 +669,75 @@ func replyRecallDrones(reply chan<- RecallDronesResult, res RecallDronesResult) 
 	case reply <- res:
 	default:
 	}
+}
+
+// MineCommand starts sustained ore mining on a ship (phase 10.3.6). It only
+// arms the mode — the per-tick drilling (energy gate, ore extraction, deposit
+// by up_drill level) runs in the worker's tickPlayerMining using the per-tick
+// world parameters (cfg.MineRange/MineRate/MineEnergyCost). Ownership is
+// enforced; the ship must carry an up_drill module (ErrEquipmentRequired), must
+// not be docked, and the target asteroid must be a live body in the same sector
+// within cfg.MineRange. A nil Asteroid is a stop request: it clears any active
+// MiningTarget (idempotent), mirroring CeaseFireCommand.
+type MineCommand struct {
+	PlayerID domain.PlayerID
+	ShipID   domain.ShipID
+	Asteroid *domain.AsteroidID
+	Reply    chan<- CmdResult
+}
+
+func (c MineCommand) apply(w *Worker, s *sectorState) {
+	var res CmdResult
+	ship, ok := s.ships[c.ShipID]
+	switch {
+	case !ok:
+		res.Err = ErrShipNotFound
+		replyOnce(c.Reply, res)
+		return
+	case ship.PlayerID != c.PlayerID:
+		res.Err = ErrForbidden
+		replyOnce(c.Reply, res)
+		return
+	}
+
+	// A nil asteroid means "stop mining" — always allowed, no equipment gate
+	// (a ship can stop regardless of its fit), idempotent.
+	if c.Asteroid == nil {
+		if ship.MiningTarget != nil {
+			ship.MiningTarget = nil
+			s.markDirty(c.ShipID)
+		}
+		replyOnce(c.Reply, res)
+		return
+	}
+
+	switch {
+	case ship.Docked != nil:
+		res.Err = ErrShipDocked
+	case shipEquipmentLevel(ship, "up_drill") < 1:
+		// Phase 10.3.6: drilling requires an installed up_drill module, mirroring
+		// the original StarWind UseDrill capability gate.
+		res.Err = ErrEquipmentRequired
+	default:
+		ast, ok := s.asteroids[*c.Asteroid]
+		switch {
+		case !ok || ast.Mass <= 0:
+			res.Err = ErrAsteroidNotFound
+		case ship.Pos.Sub(ast.Pos).Length() > w.cfg.MineRange:
+			res.Err = ErrAsteroidOutOfRange
+		default:
+			target := *c.Asteroid
+			ship.MiningTarget = &target
+			// Hold station immediately so the ship does not coast away before
+			// the next tickPlayerMining (same stance as the NPC applyMine).
+			ship.Target = nil
+			ship.FinalTarget = nil
+			ship.AttackTarget = nil
+			ship.Vel = domain.Vec2{}
+			s.markDirty(c.ShipID)
+		}
+	}
+	replyOnce(c.Reply, res)
 }
 
 func replyOnce(reply chan<- CmdResult, res CmdResult) {

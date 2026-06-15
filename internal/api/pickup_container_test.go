@@ -29,6 +29,9 @@ func (noSpaceRepo) ShipCargo(context.Context, domain.ShipID) ([]domain.CargoItem
 func (noSpaceRepo) RecordKill(context.Context, domain.ShipID, domain.SectorID, []domain.ContainerDrop) ([]domain.Container, error) {
 	return nil, nil
 }
+func (noSpaceRepo) SpawnContainer(context.Context, domain.SectorID, domain.ContainerDrop) (domain.Container, error) {
+	return domain.Container{}, nil
+}
 func (noSpaceRepo) Pickup(context.Context, domain.ContainerID, domain.ShipID) error {
 	return containers.ErrNoSpace
 }

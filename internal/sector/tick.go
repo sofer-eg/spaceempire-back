@@ -29,6 +29,7 @@ func snapshotShips(src map[domain.ShipID]*domain.Ship) []domain.Ship {
 		cp.Docked = cloneEntityRef(ship.Docked)
 		cp.AttackTarget = cloneEntityRef(ship.AttackTarget)
 		cp.CurrentTargetRef = cloneEntityRef(ship.CurrentTargetRef)
+		cp.MiningTarget = cloneAsteroidID(ship.MiningTarget)
 		ships = append(ships, cp)
 	}
 	sort.Slice(ships, func(i, j int) bool {

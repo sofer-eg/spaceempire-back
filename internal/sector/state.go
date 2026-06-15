@@ -137,6 +137,7 @@ func newSectorState(id domain.SectorID, initial []domain.Ship, initialDrones []d
 		s.FinalTarget = cloneCourse(s.FinalTarget)
 		s.Docked = cloneEntityRef(s.Docked)
 		s.AttackTarget = cloneEntityRef(s.AttackTarget)
+		s.MiningTarget = cloneAsteroidID(s.MiningTarget)
 		// CurrentTargetRef is not persisted; cold-start derives it from
 		// FinalTarget.Approach so the SPA highlight survives a worker
 		// restart while the autopilot is still parked or approaching.
@@ -480,6 +481,7 @@ func (s *sectorState) collectDirty() []domain.Ship {
 		cp.FinalTarget = cloneCourse(ship.FinalTarget)
 		cp.Docked = cloneEntityRef(ship.Docked)
 		cp.AttackTarget = cloneEntityRef(ship.AttackTarget)
+		cp.MiningTarget = cloneAsteroidID(ship.MiningTarget)
 		cp.CurrentTargetRef = cloneEntityRef(ship.CurrentTargetRef)
 		out = append(out, cp)
 	}
@@ -508,6 +510,16 @@ func cloneEntityRef(r *domain.EntityRef) *domain.EntityRef {
 		return nil
 	}
 	cp := *r
+	return &cp
+}
+
+// cloneAsteroidID deep-copies a ship's MiningTarget (phase 10.3.6) so a
+// snapshot/handoff copy never aliases the worker's live pointer.
+func cloneAsteroidID(a *domain.AsteroidID) *domain.AsteroidID {
+	if a == nil {
+		return nil
+	}
+	cp := *a
 	return &cp
 }
 

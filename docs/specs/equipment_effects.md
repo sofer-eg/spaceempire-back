@@ -93,8 +93,36 @@
   `energy_usage` ленчера: HTTP-handler берёт цену из каталога
   (`launchActionEnergyCost`), кладёт в `LaunchMissileCommand.EnergyCost`, воркер
   при `Energy < cost` отклоняет пуск `ErrNotEnoughEnergy` (HTTP 422), иначе
-  списывает. Дрон/бур/прыжок проводятся тем же паттерном по мере появления
-  механики.
+  списывает. Бур проведён по тому же паттерну (см. ниже); дрон/прыжок — по мере
+  появления механики.
+
+### `up_drill` → игровая добыча руды (phase 10.3.6)
+
+Игровая добыча — отдельный путь от NPC-шахтёров (`ai.Mine`/`applyMine` не
+тронуты). Игрок включает sustained-режим командой `POST /api/cmd/mine`
+(`MineCommand`): воркер ставит `domain.Ship.MiningTarget *AsteroidID` (RAM-only
+intent, как `AttackTarget` — не персистится), сбрасывается при handoff (ворота),
+death (корабль удаляется), depletion, `MoveCommand` (новый курс) и
+`CeaseFireCommand`/`MineCommand{Asteroid:nil}` (стоп). Гейт старта: `up_drill`
+установлен (`ErrEquipmentRequired` → 422), корабль не пристыкован, астероид жив и
+в `cfg.MineRange`.
+
+Каждый тик `tickPlayerMining` (после `tickAI`, до движения) для каждого корабля
+с `MiningTarget`: гейт `up_drill`, удержание на станции (обнуляет
+Target/Vel — как `applyMine`), проверка дистанции, **энерго-гейт** (`action`:
+`cfg.MineEnergyCost` из каталога `up_drill.energy_usage`, при нехватке тик не
+бурит, режим сохраняется), извлечение `cfg.MineRate` руды (баланс-решение
+Go-версии: **5/тик**, в паритет с NPC `miner.DrillRate=5`; величины оригинала не
+портируются), списание энергии, `ast.Mass -= rate`, `depleteAsteroid` + сброс
+`MiningTarget` при опустошении.
+
+**Депозит зависит от уровня** `shipEquipmentLevel(ship,"up_drill")`:
+- **ур.1** → руда выпадает контейнером в космос рядом с астероидом
+  (`ContainerRepo.SpawnContainer` — та же машинерия лута, что и kill-drop;
+  подбирается стандартным pickup-container);
+- **ур.2** → прямо в трюм (`MinerLogistics.AddOre`, как NPC); при полном трюме
+  (`cargo.ErrNoSpace`) — fallback в контейнер. Прочие ошибки депозита оставляют
+  астероид нетронутым и ретраят на следующем тике.
 
 ## Валидация установки
 

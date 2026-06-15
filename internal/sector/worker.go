@@ -72,6 +72,9 @@ type ContainerRepo interface {
 	// and creates one container (with its cargo) per drop, returning the
 	// created containers.
 	RecordKill(ctx context.Context, victim domain.ShipID, sectorID domain.SectorID, drops []domain.ContainerDrop) ([]domain.Container, error)
+	// SpawnContainer creates one container (with its cargo) in space without
+	// a kill — used by player mining (phase 10.3.6) to drop drilled ore.
+	SpawnContainer(ctx context.Context, sectorID domain.SectorID, drop domain.ContainerDrop) (domain.Container, error)
 	// Pickup moves a container's cargo into the ship (capacity-checked,
 	// all-or-nothing) and deletes the container.
 	Pickup(ctx context.Context, container domain.ContainerID, ship domain.ShipID) error
@@ -721,6 +724,7 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	// reactive AI) are unaffected. timeScale == 1.0 is a no-op.
 	dt := baseDt * s.timeScale
 	w.tickAI(ctx, s)
+	w.tickPlayerMining(ctx, s)
 	resolveAutopilot(s, w.router, w.cfg.DockRange)
 	applyMovement(s, dt)
 	w.tryAutoJump(s)

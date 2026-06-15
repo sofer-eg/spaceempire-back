@@ -679,3 +679,20 @@ type minerHauler struct {
 func (h minerHauler) AddOre(ctx context.Context, ship domain.EntityRef, ore domain.GoodsTypeID, qty int64) error {
 	return h.cargo.Add(ctx, ship, ore, qty)
 }
+
+// equipmentEnergyUsage returns the energy_usage of the first catalog row of the
+// given type, or 0 when none is loaded. energy_usage is uniform across a
+// module's per-class price tiers, so the first match is representative. Used to
+// seed sector.Config.MineEnergyCost from the up_drill catalog row (phase
+// 10.3.6); mirrors api.launchActionEnergyCost for up_launcher.
+func equipmentEnergyUsage(cat *balance.Equipments, typ string) int {
+	if cat == nil {
+		return 0
+	}
+	for _, e := range cat.AllEquipment() {
+		if e.Type == typ {
+			return e.EnergyUsage
+		}
+	}
+	return 0
+}

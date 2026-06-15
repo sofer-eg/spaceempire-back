@@ -22,6 +22,8 @@ type fakeContainerRepo struct {
 	nextID      int64
 	killed      []domain.ShipID
 	lastDrops   []domain.ContainerDrop
+	spawned     []domain.ContainerDrop
+	spawnErr    error
 	pickups     []containerPickup
 	deleted     []domain.ContainerID
 	pickupErr   error
@@ -50,6 +52,20 @@ func (f *fakeContainerRepo) RecordKill(_ context.Context, victim domain.ShipID, 
 		})
 	}
 	return out, nil
+}
+
+func (f *fakeContainerRepo) SpawnContainer(_ context.Context, sectorID domain.SectorID, drop domain.ContainerDrop) (domain.Container, error) {
+	if f.spawnErr != nil {
+		return domain.Container{}, f.spawnErr
+	}
+	f.spawned = append(f.spawned, drop)
+	f.nextID++
+	return domain.Container{
+		ID:        domain.ContainerID(f.nextID),
+		SectorID:  sectorID,
+		Pos:       drop.Pos,
+		ExpiresAt: drop.ExpiresAt,
+	}, nil
 }
 
 func (f *fakeContainerRepo) Pickup(_ context.Context, container domain.ContainerID, ship domain.ShipID) error {

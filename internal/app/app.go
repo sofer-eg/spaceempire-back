@@ -339,6 +339,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				DockRange:        cfg.Sector.DockRange,
 				GateRange:        cfg.Sector.GateRange,
 				ShutdownTimeout:  cfg.Server.ShutdownTimeout,
+				// 10.3.6: per-tick "action" energy a player drill spends, from the
+				// up_drill catalog row (uniform across class tiers).
+				MineEnergyCost: equipmentEnergyUsage(equipment, "up_drill"),
 			},
 		},
 		sectorIDs,

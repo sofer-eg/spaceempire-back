@@ -117,6 +117,11 @@ func executeDock(w *Worker, s *sectorState, ship *domain.Ship, target domain.Doc
 	ship.Target = nil
 	ship.FinalTarget = nil
 	ship.CurrentTargetRef = nil
+	// A mining ship that docks must drop its armed drill target, otherwise
+	// the next tick's mineForPlayer would keep drilling a docked ship. This
+	// is the single dock chokepoint (DockCommand + auto-dock), mirroring the
+	// MoveCommand mining reset (phase 10.3.6).
+	ship.MiningTarget = nil
 
 	if w.repo != nil {
 		if err := w.repo.Save(context.Background(), *ship); err != nil {

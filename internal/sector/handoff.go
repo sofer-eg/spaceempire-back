@@ -126,6 +126,10 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 	// sector and is no longer reachable. Phase 4.2 only supports
 	// same-sector combat, so we drop the reference on every gate jump.
 	relocated.AttackTarget = nil
+	// MiningTarget points at an asteroid in the source sector (phase 10.3.6),
+	// unreachable after the jump — drop it so the relocated ship is not stuck
+	// holding station against a missing target.
+	relocated.MiningTarget = nil
 
 	// Carry the AI controller across the handoff (phase 5.3): marshal its
 	// state into the JumpEvent and re-home its ai_state row to the target

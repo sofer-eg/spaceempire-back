@@ -165,6 +165,40 @@ func (r *Repository) RecordKill(ctx context.Context, victim domain.ShipID, secto
 	return created, nil
 }
 
+// SpawnContainer creates a single loot container (plus its cargo row) in
+// space — no ship death involved. Used by player mining (phase 10.3.6) to drop
+// drilled ore that does not go straight into the hold (up_drill L1, or the L2
+// full-hold fallback). Returns the created container so the worker can add it
+// to the live set for the next snapshot. The two inserts run in one
+// transaction, like a single RecordKill drop.
+func (r *Repository) SpawnContainer(ctx context.Context, sectorID domain.SectorID, drop domain.ContainerDrop) (domain.Container, error) {
+	var created domain.Container
+	err := r.tm.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var id int64
+		if err := tx.QueryRow(ctx, insertContainerSQL,
+			int64(sectorID), drop.Pos.X, drop.Pos.Y, drop.ExpiresAt,
+		).Scan(&id); err != nil {
+			return fmt.Errorf("insert container: %w", err)
+		}
+		if _, err := tx.Exec(ctx, insertCargoSQL,
+			int16(domain.EntityKindContainer), id, int32(drop.GoodsType), drop.Quantity,
+		); err != nil {
+			return fmt.Errorf("insert container cargo: %w", err)
+		}
+		created = domain.Container{
+			ID:        domain.ContainerID(id),
+			SectorID:  sectorID,
+			Pos:       drop.Pos,
+			ExpiresAt: drop.ExpiresAt,
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.Container{}, err
+	}
+	return created, nil
+}
+
 const (
 	containerExistsSQL = `SELECT EXISTS(SELECT 1 FROM containers WHERE id = $1)`
 	ownerSpaceSQL      = `

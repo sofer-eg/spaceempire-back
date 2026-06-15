@@ -122,6 +122,15 @@ type Ship struct {
 	// dockable object (station/shipyard/trade station/pirbase). A docked
 	// ship does not move and ignores Target/FinalTarget. Cleared by undock.
 	Docked *EntityRef
+	// MiningTarget, when non-nil, is the asteroid the player is sustained-
+	// mining (phase 10.3.6, gated on up_drill). Each tick the worker holds
+	// the ship on station and drills it while in range with enough energy;
+	// the ore deposit depends on the up_drill level (L1 -> loot container,
+	// L2 -> hold with container fallback). Set by MineCommand, cleared by
+	// CeaseFireCommand, by a fresh MoveCommand, when the asteroid is depleted,
+	// and dropped on a gate jump (the asteroid lives in the source sector).
+	// RAM-only transient intent, like AttackTarget — not persisted.
+	MiningTarget *AsteroidID
 	// CurrentTargetRef, when non-nil, marks the entity the player explicitly
 	// "is flying to" so the SPA can paint a persistent highlight on it
 	// (distinct from the hover-only highlight). Set by MoveCommand.TargetRef

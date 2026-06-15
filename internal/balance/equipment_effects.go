@@ -59,6 +59,10 @@ func ApplyEquipmentEffects(base ShipStats, eq []domain.InstalledEquipment) ShipS
 			// raises TurnRate +5 %/level. Pairs with up_engine (speed) as the
 			// second basic hull-tuning upgrade ported from X-BTF.
 			out.TurnRate += base.TurnRate * 0.05 * l
+		case "up_cargobay":
+			// Cargo Bay Extension (phase 10.3.16, X-BTF subspace-compression
+			// hold): widens cargo capacity +5 %/level off the class base.
+			out.CargoBay += base.CargoBay * 0.05 * l
 		case "up_shield":
 			out.MaxShield += int(math.Round(float64(base.MaxShield) * 0.15 * l))
 			out.ShieldRecharge += int(math.Round(float64(base.ShieldRecharge) * 0.10 * l))

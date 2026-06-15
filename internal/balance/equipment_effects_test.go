@@ -20,6 +20,7 @@ func base() balance.ShipStats {
 		EnergyRecharge: 4,
 		LaserDamage:    50,
 		RadarRange:     3000,
+		CargoBay:       1000,
 	}
 }
 
@@ -41,6 +42,16 @@ func TestUnit_ApplyEquipmentEffects_RudderBoostsTurnRate(t *testing.T) {
 	require.InDelta(t, 2+2*0.05*3, got.TurnRate, 0.001) // 2.3
 	require.Equal(t, base().MaxSpeed, got.MaxSpeed, "rudder touches only turn rate")
 	require.Equal(t, base().Acceleration, got.Acceleration, "rudder touches only turn rate")
+}
+
+func TestUnit_ApplyEquipmentEffects_CargoBayExtension(t *testing.T) {
+	// up_cargobay widens the hold +5% per level (phase 10.3.16, the X-BTF
+	// "Cargo Bay Extension"), off the class CargoBay base.
+	got := balance.ApplyEquipmentEffects(base(), []domain.InstalledEquipment{
+		{Type: "up_cargobay", Level: 3},
+	})
+	require.InDelta(t, 1000+1000*0.05*3, got.CargoBay, 0.001) // 1150
+	require.Equal(t, base().MaxSpeed, got.MaxSpeed, "cargobay touches only the hold")
 }
 
 func TestUnit_ApplyEquipmentEffects_EngineAndShieldBoostStats(t *testing.T) {

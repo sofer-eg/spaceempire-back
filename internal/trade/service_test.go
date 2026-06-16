@@ -354,6 +354,48 @@ func TestUnit_TradeService_Buy_InvalidStationKind(t *testing.T) {
 	require.ErrorIs(t, err, trade.ErrInvalidStationKind)
 }
 
+func TestUnit_TradeService_MarketDocked_HappyPath(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+
+	entries, err := f.svc.MarketDocked(context.Background(), f.player, f.ship, f.station)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].SellPrice)
+	// Stock 100 of cap 500 → dynamic sell 16 + (96-16)*(500-100)/500 = 80.
+	assert.EqualValues(t, 80, *entries[0].SellPrice)
+}
+
+func TestUnit_TradeService_MarketDocked_NotDocked(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	dock := f.repo.ships[f.ship]
+	dock.Docked = nil
+	f.repo.ships[f.ship] = dock
+
+	_, err := f.svc.MarketDocked(context.Background(), f.player, f.ship, f.station)
+	require.ErrorIs(t, err, trade.ErrNotDocked)
+}
+
+func TestUnit_TradeService_MarketDocked_WrongStation(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	other := domain.EntityRef{Kind: domain.EntityKindStation, ID: 555}
+	dock := f.repo.ships[f.ship]
+	dock.Docked = &other
+	f.repo.ships[f.ship] = dock
+
+	_, err := f.svc.MarketDocked(context.Background(), f.player, f.ship, f.station)
+	require.ErrorIs(t, err, trade.ErrWrongStation)
+}
+
+func TestUnit_TradeService_MarketDocked_ForbiddenForOtherPlayer(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, err := f.svc.MarketDocked(context.Background(), domain.PlayerID(999), f.ship, f.station)
+	require.ErrorIs(t, err, trade.ErrForbidden)
+}
+
 func TestUnit_TradeService_Buy_ShipNotFound(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

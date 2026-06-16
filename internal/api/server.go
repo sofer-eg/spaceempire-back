@@ -220,9 +220,12 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	// these reads must run under auth to populate the player id.
 	s.mux.Handle("GET /api/station/{id}/cargo", s.protect(s.handleCargoInventory(domain.EntityKindStation)))
 	s.mux.Handle("GET /api/trade-station/{id}/cargo", s.protect(s.handleCargoInventory(domain.EntityKindTradeStation)))
-	s.mux.HandleFunc("GET /api/station/{id}/market", s.handleMarket(domain.EntityKindStation))
-	s.mux.HandleFunc("GET /api/trade-station/{id}/market", s.handleMarket(domain.EntityKindTradeStation))
-	s.mux.HandleFunc("GET /api/pirbase/{id}/market", s.handleMarket(domain.EntityKindPirbase))
+	// Market reads are dock-gated (phase 10.3.12): the handler resolves the
+	// player's active ship, so they must run under auth to populate the player id.
+	s.mux.Handle("GET /api/station/{id}/market", s.protect(s.handleMarket(domain.EntityKindStation)))
+	s.mux.Handle("GET /api/trade-station/{id}/market", s.protect(s.handleMarket(domain.EntityKindTradeStation)))
+	s.mux.Handle("GET /api/pirbase/{id}/market", s.protect(s.handleMarket(domain.EntityKindPirbase)))
+	s.mux.Handle("GET /api/market-scan", s.protect(http.HandlerFunc(s.handleMarketScan)))
 	s.mux.Handle("POST /api/cmd/trade/buy", s.protect(http.HandlerFunc(s.handleTradeBuy)))
 	s.mux.Handle("POST /api/cmd/trade/sell", s.protect(http.HandlerFunc(s.handleTradeSell)))
 	s.mux.HandleFunc("GET /api/goods", s.handleGoods)

@@ -5,13 +5,16 @@ import (
 
 	"spaceempire/back/internal/api/dto"
 	"spaceempire/back/internal/balance"
+	"spaceempire/back/internal/domain"
 )
 
 // GoodsCatalog is the slice of *balance.Balance the goods endpoint needs.
 // Declared per ISP so handler tests can stub it without spinning up a real
-// catalog file.
+// catalog file. Get backs the trade_up scanner's price-tier classification
+// (phase 10.3.12) — it reads each good's [avg, max] band.
 type GoodsCatalog interface {
 	AllGoods() []balance.Goods
+	Get(id domain.GoodsTypeID) (balance.Goods, bool)
 }
 
 // handleGoods returns the static goods catalog (id, name, space) used by

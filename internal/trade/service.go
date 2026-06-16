@@ -54,6 +54,22 @@ func New(repo Repo, tx TxRunner, bal *balance.Balance) *Service {
 	return &Service{repo: repo, tx: tx, bal: bal}
 }
 
+// MarketDocked returns the station's market, but only when the player's
+// referenced ship is docked at that exact station — same guard Buy/Sell run
+// (phase 10.3.12). The plain Market reader (below) is left ungated for the
+// sector price-scanner, which authorizes through the trade_up module instead
+// of physical presence. The dock check reads through the pool (no transaction):
+// a stale dock here at worst denies a market the player just left.
+func (s *Service) MarketDocked(ctx context.Context, playerID domain.PlayerID, shipID domain.ShipID, owner domain.EntityRef) ([]traderepo.MarketEntry, error) {
+	if !isStationKind(owner.Kind) {
+		return nil, ErrInvalidStationKind
+	}
+	if err := s.authorizeDocked(ctx, s.repo, playerID, shipID, owner); err != nil {
+		return nil, err
+	}
+	return s.Market(ctx, owner)
+}
+
 // Market returns every goods entry the station offers (read-only), with the
 // live price filled into each direction so the UI shows what a trade would
 // actually cost at the current stock level. Reads use the pool directly — a

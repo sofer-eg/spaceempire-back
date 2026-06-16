@@ -14,9 +14,11 @@ import (
 
 	"spaceempire/back/internal/api"
 	"spaceempire/back/internal/api/dto"
+	"spaceempire/back/internal/auth"
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/economy/production"
 	traderepo "spaceempire/back/internal/persistence/trade"
+	"spaceempire/back/internal/sector"
 	"spaceempire/back/internal/trade"
 )
 
@@ -32,6 +34,7 @@ type stubTradeService struct {
 	sellErr       error
 
 	lastMarketOwner domain.EntityRef
+	lastDockedShip  domain.ShipID
 	lastBuyPlayer   domain.PlayerID
 	lastBuyShip     domain.ShipID
 	lastBuyStation  domain.EntityRef
@@ -42,6 +45,15 @@ type stubTradeService struct {
 	lastSellStation domain.EntityRef
 	lastSellType    domain.GoodsTypeID
 	lastSellQty     int64
+}
+
+func (s *stubTradeService) MarketDocked(_ context.Context, _ domain.PlayerID, shipID domain.ShipID, owner domain.EntityRef) ([]traderepo.MarketEntry, error) {
+	s.lastMarketOwner = owner
+	s.lastDockedShip = shipID
+	if s.marketErr != nil {
+		return nil, s.marketErr
+	}
+	return s.marketEntries, nil
 }
 
 func (s *stubTradeService) Market(_ context.Context, owner domain.EntityRef) ([]traderepo.MarketEntry, error) {
@@ -68,16 +80,47 @@ func (s *stubTradeService) Sell(_ context.Context, playerID domain.PlayerID, shi
 	return s.sellResult, nil
 }
 
-// newTradeServer wires a minimal api.Server around the stub. Auth is left
-// off — handlers fall back to PlayerID(0).
+// marketRouter is a minimal api.SectorRouter for the dock-gated market tests:
+// it resolves any player to a fixed primary ship so resolveActiveShip succeeds
+// and the handler reaches MarketDocked. It only needs the two lookup methods;
+// the rest are no-ops.
+type marketRouter struct {
+	primaryShip domain.ShipID
+}
+
+func (marketRouter) Send(_ domain.SectorID, _ sector.Command) error { return nil }
+func (marketRouter) Snapshot(_ domain.SectorID) sector.Snapshot     { return sector.Snapshot{} }
+func (marketRouter) Subscribe(_ context.Context, _ domain.SectorID, _ domain.PlayerID) (*sector.Subscription, func(), error) {
+	return &sector.Subscription{}, func() {}, nil
+}
+func (marketRouter) LookupShipSector(_ domain.ShipID) (domain.SectorID, bool) { return 1, true }
+func (r marketRouter) LookupPrimaryShipByPlayer(_ domain.PlayerID) (domain.ShipID, domain.SectorID, bool) {
+	if r.primaryShip == 0 {
+		return 0, 0, false
+	}
+	return r.primaryShip, 1, true
+}
+
+// newTradeServer wires a minimal api.Server around the stub. A marketRouter
+// resolves a primary ship (id 7) so the dock-gated market handler reaches the
+// service; the buy/sell handlers ignore it. Auth middleware is left off — the
+// market tests inject the player id directly via authedMarketRequest.
 func newTradeServer(t *testing.T, stub *stubTradeService) *api.Server {
 	t.Helper()
-	return api.NewServer(nil, api.Config{
+	return api.NewServer(marketRouter{primaryShip: 7}, api.Config{
 		SnapshotInterval: 10 * time.Millisecond,
 		AckTimeout:       time.Second,
 		SectorID:         1,
 		Trade:            stub,
 	}, nil)
+}
+
+// authedMarketRequest builds a GET request to path with a player id stamped on
+// the context, the way RequireAuth would in production. The market handler
+// reads it to resolve the active ship.
+func authedMarketRequest(path string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	return req.WithContext(auth.ContextWithPlayerID(req.Context(), domain.PlayerID(42)))
 }
 
 func TestUnit_Market_ReturnsEntries(t *testing.T) {
@@ -97,7 +140,7 @@ func TestUnit_Market_ReturnsEntries(t *testing.T) {
 	}
 	srv := newTradeServer(t, stub)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/station/11/market", nil)
+	req := authedMarketRequest("/api/station/11/market")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
@@ -112,12 +155,44 @@ func TestUnit_Market_ReturnsEntries(t *testing.T) {
 	require.NotNil(t, resp.Items[0].SellPrice)
 	assert.EqualValues(t, 40, *resp.Items[0].BuyPrice)
 	assert.EqualValues(t, 80, *resp.Items[0].SellPrice)
+	// The handler must have resolved the docked ship before reading the market.
+	assert.EqualValues(t, 7, stub.lastDockedShip)
+}
+
+func TestUnit_Market_NotDocked_PropagatesError(t *testing.T) {
+	t.Parallel()
+	stub := &stubTradeService{marketErr: trade.ErrNotDocked}
+	srv := newTradeServer(t, stub)
+
+	req := authedMarketRequest("/api/station/11/market")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestUnit_Market_NoActiveShip_Returns400(t *testing.T) {
+	t.Parallel()
+	stub := &stubTradeService{}
+	// A router that resolves no primary ship → resolveActiveShip fails.
+	srv := api.NewServer(marketRouter{primaryShip: 0}, api.Config{
+		SnapshotInterval: 10 * time.Millisecond,
+		AckTimeout:       time.Second,
+		SectorID:         1,
+		Trade:            stub,
+	}, nil)
+
+	req := authedMarketRequest("/api/station/11/market")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 }
 
 func TestUnit_Market_InvalidID(t *testing.T) {
 	t.Parallel()
 	srv := newTradeServer(t, &stubTradeService{})
-	req := httptest.NewRequest(http.MethodGet, "/api/station/abc/market", nil)
+	req := authedMarketRequest("/api/station/abc/market")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -166,7 +241,7 @@ func TestUnit_Market_Station_IncludesProduction(t *testing.T) {
 		NextCycleAt: time.Now().Add(30 * time.Second),
 		CycleTime:   60 * time.Second,
 	}}
-	srv := api.NewServer(nil, api.Config{
+	srv := api.NewServer(marketRouter{primaryShip: 7}, api.Config{
 		SnapshotInterval:  10 * time.Millisecond,
 		AckTimeout:        time.Second,
 		SectorID:          1,
@@ -174,7 +249,7 @@ func TestUnit_Market_Station_IncludesProduction(t *testing.T) {
 		StationProduction: prod,
 	}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/station/11/market", nil)
+	req := authedMarketRequest("/api/station/11/market")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
@@ -197,7 +272,7 @@ func TestUnit_Market_TradeStation_OmitsProduction(t *testing.T) {
 		},
 	}
 	prod := &stubProductionReader{info: production.CycleInfo{Produces: true}}
-	srv := api.NewServer(nil, api.Config{
+	srv := api.NewServer(marketRouter{primaryShip: 7}, api.Config{
 		SnapshotInterval:  10 * time.Millisecond,
 		AckTimeout:        time.Second,
 		SectorID:          1,
@@ -205,7 +280,7 @@ func TestUnit_Market_TradeStation_OmitsProduction(t *testing.T) {
 		StationProduction: prod,
 	}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/trade-station/3/market", nil)
+	req := authedMarketRequest("/api/trade-station/3/market")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 

@@ -19,6 +19,12 @@ import (
 // TradeService is the slice of *trade.Service the HTTP layer needs.
 // Declared per ISP so handler tests can stub it.
 type TradeService interface {
+	// MarketDocked gates the read on the player's ship being docked at the
+	// station — the only path a station's prices reach the SPA, short of the
+	// sector scanner (phase 10.3.12).
+	MarketDocked(ctx context.Context, playerID domain.PlayerID, shipID domain.ShipID, owner domain.EntityRef) ([]traderepo.MarketEntry, error)
+	// Market is the ungated read the trade_up sector scanner uses to collect
+	// prices for every tradeable station in the player's sector.
 	Market(ctx context.Context, owner domain.EntityRef) ([]traderepo.MarketEntry, error)
 	Buy(ctx context.Context, playerID domain.PlayerID, shipID domain.ShipID, station domain.EntityRef, gtype domain.GoodsTypeID, qty int64) (trade.BuyResult, error)
 	Sell(ctx context.Context, playerID domain.PlayerID, shipID domain.ShipID, station domain.EntityRef, gtype domain.GoodsTypeID, qty int64) (trade.SellResult, error)
@@ -41,8 +47,18 @@ func (s *Server) handleMarket(kind domain.EntityKind) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid id")
 			return
 		}
+		// Market prices are gated on physical presence (phase 10.3.12): only a
+		// player whose active ship is docked at this station may read it. The
+		// sector scanner (/api/market-scan) is the sole exception, gated on the
+		// trade_up module instead.
+		playerID, _ := auth.PlayerIDFromContext(r.Context())
+		shipID, ok := s.resolveActiveShip(r.Context(), playerID)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "no active ship")
+			return
+		}
 		owner := domain.EntityRef{Kind: kind, ID: id}
-		entries, err := s.trade.Market(r.Context(), owner)
+		entries, err := s.trade.MarketDocked(r.Context(), playerID, shipID, owner)
 		if err != nil {
 			writeTradeError(w, err)
 			return

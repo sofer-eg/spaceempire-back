@@ -27,6 +27,34 @@ func (s *Service) priceFor(gtype domain.GoodsTypeID, columnPrice, stock, maxStoc
 	return dyn
 }
 
+// PriceTier classifies a unit price as "high", "medium" or "low" relative to a
+// good's [avg, max] price band (phase 10.3.12 sector price-scanner). The band's
+// width is split into thirds: a price at or above the top third is "high", the
+// bottom third "low", the middle "medium". Goods without a usable band
+// (avg<=0 or max<=avg — flat-priced trade-station / pirbase wares such as
+// slaves) are classified relative to AvgPrice alone: at or above avg is "high",
+// below is "low". This is the only signal level-1 trade_up reveals — the real
+// price and stock are masked to 0 until level 2/3.
+func PriceTier(price, avg, max int64) string {
+	if avg <= 0 || max <= avg {
+		if price >= avg {
+			return "high"
+		}
+		return "low"
+	}
+	band := max - avg
+	lowCut := avg + band/3
+	highCut := avg + 2*band/3
+	switch {
+	case price >= highCut:
+		return "high"
+	case price >= lowCut:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
 // dynamicUnitPrice interpolates the price across the good's [avg, max] band by
 // how empty the shelf is. It reports false when the good has no usable band
 // (avg<=0, max<=avg) or no capacity, leaving the caller on the column price.

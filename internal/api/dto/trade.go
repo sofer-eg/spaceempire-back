@@ -83,6 +83,45 @@ func MarketResponseFromRepo(owner domain.EntityRef, entries []traderepo.MarketEn
 	}
 }
 
+// ScanResponse is the body of GET /api/market-scan (phase 10.3.12). It lists
+// the goods on offer at every tradeable station in the player's current sector,
+// with detail gated by the active ship's trade_up module Level: 1 reveals only
+// the price tier, 2 adds the real prices, 3 adds the on-hand stock. Masked
+// numeric fields arrive as 0 (NOT null / omitted) — the SPA branches on Level,
+// not on field presence, so the zeros are intentional and must serialize.
+type ScanResponse struct {
+	Level    int           `json:"level"`
+	Stations []ScanStation `json:"stations"`
+}
+
+// ScanStation is one tradeable station's price board. Owner pins the static;
+// Name is its human-readable type label; Pos lets the SPA point the player at
+// it on the map.
+type ScanStation struct {
+	Owner EntityRef  `json:"owner"`
+	Name  string     `json:"name"`
+	Pos   ScanPos    `json:"pos"`
+	Goods []ScanGood `json:"goods"`
+}
+
+// ScanPos is the station's sector position.
+type ScanPos struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// ScanGood is one good's scanned line. PriceLevel ("high"/"medium"/"low") is
+// always present (level 1+). BuyPrice/SellPrice are the real prices at level
+// 2+, 0 below that. Stock is the on-hand quantity at level 3, 0 below that.
+// The 0-masks are significant — see ScanResponse.
+type ScanGood struct {
+	TypeID     int32  `json:"typeID"`
+	PriceLevel string `json:"priceLevel"`
+	BuyPrice   int64  `json:"buyPrice"`
+	SellPrice  int64  `json:"sellPrice"`
+	Stock      int64  `json:"stock"`
+}
+
 // TradeBuyRequest is the body of POST /api/cmd/trade/buy.
 type TradeBuyRequest struct {
 	ShipID   int64     `json:"shipID"`

@@ -81,7 +81,7 @@ func newScanServer(t *testing.T, equipment []domain.InstalledEquipment) *api.Ser
 		},
 		Statics: domain.SectorStatics{
 			Stations: []domain.Station{
-				{ID: 11, SectorID: 1, Pos: domain.Vec2{X: 100, Y: 200}, Built: true},
+				{ID: 11, Type: 7, SectorID: 1, Pos: domain.Vec2{X: 100, Y: 200}, Built: true},
 			},
 		},
 	}
@@ -128,6 +128,7 @@ func TestUnit_MarketScan_Level1_TierOnly_PricesAndStockMaskedToZero(t *testing.T
 	require.Len(t, resp.Stations, 1)
 	st := resp.Stations[0]
 	assert.Equal(t, "Станция", st.Name)
+	assert.Equal(t, 7, st.StationType, "station_types catalog id threaded for the SPA to resolve a precise name")
 	assert.Equal(t, int(domain.EntityKindStation), st.Owner.Kind)
 	assert.EqualValues(t, 11, st.Owner.ID)
 	assert.InDelta(t, 100, st.Pos.X, 0.001)

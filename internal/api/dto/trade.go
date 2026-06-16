@@ -95,13 +95,17 @@ type ScanResponse struct {
 }
 
 // ScanStation is one tradeable station's price board. Owner pins the static;
-// Name is its human-readable type label; Pos lets the SPA point the player at
-// it on the map.
+// Name is a generic per-kind fallback label; StationType is the station_types
+// catalog id of a production station (0 for trade-stations / pirbases, whose
+// Type field is not a catalog id) so the SPA can resolve a precise type name
+// and tell several factories in one sector apart; Pos lets the SPA point the
+// player at it on the map.
 type ScanStation struct {
-	Owner EntityRef  `json:"owner"`
-	Name  string     `json:"name"`
-	Pos   ScanPos    `json:"pos"`
-	Goods []ScanGood `json:"goods"`
+	Owner       EntityRef  `json:"owner"`
+	Name        string     `json:"name"`
+	StationType int        `json:"stationType"`
+	Pos         ScanPos    `json:"pos"`
+	Goods       []ScanGood `json:"goods"`
 }
 
 // ScanPos is the station's sector position.

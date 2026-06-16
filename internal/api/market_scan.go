@@ -62,19 +62,23 @@ func (s *Server) scanStations(ctx context.Context, statics domain.SectorStatics,
 	out := make([]dto.ScanStation, 0, len(statics.Stations)+len(statics.TradeStations)+len(statics.Pirbases))
 	for _, st := range statics.Stations {
 		owner := domain.EntityRef{Kind: domain.EntityKindStation, ID: int64(st.ID)}
-		if scan, ok := s.scanOne(ctx, owner, "Станция", st.Pos, level); ok {
+		// st.Type is the station_types catalog id; the SPA resolves the precise
+		// type name from it so several factories in one sector are distinct.
+		if scan, ok := s.scanOne(ctx, owner, "Станция", st.Type, st.Pos, level); ok {
 			out = append(out, scan)
 		}
 	}
 	for _, ts := range statics.TradeStations {
 		owner := domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: int64(ts.ID)}
-		if scan, ok := s.scanOne(ctx, owner, "Торговая станция", ts.Pos, level); ok {
+		// TradeStation.Type is the central/ring classification, not a catalog id
+		// — leave StationType 0 so the SPA labels it by kind.
+		if scan, ok := s.scanOne(ctx, owner, "Торговая станция", 0, ts.Pos, level); ok {
 			out = append(out, scan)
 		}
 	}
 	for _, pb := range statics.Pirbases {
 		owner := domain.EntityRef{Kind: domain.EntityKindPirbase, ID: int64(pb.ID)}
-		if scan, ok := s.scanOne(ctx, owner, "Пиратская база", pb.Pos, level); ok {
+		if scan, ok := s.scanOne(ctx, owner, "Пиратская база", 0, pb.Pos, level); ok {
 			out = append(out, scan)
 		}
 	}
@@ -82,25 +86,34 @@ func (s *Server) scanStations(ctx context.Context, statics domain.SectorStatics,
 }
 
 // scanOne reads one station's market and projects it onto a ScanStation at the
-// given level. ok=false when the station offers nothing or the read errors.
-func (s *Server) scanOne(ctx context.Context, owner domain.EntityRef, name string, pos domain.Vec2, level int) (dto.ScanStation, bool) {
+// given level. stationType is the station_types catalog id for a production
+// station (0 for trade-stations / pirbases). ok=false when the station offers
+// nothing or the read errors.
+func (s *Server) scanOne(ctx context.Context, owner domain.EntityRef, name string, stationType int, pos domain.Vec2, level int) (dto.ScanStation, bool) {
 	entries, err := s.trade.Market(ctx, owner)
 	if err != nil {
 		s.logger.Warn("market scan: station read", "kind", int(owner.Kind), "id", owner.ID, "err", err)
 		return dto.ScanStation{}, false
 	}
-	if len(entries) == 0 {
-		return dto.ScanStation{}, false
-	}
 	goods := make([]dto.ScanGood, 0, len(entries))
 	for _, e := range entries {
+		// A row with neither a buy nor a sell price is a degenerate market state
+		// (ref would be 0 and the tier meaningless) — skip it rather than emit a
+		// bogus comparison cell.
+		if e.BuyPrice == nil && e.SellPrice == nil {
+			continue
+		}
 		goods = append(goods, s.scanGood(e, level))
 	}
+	if len(goods) == 0 {
+		return dto.ScanStation{}, false
+	}
 	return dto.ScanStation{
-		Owner: dto.EntityRef{Kind: int(owner.Kind), ID: owner.ID},
-		Name:  name,
-		Pos:   dto.ScanPos{X: pos.X, Y: pos.Y},
-		Goods: goods,
+		Owner:       dto.EntityRef{Kind: int(owner.Kind), ID: owner.ID},
+		Name:        name,
+		StationType: stationType,
+		Pos:         dto.ScanPos{X: pos.X, Y: pos.Y},
+		Goods:       goods,
 	}, true
 }
 

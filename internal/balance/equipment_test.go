@@ -42,23 +42,31 @@ func TestUnit_NewEquipments_Rejects(t *testing.T) {
 }
 
 // TestUnit_LoadEquipment_RealConfig loads the converted catalog and checks it
-// against ct_updates plus the X-BTF gap upgrades: 141 rows, 24 distinct types
-// (the +2 are up_rudder phase 10.3.15 and up_cargobay phase 10.3.16), with
-// spot-checks of the core modules and the up_accumulator→up_generator energy
-// dependency.
+// against ct_updates plus the X-BTF gap upgrades: 142 rows, 25 distinct types
+// (the +3 are up_rudder phase 10.3.15, up_cargobay phase 10.3.16 and
+// up_ore_scanner phase 10.3.19), with spot-checks of the core modules and the
+// up_accumulator→up_generator energy dependency.
 func TestUnit_LoadEquipment_RealConfig(t *testing.T) {
 	cat, err := balance.LoadEquipmentFromFile("../../configs/equipment.yaml")
 	require.NoError(t, err)
-	require.Equal(t, 141, cat.EquipmentCount())
+	require.Equal(t, 142, cat.EquipmentCount())
 
 	seenTypes := map[string]bool{}
 	for _, e := range cat.AllEquipment() {
 		seenTypes[e.Type] = true
 	}
-	assert.Len(t, seenTypes, 24, "24 distinct equipment types")
-	for _, want := range []string{"up_engine", "up_shield", "up_drill", "up_jump_drive", "up_generator", "up_accumulator", "up_rudder", "up_cargobay"} {
+	assert.Len(t, seenTypes, 25, "25 distinct equipment types")
+	for _, want := range []string{"up_engine", "up_shield", "up_drill", "up_jump_drive", "up_generator", "up_accumulator", "up_rudder", "up_cargobay", "up_ore_scanner"} {
 		assert.Truef(t, seenTypes[want], "type %s must be present", want)
 	}
+
+	// id 142 = up_ore_scanner (any class): a passive info module — single level,
+	// no energy draw, no dependency (phase 10.3.19).
+	ore, ok := cat.GetEquipment(142)
+	require.True(t, ok)
+	assert.Equal(t, "up_ore_scanner", ore.Type)
+	assert.Equal(t, 0, ore.ShipClass, "available to any ship class")
+	assert.Equal(t, 1, ore.MaxLevel)
 
 	// id 95 = up_drill M1 (class 1): price 1440000, depends on up_accumulator.
 	e, ok := cat.GetEquipment(95)

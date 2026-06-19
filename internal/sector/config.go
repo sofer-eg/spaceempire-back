@@ -13,10 +13,11 @@ type Config struct {
 	// per-tick movement step so the player has a forgiving window.
 	GateRange float64
 	// DockRange is the radius in world units a ship must be within of a
-	// static dockable object before DockCommand succeeds. Phase 3.12
-	// dropped tick-driven auto-docking — docking is always player-issued
-	// now. Smaller than GateRange because the player must actively decide
-	// to dock, so a tight tolerance prevents stray clicks from succeeding.
+	// static dockable object before DockCommand succeeds. Phase 3.12 dropped
+	// the unconditional tick-driven auto-docking; phase 10.3.10 brought it
+	// back gated on the up_docking module (tryAutoDock) — ships without it are
+	// still player-issued only. Smaller than GateRange because manual docking
+	// is a deliberate act, so a tight tolerance prevents stray clicks.
 	DockRange float64
 	// AOIRadius is the per-player Area of Interest radius in world units.
 	// Each subscription only receives patches for ships within this radius

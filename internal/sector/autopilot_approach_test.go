@@ -81,8 +81,10 @@ func TestUnit_Autopilot_DoesNotDockAutomatically(t *testing.T) {
 	shipPos := domain.Vec2{X: 0, Y: 0}
 	w := newApproachWorker(t, shipPos, stationPos)
 
-	// Generous tick budget — coverage + 10 stand-by ticks. If auto-dock
-	// were back, Docked would flip during one of these.
+	// newApproachWorker fits no up_docking module, so the phase 10.3.10
+	// tick-driven auto-dock stays off: a generous tick budget (coverage + 10
+	// stand-by ticks) must leave the ship parked, not docked. The positive
+	// path lives in TestUnit_AutoDock_WithDockingModule_Docks.
 	for i := 0; i < 30; i++ {
 		w.Tick(context.Background())
 	}

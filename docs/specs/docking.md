@@ -83,36 +83,54 @@ type Course struct {
 
 Позиция (`ship.Pos`) **не** изменяется — корабль остаётся в точке статика. Этого достаточно для MVP; небольшое смещение «по направлению наружу станции» добавим, если коллизии станут проблемой.
 
-## 3. Авто-стыковка (tick-driven)
+## 3. Авто-стыковка (tick-driven, гейт `up_docking` — phase 10.3.10)
 
-Аналог `tryAutoJump` для статиков:
+> **Историческая правка.** В фазе 3.2 авто-стыковка планировалась через
+> булев флаг `Ship.AutoPilotModule` и поле `Course.Dock`. Фаза 3.12 сняла
+> tick-driven автодок целиком (стыковка только по команде игрока). Фаза
+> 10.3.10 вернула его **под гейт модуля `up_docking`** («Стыковочная
+> система», порт оригинального гейта SP `Docking`, `db.sql:4413`), а курс
+> со стыковкой хранится в `Course.Approach *EntityRef` (а не `Course.Dock`),
+> оснащение — в `Ship.Equipment []InstalledEquipment` (а не отдельном флаге).
 
-В каждом тике после `applyMovement`:
+Реализация — `tryAutoDock` (`internal/sector/autodock.go`), аналог
+`tryAutoJump` для статиков. В каждом тике **после `applyMovement`**:
 
 ```
 for ship in sector.ships:
     if ship.Docked != nil:                                          # уже пристыкован
         continue
-    if !ship.AutoPilotModule:                                       # нет модуля — не стыкуется автоматически
+    if ship.FinalTarget == nil || ship.FinalTarget.Approach == nil: # нет курса со стыковкой
         continue
-    if ship.FinalTarget == nil || ship.FinalTarget.Dock == nil:     # нет курса со стыковкой
+    if ship.SectorID != ship.FinalTarget.Sector:                    # ещё лететь через ворота
         continue
-    if ship.FinalTarget.Sector != ship.SectorID:                    # ещё лететь через ворота
+    if shipEquipmentLevel(ship, "up_docking") < 1:                  # нет модуля — не стыкуется автоматически
         continue
-    target := lookupStatic(sector.statics, *ship.FinalTarget.Dock)
+    target := lookupStatic(sector.statics, *ship.FinalTarget.Approach)
     if target == nil:                                               # цель исчезла (битая, разрушена и т.п.)
-        ship.FinalTarget = nil
-        markDirty(ship.ID)
         continue
     if !inRange(ship.Pos, target.ObjectPos(), DockRange):
         continue
-    Dock(ship, target)                                              # успех — immediate persist
-    markDirty(ship.ID)
+    executeDock(ship, target)                                       # успех — immediate persist
 ```
+
+Без модуля корабль доезжает до парковки `DockRange/2` (`resolveApproach`) и
+ждёт ручной `/api/cmd/dock`. С модулем — стыкуется на первом тике, когда
+оказывается в пределах `DockRange` цели; `executeDock` приклеивает корабль к
+позиции статика и обнуляет скорость/курс. Стыковка переиспользует тот же
+`executeDock`, что и ручной `DockCommand` — переход состояния живёт в одной
+точке.
 
 `lookupStatic` пробегает `sector.statics` по `EntityRef.Kind` и `ID`.
 
-`DockRange` живёт в `sector.Config` рядом с `GateRange` (значение по умолчанию — синхронно с GateRange, 30).
+`DockRange` живёт в `sector.Config` рядом с `GateRange` (значение по умолчанию — 3).
+
+> **`up_exdocking` («Модуль внешней стыковки») — вне скоупа.** В оригинале
+> это отдельная мультитиковая механика стыковки к **подвижному** объекту
+> (чужому кораблю в космосе): `ExternalDockInitiate` / `ExternalDockCheck`,
+> состояние в `up_status` (`docked,<target>` / счётчик ходов). Go-порт
+> ship-to-ship-докинга к подвижной цели не имеет вообще, поэтому
+> `up_exdocking` требует сначала отдельной крупной фичи и здесь не вводится.
 
 ## 4. Ручная стыковка/расстыковка
 
@@ -178,8 +196,8 @@ Response:
 | Dock когда далеко | `ErrDockOutOfRange` |
 | Dock к несуществующему target | `ErrTargetNotFound` (статик не найден в sector.statics) |
 | Undock когда не пристыкован | `ErrNotDocked` |
-| Авто-стыковка без модуля | Корабль приходит в Pos и стоит; `Course` остаётся, ничего не происходит, пока игрок не вызовет `/dock` |
-| Авто-стыковка к разрушенному за время полёта статику | `Course.Dock` сбрасывается (`FinalTarget = nil`) |
+| Авто-стыковка без модуля `up_docking` | Корабль приходит в Pos и паркуется (`DockRange/2`); `Course.Approach` остаётся, ничего не происходит, пока игрок не вызовет `/dock` |
+| Авто-стыковка к разрушенному за время полёта статику | `lookupStatic` не находит цель → `tryAutoDock` пропускает корабль; он паркуется в последней `Course.Approach.Pos` |
 | Прыжок через ворота с `Course.Dock` | `executeJump` сохраняет `FinalTarget` (включая `Dock`) — авто-стыковка сработает в конечном секторе |
 | Set-course во время стыковки | команда игнорируется (или ошибка); состояние Docked фиксирует корабль |
 

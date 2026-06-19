@@ -54,6 +54,12 @@ type Ship struct {
 	// at. Phase 4.2 only emits EntityKindShip targets here. Cleared on
 	// cease-fire, target death, or sector handoff.
 	AttackTarget *EntityRef `json:"attackTarget,omitempty"`
+	// MiningTarget, when set, is the id of the asteroid the ship is sustained-
+	// mining (phase 10.3.6/10.3.21). A bare asteroid id (asteroids are not an
+	// EntityKind). The SPA reads it on its own active ship to collapse the
+	// «Бурить»/«Прекратить добычу» affordance into one toggle, mirroring how
+	// AttackTarget flips «Атаковать»/«Прекратить огонь».
+	MiningTarget *int64 `json:"miningTarget,omitempty"`
 	// IsSpacesuit marks the weak pilot suit a player flies after their ship is
 	// destroyed (phase 10.1) so the SPA can show a "СКАФАНДР" indicator.
 	IsSpacesuit bool `json:"isSpacesuit,omitempty"`
@@ -202,6 +208,10 @@ func ShipFromDomain(s domain.Ship, hull HullCategoryResolver) Ship {
 			Kind: int(s.AttackTarget.Kind),
 			ID:   s.AttackTarget.ID,
 		}
+	}
+	if s.MiningTarget != nil {
+		id := int64(*s.MiningTarget)
+		out.MiningTarget = &id
 	}
 	return out
 }

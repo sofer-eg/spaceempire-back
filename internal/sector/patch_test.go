@@ -90,3 +90,29 @@ func TestUnit_BuildPatch_DetectsTargetClear(t *testing.T) {
 	p := buildPatch(prev, curr, 1)
 	require.Len(t, p.Updated, 1)
 }
+
+// TestUnit_BuildPatch_DetectsMiningTargetChange guards the «Бурить/Стоп» toggle
+// (phase 10.3.21): a parked ship that only arms or clears its MiningTarget —
+// no Pos/Vel/Energy change — must still be broadcast, or the SPA never learns
+// the mining state flipped.
+func TestUnit_BuildPatch_DetectsMiningTargetChange(t *testing.T) {
+	t.Parallel()
+
+	a7 := domain.AsteroidID(7)
+
+	// Arm: nil -> set.
+	armed := buildPatch(
+		map[domain.ShipID]domain.Ship{1: {ID: 1, Pos: domain.Vec2{X: 1, Y: 1}}},
+		map[domain.ShipID]domain.Ship{1: {ID: 1, Pos: domain.Vec2{X: 1, Y: 1}, MiningTarget: &a7}},
+		1,
+	)
+	require.Len(t, armed.Updated, 1, "arming mining must surface the ship")
+
+	// Stop: set -> nil.
+	stopped := buildPatch(
+		map[domain.ShipID]domain.Ship{1: {ID: 1, Pos: domain.Vec2{X: 1, Y: 1}, MiningTarget: &a7}},
+		map[domain.ShipID]domain.Ship{1: {ID: 1, Pos: domain.Vec2{X: 1, Y: 1}}},
+		1,
+	)
+	require.Len(t, stopped.Updated, 1, "clearing mining must surface the ship")
+}

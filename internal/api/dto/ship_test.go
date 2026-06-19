@@ -38,6 +38,22 @@ func TestUnit_ShipFromDomain_NilResolver(t *testing.T) {
 	assert.Empty(t, got.HullCategory)
 }
 
+// TestUnit_ShipFromDomain_MiningTarget checks the sustained-mining asteroid id
+// is surfaced as a bare id, and omitted when the ship is not mining (phase
+// 10.3.21 — drives the SPA's «Бурить/Стоп» toggle).
+func TestUnit_ShipFromDomain_MiningTarget(t *testing.T) {
+	t.Parallel()
+
+	ast := domain.AsteroidID(42)
+	mining := dto.ShipFromDomain(domain.Ship{ID: 1, MiningTarget: &ast}, nil)
+	if assert.NotNil(t, mining.MiningTarget) {
+		assert.Equal(t, int64(42), *mining.MiningTarget)
+	}
+
+	idle := dto.ShipFromDomain(domain.Ship{ID: 2}, nil)
+	assert.Nil(t, idle.MiningTarget, "non-mining ship omits miningTarget")
+}
+
 // TestUnit_ShipsFromDomain_AppliesResolver checks the batch path stamps every
 // ship via the same resolver.
 func TestUnit_ShipsFromDomain_AppliesResolver(t *testing.T) {

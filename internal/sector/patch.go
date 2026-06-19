@@ -142,6 +142,9 @@ func shipEqual(a, b domain.Ship) bool {
 	if !entityRefPtrEqual(a.AttackTarget, b.AttackTarget) {
 		return false
 	}
+	if !asteroidIDPtrEqual(a.MiningTarget, b.MiningTarget) {
+		return false
+	}
 	switch {
 	case a.Target == nil && b.Target == nil:
 		return true
@@ -155,6 +158,20 @@ func shipEqual(a, b domain.Ship) bool {
 // entityRefPtrEqual reports value equality of two *EntityRef pointers,
 // treating two nils as equal.
 func entityRefPtrEqual(a, b *domain.EntityRef) bool {
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return *a == *b
+	}
+}
+
+// asteroidIDPtrEqual reports value equality of two *AsteroidID pointers,
+// treating two nils as equal. Used so a mining-state change (phase 10.3.21)
+// is detected even when nothing else about the ship moved.
+func asteroidIDPtrEqual(a, b *domain.AsteroidID) bool {
 	switch {
 	case a == nil && b == nil:
 		return true

@@ -158,6 +158,24 @@ func (c *ShipClasses) GetShipClass(id domain.ShipClassID) (ShipClass, bool) {
 	return s, ok
 }
 
+// HangerOf returns the hangar capacity/footprint of a ship class as a
+// domain.Hanger (phase 10.3.24), so the sector worker can gate ship-to-ship
+// docking without depending on the balance package. An unknown class id (0 =
+// spacesuit/legacy, or a missing row) yields the zero Hanger — no capacity and
+// no footprint, which rejects ship-to-ship docking for that ship.
+func (c *ShipClasses) HangerOf(id domain.ShipClassID) domain.Hanger {
+	s, ok := c.byID[id]
+	if !ok {
+		return domain.Hanger{}
+	}
+	return domain.Hanger{
+		Capital:   s.HangerCapital,
+		Small:     s.HangerSmall,
+		ShipType:  s.HangerShipType,
+		ShipSpace: s.HangerShipSpace,
+	}
+}
+
 // AllShipClasses returns every loaded ship class, ordered as the YAML. The
 // returned slice is a defensive copy.
 func (c *ShipClasses) AllShipClasses() []ShipClass {

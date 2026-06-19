@@ -26,14 +26,34 @@ var (
 	ErrTargetNotFound = errors.New("sector: dock target not found")
 	// ErrInvalidDockTarget is returned when the EntityKind is not one of
 	// the four static dockable kinds (station / shipyard / trade station /
-	// pirbase).
+	// pirbase) nor a host ship (EntityKindShip).
 	ErrInvalidDockTarget = errors.New("sector: invalid dock target kind")
+	// ErrDockSelf is returned when a ship is told to dock to itself.
+	ErrDockSelf = errors.New("sector: cannot dock ship to itself")
+	// ErrDockNotOpen is returned when docking to another player's ship whose
+	// hangar is closed to outsiders (host.IsOpen == false). Own ships are
+	// always dockable. Ported from the SP `object_opened` gate.
+	ErrDockNotOpen = errors.New("sector: host ship not open for docking")
+	// ErrDockHostile is returned when docking to a host ship the docking
+	// ship's owner is hostile to. Ported from the SP relation gate.
+	ErrDockHostile = errors.New("sector: host ship is hostile")
+	// ErrNoHangar is returned when the host ship has no hangar of the type
+	// the docking ship needs, or the docking ship has no hangar footprint at
+	// all. Ported from the SP restriction_type 6/2.
+	ErrNoHangar = errors.New("sector: host ship has no suitable hangar")
+	// ErrHangarFull is returned when the host ship's hangar of the needed
+	// type cannot fit the docking ship's footprint. Ported from the SP
+	// restriction_type 7.
+	ErrHangarFull = errors.New("sector: host ship hangar full")
 )
 
 // DockCommand is the player-issued request to dock the given ship to the
-// referenced static. The worker validates ownership, the static's existence,
-// and Config.DockRange before mutating state. Manual dock works regardless
-// of Ship.AutoPilotModule — that flag only gates the tick-driven auto-dock.
+// referenced target — a static (station/shipyard/trade station/pirbase) or,
+// since phase 10.3.24, a host ship (Target.Kind == EntityKindShip). The worker
+// validates ownership, the target's existence, and Config.DockRange before
+// mutating state; ship targets add open/owner, hostility and hangar-capacity
+// gates. Manual dock requires no module — that gates only the tick-driven
+// auto-dock.
 type DockCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
@@ -51,6 +71,14 @@ func (c DockCommand) apply(w *Worker, s *sectorState) {
 		res.Err = ErrForbidden
 	}
 	if res.Err != nil {
+		replyOnce(c.Reply, res)
+		return
+	}
+	// Ship-to-ship docking (phase 10.3.24) takes its own path: a host ship is
+	// not a DockableObject and carries extra gates (open/owner, hostility,
+	// hangar capacity) that statics do not.
+	if c.Target.Kind == domain.EntityKindShip {
+		res.Err = w.dockToShip(s, ship, c.Target)
 		replyOnce(c.Reply, res)
 		return
 	}

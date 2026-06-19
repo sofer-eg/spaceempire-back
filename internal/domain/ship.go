@@ -118,9 +118,13 @@ type Ship struct {
 	// from CurrentTargetRef (which is the navigation target). Phase
 	// 4.2 only supports EntityKindShip targets; the worker enforces.
 	AttackTarget *EntityRef
-	// Docked, when non-nil, marks the ship as parked inside a static
-	// dockable object (station/shipyard/trade station/pirbase). A docked
-	// ship does not move and ignores Target/FinalTarget. Cleared by undock.
+	// Docked, when non-nil, marks the ship as parked inside a dockable
+	// object: a static (station/shipyard/trade station/pirbase) or — since
+	// phase 10.3.24 — another (moving) host ship (Docked.Kind ==
+	// EntityKindShip), carried along in the host's hangar. A docked ship does
+	// not move under its own thrust and ignores Target/FinalTarget; a
+	// ship-docked one is snapped to the host's position each tick
+	// (carryDockedShips). Cleared by undock.
 	Docked *EntityRef
 	// MiningTarget, when non-nil, is the asteroid the player is sustained-
 	// mining (phase 10.3.6, gated on up_drill). Each tick the worker holds

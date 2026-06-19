@@ -373,6 +373,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			return relationsSvc.IsHostile(domain.PlayerRef(*owner), domain.PlayerRef(ship.PlayerID))
 		}),
 		sector.WithRelations(relationsSvc),
+		// 10.3.24: ship-class hangar resolver for ship-to-ship docking
+		// (*balance.ShipClasses satisfies sector.HangerStats via HangerOf).
+		sector.WithHangerStats(shipClasses),
 		// 7.1: per-tick telemetry (tick duration, ship count, queue depth,
 		// overruns, handoffs, time-scale) into the Prometheus registry.
 		sector.WithMetrics(metrics),

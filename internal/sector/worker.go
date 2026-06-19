@@ -111,6 +111,17 @@ type Relations interface {
 	Get(a, b domain.EntityRef) domain.Relation
 }
 
+// HangerStats resolves a ship class's hangar capacity and footprint (phase
+// 10.3.24): the worker needs it to gate ship-to-ship docking (whether a host
+// ship can carry the docking ship in its hangar). Keyed by ship.ShipClassID —
+// the data lives in balance.ShipClass and is immutable per class, so no per-row
+// denormalization is needed. Injected via WithHangerStats; nil disables
+// ship-to-ship docking (every ship resolves to the zero Hanger → no hangar).
+// Satisfied by an app-side adapter over *balance.ShipClasses.
+type HangerStats interface {
+	HangerOf(classID domain.ShipClassID) domain.Hanger
+}
+
 // AIStateRepo is the persistence surface for NPC AI controller state
 // (phase 5.1). The real implementation lives in internal/persistence/
 // aistate. Wired via WithAI together with the registry and the cold-start
@@ -199,6 +210,12 @@ type Worker struct {
 	// relations is the ship-vs-ship hostility oracle (6.2a) used by laser
 	// friendly-fire gating and drone auto-acquire. Nil disables both.
 	relations Relations
+
+	// hangers resolves a ship class's hangar capacity/footprint for
+	// ship-to-ship docking (phase 10.3.24). Nil disables ship-to-ship docking
+	// (the capacity check treats every ship as having no hangar). Wired via
+	// WithHangerStats.
+	hangers HangerStats
 
 	// police runs the per-tick contraband scan (phase 9.4); policeRaces is the
 	// set of races whose navy acts as police; policeCfg tunes range/cooldown.
@@ -414,6 +431,14 @@ func WithMinerLogistics(l MinerLogistics) Option {
 func WithRelations(r Relations) Option {
 	return func(w *Worker) {
 		w.relations = r
+	}
+}
+
+// WithHangerStats injects the ship-class hangar resolver used to gate
+// ship-to-ship docking (phase 10.3.24). Nil disables ship-to-ship docking.
+func WithHangerStats(h HangerStats) Option {
+	return func(w *Worker) {
+		w.hangers = h
 	}
 }
 
@@ -727,6 +752,7 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	w.tickPlayerMining(ctx, s)
 	resolveAutopilot(s, w.router, w.cfg.DockRange)
 	applyMovement(s, dt)
+	carryDockedShips(s)
 	w.tryAutoJump(s)
 	w.tryAutoDock(s)
 	chargeShields(s)

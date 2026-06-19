@@ -175,7 +175,8 @@ func TestUnit_DockCommand_InvalidKindFails(t *testing.T) {
 	err := sendAndWait(t, w, func(reply chan<- sector.CmdResult) sector.Command {
 		return sector.DockCommand{
 			PlayerID: 7, ShipID: 1,
-			Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: 1}, // ship-target not in MVP
+			// Containers are not dockable; ship targets are (phase 10.3.24).
+			Target: domain.EntityRef{Kind: domain.EntityKindContainer, ID: 1},
 			Reply:  reply,
 		}
 	})

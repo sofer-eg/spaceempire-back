@@ -119,6 +119,9 @@ func (c MoveCommand) apply(w *Worker, s *sectorState) {
 		// A fresh move order ends any sustained mining (phase 10.3.6): the
 		// player is flying the ship off station, so it can no longer drill.
 		ship.MiningTarget = nil
+		// A fresh move also abandons an in-progress external dock (phase
+		// 10.3.23) — the clamps cannot engage while flying off.
+		ship.ExternalDock = nil
 		s.markDirty(c.ShipID)
 	}
 	replyOnce(c.Reply, res)
@@ -172,6 +175,8 @@ func (c SetCourseCommand) apply(w *Worker, s *sectorState) {
 		} else {
 			ship.CurrentTargetRef = nil
 		}
+		// Arming a course abandons an in-progress external dock (phase 10.3.23).
+		ship.ExternalDock = nil
 		s.markDirty(c.ShipID)
 	}
 	replyOnce(c.Reply, res)

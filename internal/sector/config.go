@@ -67,6 +67,10 @@ type Config struct {
 	// build time. Below this the ship cannot drill this tick. 0 disables the
 	// gate (unit tests / a catalog with no up_drill energy_usage).
 	MineEnergyCost int
+	// ExternalDockTurns is how many ticks the up_exdocking external-docking
+	// process runs before it attaches (phase 10.3.23, port of the SP
+	// dock_suspension_time = 1). Default 1.
+	ExternalDockTurns int
 }
 
 func (c Config) withDefaults() Config {
@@ -111,6 +115,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MineRate <= 0 {
 		c.MineRate = 5
+	}
+	if c.ExternalDockTurns <= 0 {
+		c.ExternalDockTurns = 1
 	}
 	return c
 }

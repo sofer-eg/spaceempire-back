@@ -202,6 +202,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	s.mux.Handle("POST /api/cmd/move", s.protect(http.HandlerFunc(s.handleMove)))
 	s.mux.Handle("POST /api/cmd/set-course", s.protect(http.HandlerFunc(s.handleSetCourse)))
 	s.mux.Handle("POST /api/cmd/dock", s.protect(http.HandlerFunc(s.handleDock)))
+	s.mux.Handle("POST /api/cmd/exdock", s.protect(http.HandlerFunc(s.handleExternalDock)))
 	s.mux.Handle("POST /api/cmd/undock", s.protect(http.HandlerFunc(s.handleUndock)))
 	s.mux.Handle("POST /api/cmd/jump", s.protect(http.HandlerFunc(s.handleJump)))
 	s.mux.Handle("POST /api/cmd/attack", s.protect(http.HandlerFunc(s.handleAttack)))

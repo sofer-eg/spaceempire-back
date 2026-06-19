@@ -142,37 +142,56 @@ for ship in s.ships where ship.Docked.Kind == EntityKindShip:
 
 ---
 
-# Часть 2 — up_exdocking (TASK-100.3.23, будущее)
+# Часть 2 — up_exdocking (TASK-100.3.23, реализовано)
 
-Строится поверх §1–§5. Документ фиксирует целевой дизайн; реализуется отдельно.
-
-## 6. Мультитиковая внешняя стыковка
-
-Состояние в оригинале — строка `updates.up_status`:
+Строится поверх §1–§5. Состояние в оригинале — строка `updates.up_status`:
 `<turn_count>,<target_full_id>` (в процессе) → `docked,<target_full_id>`
-(завершено) → `none` (сброс при отлёте). Порт: новое поле на `Ship`
-(например `ExternalDock *ExternalDockState{ Target EntityRef; TurnsLeft int }`,
-RAM + persist) либо переиспользование `up_status` через equipment-state.
+(завершено) → `none` (сброс при отлёте).
 
-- **Initiate** (порт `ExternalDockInitiate`): гейт модуля `up_exdocking`
-  (`shipEquipmentLevel >= 1`; по каталогу `equipment.yaml` ставится только на
-  класс 7), правило «процесс уже идёт и класс ≠ 7 → нельзя переинициировать»,
-  relation+range гейт (§3 переиспользуется), затем запуск счётчика.
-- **Per-tick** (порт `TO_ShipMovement` exdock-блок): инкремент счётчика;
-  по достижении `dock_suspension_time` (=1) → `docked` + системное сообщение
-  «Процесс стыковки завершён»; при отлёте (корабль снова `Vel != 0` / undock) →
-  сброс.
-- **Check** (порт `ExternalDockCheck`): статус 2=none/3=in-progress/4=docked для
-  UI.
-- **Назначение модуля**: внешний док разрешает прицепиться к носителю, когда
-  обычный ангарный док невозможен (ангар полон) — класс 7 (TL/Супертранспорт)
-  обходит ограничение.
+## 6. Мультитиковая внешняя стыковка (реализация)
+
+**Состояние** — поле `Ship.ExternalDock *domain.ExternalDock{ Target EntityRef;
+TurnsLeft int }`, **RAM-only transient** (как `MiningTarget`): не персистится
+(оригинальный счётчик живёт ~1 тик). Воркер на каждом тике **заменяет**
+указатель (не мутирует `TurnsLeft` на месте), чтобы алиасящий снапшот не словил
+гонку. В WS DTO не попадает (`domain.Ship` без json-тегов).
+
+**Initiate** — `ExternalDockCommand{PlayerID, ShipID, Target, Reply}`
+(`internal/sector/external_dock.go`), `POST /api/cmd/exdock`:
+- гейты: ownership, `Docked == nil`, **модуль `up_exdocking`**
+  (`shipEquipmentLevel >= 1` → иначе `ErrEquipmentRequired`). В каталоге
+  `equipment.yaml` модуль ставится **только на класс 7**, поэтому оригинальное
+  правило «процесс идёт и класс ≠ 7 → нельзя переинициировать» выполняется
+  автоматически: любой носитель модуля — класс 7, переинициация просто
+  перезапускает счётчик.
+- `externalDockGates`: self / sector / range / **не-враждебность** (§3 без гейтов
+  open/owner и вместимости — внешний док для того и существует).
+- успех: `ExternalDock = {Target, TurnsLeft: cfg.ExternalDockTurns}` (default 1 =
+  `dock_suspension_time`).
+
+**Per-tick** — `tickExternalDock` (tickSector, после `carryDockedShips`):
+- `Docked != nil` → процесс снимается.
+- `TurnsLeft > 1` → декремент (замена указателя).
+- последний тик → `completeExternalDock`: ре-валидация `externalDockGates`
+  (носитель мог уйти из радиуса) и `executeExternalAttach` → `applyShipDock`
+  (тот же ride-along attach, что у foundation, **но без проверки вместимости
+  ангара** — внешний захват за корпус). Провал валидации/исчезновение носителя →
+  тихая отмена (debug-лог).
+
+**Отмена** — `MoveCommand` / `SetCourseCommand` сбрасывают `ExternalDock` (порт
+«сброса при отлёте `fly_mode=0`»). Завершённый внешний док — это обычный
+`Docked`, поэтому отстыковка/отлёт работают через тот же auto-undock foundation.
+
+**`ExternalDockCheck` (статус 2/3/4 для UI)** — не реализован: `ExternalDock`
+есть в RAM-снапшоте, но в WS DTO/фронт не проброшен (отдельный фронт-таск при
+необходимости). Бэкенд-механика (AC #2/#3) закрыта.
 
 ## 7. messages_sys
 
-В Go-порте **нет** таблицы сообщений игроку (есть bus + WS push, rent-нотификации).
-Сообщения «Стыковка запрещена/завершена» из `ExternalDockInitiate` маппятся в
-WS-нотификацию игроку либо опускаются в MVP .23. Решается в рамках .23.
+В Go-порте **нет** таблицы сообщений игроку (есть bus + WS push). Системные
+сообщения «Стыковка запрещена/завершена» из оригинала **не портированы**:
+запрет возвращается синхронным ответом команды (`ErrDock*`), завершение — это
+переход в `Docked` (виден в снапшоте). WS-тосты — отдельный фронт-таск.
 
 ## Ссылки
 - SP `Docking`: `/home/sof/projects/go/src/starwind/sql/db.sql:11103-11420`.

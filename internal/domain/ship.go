@@ -126,6 +126,14 @@ type Ship struct {
 	// ship-docked one is snapped to the host's position each tick
 	// (carryDockedShips). Cleared by undock.
 	Docked *EntityRef
+	// ExternalDock, when non-nil, is the in-progress external-docking process
+	// (phase 10.3.23, up_exdocking): the ship is engaging external clamps to
+	// attach to a moving host ship its hangar cannot hold. TurnsLeft counts
+	// down each tick; at 0 the ship attaches to Target bypassing hangar
+	// capacity (executeExternalAttach). RAM-only transient intent, like
+	// MiningTarget — not persisted (the original up_status counter lasts ~1
+	// tick). Cleared on completion, cancellation, or a fresh move/course.
+	ExternalDock *ExternalDock
 	// MiningTarget, when non-nil, is the asteroid the player is sustained-
 	// mining (phase 10.3.6, gated on up_drill). Each tick the worker holds
 	// the ship on station and drills it while in range with enough energy;
@@ -178,6 +186,16 @@ type Ship struct {
 	// gate jump and to eject passengers on death. Carried across handoff in the
 	// JumpEvent; rebuilt at cold-start from the players table. Not a DB column.
 	PassengerPlayers []PlayerID
+}
+
+// ExternalDock is the state of an in-progress up_exdocking external-docking
+// process (phase 10.3.23): the host ship being attached to and how many ticks
+// remain before the clamps engage. The worker replaces this pointer each tick
+// (never mutates TurnsLeft in place) so a published snapshot that aliases it
+// never sees a concurrent write.
+type ExternalDock struct {
+	Target    EntityRef
+	TurnsLeft int
 }
 
 // InstalledEquipment is one ct_updates module fitted on a ship (phase 10.14).

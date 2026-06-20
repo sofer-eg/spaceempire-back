@@ -67,6 +67,14 @@ type Config struct {
 	// build time. Below this the ship cannot drill this tick. 0 disables the
 	// gate (unit tests / a catalog with no up_drill energy_usage).
 	MineEnergyCost int
+	// TransporterRange is how close (world units) the source ship must be to the
+	// up_transporter ship for a cargo teleport (phase 10.3.18). Default 250 — a
+	// no-dock reach far longer than PickupRange.
+	TransporterRange float64
+	// TransporterEnergyCost is the "action" energy a cargo teleport spends
+	// (phase 10.3.1/10.3.18), resolved from the up_transporter catalog row at
+	// build time. Below this the teleport is rejected. 0 disables the gate.
+	TransporterEnergyCost int
 	// ExternalDockTurns is how many ticks the up_exdocking external-docking
 	// process runs before it attaches (phase 10.3.23, port of the SP
 	// dock_suspension_time = 1). Default 1.
@@ -115,6 +123,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MineRate <= 0 {
 		c.MineRate = 5
+	}
+	if c.TransporterRange <= 0 {
+		c.TransporterRange = 250
 	}
 	if c.ExternalDockTurns <= 0 {
 		c.ExternalDockTurns = 1

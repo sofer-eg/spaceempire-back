@@ -342,6 +342,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				// 10.3.6: per-tick "action" energy a player drill spends, from the
 				// up_drill catalog row (uniform across class tiers).
 				MineEnergyCost: equipmentEnergyUsage(equipment, "up_drill"),
+				// 10.3.18: "action" energy a cargo teleport spends, from the
+				// up_transporter catalog row.
+				TransporterEnergyCost: equipmentEnergyUsage(equipment, "up_transporter"),
 			},
 		},
 		sectorIDs,

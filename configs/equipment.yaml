@@ -2273,3 +2273,19 @@ equipment:
       dependance: none
       energy_use_type: hold
       energy_usage: 0
+    - id: 143
+      type: up_transporter
+      description: Транспортатор грузов
+      max_level: 1
+      race: 0
+      class: 0
+      price: 300000
+      price_per_level: 0
+      min_war_rate: 0
+      min_trade_rate: 0
+      min_race_rate: 0
+      is_base: 0
+      position: 1
+      dependance: none
+      energy_use_type: action
+      energy_usage: 50

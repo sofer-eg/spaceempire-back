@@ -60,6 +60,12 @@ func (c scanGoodsCatalog) Get(id domain.GoodsTypeID) (balance.Goods, bool) {
 // carries the given equipment and sits in a sector with one tradeable station
 // offering one good (sell=80) at stock 30/100. The good's band is [16, 96].
 func newScanServer(t *testing.T, equipment []domain.InstalledEquipment) *api.Server {
+	return newScanServerProd(t, equipment, nil)
+}
+
+// newScanServerProd is newScanServer plus a StationProductionReader (the
+// level-4 forecast source). nil omits it (the forecast path is then a no-op).
+func newScanServerProd(t *testing.T, equipment []domain.InstalledEquipment, prod api.StationProductionReader) *api.Server {
 	t.Helper()
 	const gtype = domain.GoodsTypeID(1)
 	sell := int64(80)
@@ -90,11 +96,12 @@ func newScanServer(t *testing.T, equipment []domain.InstalledEquipment) *api.Ser
 		gtype: {ID: gtype, Name: "Батарейки", AvgPrice: 16, MaxPrice: 96},
 	}}
 	return api.NewServer(router, api.Config{
-		SnapshotInterval: 10 * time.Millisecond,
-		AckTimeout:       time.Second,
-		SectorID:         1,
-		Trade:            stub,
-		Goods:            goods,
+		SnapshotInterval:  10 * time.Millisecond,
+		AckTimeout:        time.Second,
+		SectorID:          1,
+		Trade:             stub,
+		Goods:             goods,
+		StationProduction: prod,
 	}, nil)
 }
 
@@ -168,6 +175,37 @@ func TestUnit_MarketScan_Level3_RevealsStock(t *testing.T) {
 	g := resp.Stations[0].Goods[0]
 	assert.EqualValues(t, 80, g.SellPrice)
 	assert.EqualValues(t, 30, g.Stock, "level 3 reveals the on-hand stock")
+}
+
+func TestUnit_MarketScan_Level4_RevealsForecast(t *testing.T) {
+	t.Parallel()
+	// The forecast projects the good (id 1) down to stock 10/100; with band
+	// [16,96] that implies price 16 + 80*(100-10)/100 = 88.
+	prod := &stubProductionReader{forecastOK: true, forecast: map[domain.GoodsTypeID]int64{1: 10}}
+	srv := newScanServerProd(t, []domain.InstalledEquipment{{Type: "trade_up", Level: 4}}, prod)
+	rec, resp := doScan(t, srv)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, 4, resp.Level)
+	require.Len(t, resp.Stations, 1)
+	g := resp.Stations[0].Goods[0]
+	assert.EqualValues(t, 80, g.SellPrice, "level 4 keeps the real price")
+	assert.EqualValues(t, 30, g.Stock, "level 4 keeps the stock")
+	assert.EqualValues(t, 10, g.ForecastStock, "level 4 reveals the projected stock")
+	assert.EqualValues(t, 88, g.ForecastPrice, "projected price at the forecast stock")
+}
+
+func TestUnit_MarketScan_Level3_NoForecast_EvenWithReader(t *testing.T) {
+	t.Parallel()
+	// A reader that WOULD return a forecast must not leak it below level 4.
+	prod := &stubProductionReader{forecastOK: true, forecast: map[domain.GoodsTypeID]int64{1: 10}}
+	srv := newScanServerProd(t, []domain.InstalledEquipment{{Type: "trade_up", Level: 3}}, prod)
+	rec, resp := doScan(t, srv)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	g := resp.Stations[0].Goods[0]
+	assert.Zero(t, g.ForecastStock, "forecast gated to level 4")
+	assert.Zero(t, g.ForecastPrice, "forecast gated to level 4")
 }
 
 func TestUnit_MarketScan_NoActiveShip_Returns400(t *testing.T) {

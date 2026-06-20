@@ -214,9 +214,11 @@ func TestUnit_Market_TradeUnavailable_Returns503(t *testing.T) {
 // stubProductionReader implements api.StationProductionReader. called records
 // whether the handler consulted it (used to assert non-station markets skip it).
 type stubProductionReader struct {
-	info   production.CycleInfo
-	err    error
-	called bool
+	info       production.CycleInfo
+	err        error
+	called     bool
+	forecast   map[domain.GoodsTypeID]int64
+	forecastOK bool
 }
 
 func (s *stubProductionReader) StationCycle(_ context.Context, _ domain.StationID) (production.CycleInfo, error) {
@@ -225,6 +227,10 @@ func (s *stubProductionReader) StationCycle(_ context.Context, _ domain.StationI
 		return production.CycleInfo{}, s.err
 	}
 	return s.info, nil
+}
+
+func (s *stubProductionReader) StationForecast(_ domain.Station, _ []traderepo.MarketEntry, _ int) (map[domain.GoodsTypeID]int64, int, bool) {
+	return s.forecast, len(s.forecast), s.forecastOK
 }
 
 func TestUnit_Market_Station_IncludesProduction(t *testing.T) {

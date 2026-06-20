@@ -32,8 +32,13 @@ type TradeService interface {
 
 // StationProductionReader adorns a factory's market with its production
 // cycle. Optional (nil omits the block); only consulted for Station markets.
+// StationForecast dry-runs a factory's production `cycles` ahead for the
+// trade_up level-4 forecast (phase 10.3.22): given the station and its current
+// market it returns the projected stock per good and how many cycles complete
+// before the chain stalls; ok=false for a station type without a recipe.
 type StationProductionReader interface {
 	StationCycle(ctx context.Context, id domain.StationID) (production.CycleInfo, error)
+	StationForecast(st domain.Station, market []traderepo.MarketEntry, cycles int) (projected map[domain.GoodsTypeID]int64, completed int, ok bool)
 }
 
 func (s *Server) handleMarket(kind domain.EntityKind) http.HandlerFunc {

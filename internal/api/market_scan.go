@@ -14,8 +14,13 @@ import (
 
 // tradeUpModuleType is the equipment key (ct_updates.type) of the trade-info
 // scanner module. A ship carrying it at level L reveals sector prices to depth
-// L (1 tier-only, 2 +prices, 3 +stock); 4 (forecast) is a separate task.
+// L: 1 tier-only, 2 +prices, 3 +stock, 4 +production/price forecast.
 const tradeUpModuleType = "trade_up"
+
+// forecastDepth is how many production cycles the level-4 forecast simulates
+// ahead (phase 10.3.22). A fixed horizon keeps the projection deterministic and
+// cheap; starvation/cap can stop it sooner.
+const forecastDepth = 5
 
 // handleMarketScan implements GET /api/market-scan (phase 10.3.12): the
 // trade_up sector price-scanner. It resolves the player's active ship, reads
@@ -60,25 +65,29 @@ func (s *Server) handleMarketScan(w http.ResponseWriter, r *http.Request) {
 // transaction.
 func (s *Server) scanStations(ctx context.Context, statics domain.SectorStatics, level int) []dto.ScanStation {
 	out := make([]dto.ScanStation, 0, len(statics.Stations)+len(statics.TradeStations)+len(statics.Pirbases))
-	for _, st := range statics.Stations {
+	for i := range statics.Stations {
+		st := statics.Stations[i]
 		owner := domain.EntityRef{Kind: domain.EntityKindStation, ID: int64(st.ID)}
 		// st.Type is the station_types catalog id; the SPA resolves the precise
-		// type name from it so several factories in one sector are distinct.
-		if scan, ok := s.scanOne(ctx, owner, "Станция", st.Type, st.Pos, level); ok {
+		// type name from it so several factories in one sector are distinct. A
+		// factory is the only static with a recipe, so it is the only one that
+		// carries the level-4 forecast (passed as &st).
+		if scan, ok := s.scanOne(ctx, owner, "Станция", st.Type, st.Pos, level, &st); ok {
 			out = append(out, scan)
 		}
 	}
 	for _, ts := range statics.TradeStations {
 		owner := domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: int64(ts.ID)}
 		// TradeStation.Type is the central/ring classification, not a catalog id
-		// — leave StationType 0 so the SPA labels it by kind.
-		if scan, ok := s.scanOne(ctx, owner, "Торговая станция", 0, ts.Pos, level); ok {
+		// — leave StationType 0 so the SPA labels it by kind. No recipe → no
+		// forecast.
+		if scan, ok := s.scanOne(ctx, owner, "Торговая станция", 0, ts.Pos, level, nil); ok {
 			out = append(out, scan)
 		}
 	}
 	for _, pb := range statics.Pirbases {
 		owner := domain.EntityRef{Kind: domain.EntityKindPirbase, ID: int64(pb.ID)}
-		if scan, ok := s.scanOne(ctx, owner, "Пиратская база", 0, pb.Pos, level); ok {
+		if scan, ok := s.scanOne(ctx, owner, "Пиратская база", 0, pb.Pos, level, nil); ok {
 			out = append(out, scan)
 		}
 	}
@@ -87,13 +96,22 @@ func (s *Server) scanStations(ctx context.Context, statics domain.SectorStatics,
 
 // scanOne reads one station's market and projects it onto a ScanStation at the
 // given level. stationType is the station_types catalog id for a production
-// station (0 for trade-stations / pirbases). ok=false when the station offers
-// nothing or the read errors.
-func (s *Server) scanOne(ctx context.Context, owner domain.EntityRef, name string, stationType int, pos domain.Vec2, level int) (dto.ScanStation, bool) {
+// station (0 for trade-stations / pirbases). station, when non-nil, is the
+// producing factory whose level-4 forecast is computed from its current market.
+// ok=false when the station offers nothing or the read errors.
+func (s *Server) scanOne(ctx context.Context, owner domain.EntityRef, name string, stationType int, pos domain.Vec2, level int, station *domain.Station) (dto.ScanStation, bool) {
 	entries, err := s.trade.Market(ctx, owner)
 	if err != nil {
 		s.logger.Warn("market scan: station read", "kind", int(owner.Kind), "id", owner.ID, "err", err)
 		return dto.ScanStation{}, false
+	}
+	// Level-4 forecast: dry-run the factory's production over a fixed horizon and
+	// project per-good stock. nil for non-producers / lower levels / no reader.
+	var forecast map[domain.GoodsTypeID]int64
+	if level >= 4 && station != nil && s.stationProduction != nil {
+		if proj, _, ok := s.stationProduction.StationForecast(*station, entries, forecastDepth); ok {
+			forecast = proj
+		}
 	}
 	goods := make([]dto.ScanGood, 0, len(entries))
 	for _, e := range entries {
@@ -103,7 +121,7 @@ func (s *Server) scanOne(ctx context.Context, owner domain.EntityRef, name strin
 		if e.BuyPrice == nil && e.SellPrice == nil {
 			continue
 		}
-		goods = append(goods, s.scanGood(e, level))
+		goods = append(goods, s.scanGood(e, level, forecast))
 	}
 	if len(goods) == 0 {
 		return dto.ScanStation{}, false
@@ -123,20 +141,17 @@ func (s *Server) scanOne(ctx context.Context, owner domain.EntityRef, name strin
 // tier uses whichever direction the station offers — sell price for a factory
 // product, buy price for raw materials — so flat trade-station/pirbase wares
 // (one shared price) tier off that single value.
-func (s *Server) scanGood(e traderepo.MarketEntry, level int) dto.ScanGood {
+func (s *Server) scanGood(e traderepo.MarketEntry, level int, forecast map[domain.GoodsTypeID]int64) dto.ScanGood {
 	var ref int64
 	if e.SellPrice != nil {
 		ref = *e.SellPrice
 	} else if e.BuyPrice != nil {
 		ref = *e.BuyPrice
 	}
-	var avg, max int64
-	if g, ok := s.goodsBands(e.GoodsType); ok {
-		avg, max = g.AvgPrice, g.MaxPrice
-	}
+	g, hasBand := s.goodsBands(e.GoodsType)
 	good := dto.ScanGood{
 		TypeID:     int32(e.GoodsType),
-		PriceLevel: trade.PriceTier(ref, avg, max),
+		PriceLevel: trade.PriceTier(ref, g.AvgPrice, g.MaxPrice),
 	}
 	if level >= 2 {
 		if e.BuyPrice != nil {
@@ -148,6 +163,18 @@ func (s *Server) scanGood(e traderepo.MarketEntry, level int) dto.ScanGood {
 	}
 	if level >= 3 {
 		good.Stock = e.Stock
+	}
+	// Level 4: projected stock after the forecast horizon, and the dynamic price
+	// it implies (left 0 for goods with no dynamic band or no projection).
+	if level >= 4 && forecast != nil {
+		if ps, ok := forecast[e.GoodsType]; ok {
+			good.ForecastStock = ps
+			if hasBand {
+				if p, ok := trade.ProjectedUnitPrice(g, ps, e.MaxStock); ok {
+					good.ForecastPrice = p
+				}
+			}
+		}
 	}
 	return good
 }

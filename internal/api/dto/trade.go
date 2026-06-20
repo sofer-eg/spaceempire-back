@@ -117,13 +117,18 @@ type ScanPos struct {
 // ScanGood is one good's scanned line. PriceLevel ("high"/"medium"/"low") is
 // always present (level 1+). BuyPrice/SellPrice are the real prices at level
 // 2+, 0 below that. Stock is the on-hand quantity at level 3, 0 below that.
-// The 0-masks are significant — see ScanResponse.
+// ForecastStock/ForecastPrice are the projected stock and dynamic price after a
+// fixed production horizon, revealed only at level 4 (0 below that, and 0 for a
+// non-producing station / a good with no dynamic band). The 0-masks are
+// significant — see ScanResponse.
 type ScanGood struct {
-	TypeID     int32  `json:"typeID"`
-	PriceLevel string `json:"priceLevel"`
-	BuyPrice   int64  `json:"buyPrice"`
-	SellPrice  int64  `json:"sellPrice"`
-	Stock      int64  `json:"stock"`
+	TypeID        int32  `json:"typeID"`
+	PriceLevel    string `json:"priceLevel"`
+	BuyPrice      int64  `json:"buyPrice"`
+	SellPrice     int64  `json:"sellPrice"`
+	Stock         int64  `json:"stock"`
+	ForecastStock int64  `json:"forecastStock"`
+	ForecastPrice int64  `json:"forecastPrice"`
 }
 
 // TradeBuyRequest is the body of POST /api/cmd/trade/buy.

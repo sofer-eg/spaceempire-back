@@ -61,6 +61,14 @@ func PriceTier(price, avg, max int64) string {
 	}
 }
 
+// ProjectedUnitPrice is the price a good would trade at given a projected stock
+// level — the public face of dynamicUnitPrice for the trade_up level-4 forecast
+// (phase 10.3.22). False when the good has no usable band, so the caller leaves
+// the forecast price masked (0).
+func ProjectedUnitPrice(g balance.Goods, stock, maxStock int64) (int64, bool) {
+	return dynamicUnitPrice(g, stock, maxStock)
+}
+
 // dynamicUnitPrice interpolates the price across the good's [avg, max] band by
 // how empty the shelf is. It reports false when the good has no usable band
 // (avg<=0, max<=avg) or no capacity, leaving the caller on the column price.

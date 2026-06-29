@@ -38,6 +38,12 @@ const (
 	// EntityKindSatellite is a player-deployed navigation satellite (phase
 	// 10.15): a destructible static beacon that reveals the sector radar.
 	EntityKindSatellite EntityKind = 11
+	// EntityKindTorpedo is an in-flight homing torpedo (phase 10.3.5): a
+	// persistent, shoot-downable projectile. Unlike a fire-and-forget missile a
+	// torpedo carries its own HP, so it joins the targetable universe — a weapon
+	// can lock onto and destroy an incoming torpedo (ЧТЗ doc-1 §3 FR-008). See
+	// isProjectileTargetKind, the single point that makes it a weapon target.
+	EntityKindTorpedo EntityKind = 12
 )
 
 type EntityRef struct {

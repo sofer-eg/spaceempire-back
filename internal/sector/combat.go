@@ -54,8 +54,10 @@ func chargeEnergies(s *sectorState) {
 // Same-sector targets only — AttackTarget pointing at a ship that
 // belongs to a different sector is dropped silently. Ship targets follow
 // the 4.2 path; static targets (station/shipyard/trade-station/pirbase/
-// tower) go through fireLaserAtStatic (phase 6.2b); any other kind (e.g. a
-// gate) is treated as "no target" and the attack reference is cleared.
+// tower) go through fireLaserAtStatic (phase 6.2b); shoot-downable
+// projectiles (torpedo, the isProjectileTargetKind set) go through
+// fireLaserAtProjectile (TASK-100.3.5.6); any other kind (e.g. a gate) is
+// treated as "no target" and the attack reference is cleared.
 func (w *Worker) fireLasers(ctx context.Context, s *sectorState) {
 	for id, attacker := range s.ships {
 		if attacker.AttackTarget == nil {
@@ -64,6 +66,13 @@ func (w *Worker) fireLasers(ctx context.Context, s *sectorState) {
 		ref := *attacker.AttackTarget
 		if isStaticTargetKind(ref.Kind) {
 			w.fireLaserAtStatic(ctx, s, id, attacker, ref)
+			continue
+		}
+		if isProjectileTargetKind(ref.Kind) {
+			// Shoot-downable projectile (torpedo): route laser damage into its
+			// HP. tickTorpedos reaps it on HP<=0 with impact(killed), no splash
+			// (TASK-100.3.5.6).
+			s.fireLaserAtProjectile(id, attacker, ref)
 			continue
 		}
 		if ref.Kind != domain.EntityKindShip {

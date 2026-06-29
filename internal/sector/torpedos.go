@@ -9,12 +9,17 @@ import (
 )
 
 // TorpedoImpact is a per-tick torpedo event accumulated for the current tick.
-// A detonation sets Hit=true and carries the splash centre (Pos) and
-// SplashRadius so the area-damage pass (TASK-100.3.5.5) and the renderer
-// (TASK-100.3.5.7) know where the blast lands; a TTL expiry or owner-loss sets
-// Expired=true and deals no damage. Modelled on DroneImpact / MissileImpact and,
-// like them before the DTO layer, kept internal this sub-task — the Snapshot/AOI
-// surfacing is TASK-100.3.5.7.
+// Exactly one of the three outcome flags is set:
+//   - Hit=true: a detonation; carries the splash centre (Pos) and SplashRadius so
+//     the area-damage pass (TASK-100.3.5.5) and the renderer (TASK-100.3.5.7) know
+//     where the blast lands.
+//   - Killed=true: the torpedo was shot down (its own HP reached 0 from enemy
+//     weapons, TASK-100.3.5.6); it dies where it is with NO splash and NO
+//     detonation — distinct from a Hit (no SplashRadius) and from an Expired.
+//   - Expired=true: a TTL expiry or owner-loss; deals no damage.
+//
+// Modelled on DroneImpact / MissileImpact and, like them before the DTO layer,
+// kept internal this sub-task — the Snapshot/AOI surfacing is TASK-100.3.5.7.
 type TorpedoImpact struct {
 	TorpedoID    domain.TorpedoID
 	OwnerShipID  domain.ShipID
@@ -22,22 +27,45 @@ type TorpedoImpact struct {
 	Pos          domain.Vec2
 	SplashRadius float64
 	Hit          bool
+	Killed       bool
 	Expired      bool
 }
 
 // tickTorpedos advances every torpedo in the sector for dt seconds. For each
 // torpedo it resolves the owner and the (ship or destructible-static) target,
 // homes via combat.TickTorpedo, and ends the torpedo's life on:
+//   - shoot-down (its own HP reached 0, TASK-100.3.5.6) → removal + Killed impact,
+//     no splash, no detonation — checked first so a torpedo killed in flight never
+//     gets a last detonation off;
 //   - owner loss (owner ship gone or dead) → removal + Expired impact;
 //   - detonation (within HitRadius of an alive target) → indiscriminate splash
 //     damage to everything inside SplashRadius (combat.ApplyDamageInRadius,
 //     TASK-100.3.5.5) + removal + Hit impact carrying the splash centre/radius;
 //   - TTL expiry → removal + Expired impact, no damage.
 //
+// fireLasers/tickTowers/tickDrones run before this step, so a torpedo whose HP a
+// weapon drove to 0 this tick is reaped here exactly once, the same one-place
+// reap sweepKilledShips gives a laser-killed ship.
+//
 // Every removal writes the DELETE to the DB immediately (torpedoes are
 // persistent, like drones). All mutations happen here — one writer per sector.
 func (w *Worker) tickTorpedos(ctx context.Context, s *sectorState, dt float64, now time.Time) {
 	for id, t := range s.torpedos {
+		if t.HP <= 0 {
+			// Shot down (ЧТЗ §5.3 "сбита"): an enemy weapon (lasers/drones/towers
+			// run earlier this tick) drove the torpedo's hull to 0 via TakeDamage.
+			// It dies in place — no detonation, no splash (FR-008) — with a Killed
+			// impact distinct from a Hit (no splash centre/radius) and an Expired.
+			w.removeTorpedo(ctx, s, id, TorpedoImpact{
+				TorpedoID:   id,
+				OwnerShipID: t.OwnerShipID,
+				Target:      t.Target,
+				Pos:         t.Pos,
+				Killed:      true,
+			})
+			continue
+		}
+
 		owner, ownerOK := s.ships[t.OwnerShipID]
 		if !ownerOK || owner.HP <= 0 {
 			// Owner gone — the torpedo dies with it (ЧТЗ FR-009).

@@ -51,3 +51,20 @@ type Torpedo struct {
 	HP        int
 	ExpiresAt time.Time
 }
+
+// TakeDamage soaks dmg straight into the torpedo's hull. A torpedo carries no
+// shield (unlike a Ship or a DestructibleStatic), so a zero throwaway shield is
+// threaded through the shared applyDamage — raw damage goes to HP. It implements
+// combat.Damageable so a laser/drone/tower routes damage to a torpedo through the
+// very same ApplyDamage path every other target uses, with no torpedo-specific
+// branch in the weapon (ЧТЗ doc-1 §3 FR-008). A torpedo dropped to HP<=0 is not
+// removed here: the sector's tickTorpedos reaps it on the next pass with
+// impact(killed) and no splash — exactly as a laser-killed ship is reaped by the
+// sector's kill sweep, not by the laser.
+func (t *Torpedo) TakeDamage(dmg int) DamageResult {
+	if t == nil {
+		return DamageResult{}
+	}
+	shield := 0
+	return applyDamage(&t.HP, &shield, dmg)
+}

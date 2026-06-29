@@ -462,6 +462,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		MissileCargo:      cargoSvc,
 		SatelliteCargo:    cargoSvc,
 		DroneCargo:        cargoSvc,
+		TorpedoCargo:      cargoSvc,
 		NpcPlayerID:       npcPlayerID,
 		ActiveShips:       playersRepoPersistence,
 		ActiveShipWriter:  playersRepoPersistence,

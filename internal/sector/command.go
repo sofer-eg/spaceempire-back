@@ -493,6 +493,109 @@ func replyLaunchMissile(reply chan<- LaunchMissileResult, res LaunchMissileResul
 	}
 }
 
+// LaunchTorpedoResult carries the torpedo id allocated for a launch back to the
+// HTTP handler so the response can echo it. The torpedo object's spawn and
+// persistence are sub-task TASK-100.3.5.4; in this sub-task a successful launch
+// only enforces the gates and the action-energy cost, so TorpedoID stays zero
+// (the .4 seam fills it). On error TorpedoID is zero and Err is non-nil.
+type LaunchTorpedoResult struct {
+	Err       error
+	TorpedoID domain.TorpedoID
+}
+
+// LaunchTorpedoCommand fires one torpedo from ShipID at Target (ЧТЗ doc-1 §3
+// FR-002/004/006). Modelled on LaunchMissileCommand: ownership is enforced, the
+// ship must carry up_torpedo_launcher and be undocked, and a launch spends the
+// launcher's "action" energy. Unlike a missile, a torpedo may also strike a
+// destructible static (isStaticTargetKind), not just a ship. Cargo accounting
+// (1 unit of the class's goods type) happens in the HTTP handler, which refunds
+// on reply.Err.
+//
+// Spawning the torpedo object (combat.LaunchTorpedo + insert into sectorState +
+// torpedoRepo.Create + the homing tick) is sub-task TASK-100.3.5.4; see the
+// seam at the end of apply.
+type LaunchTorpedoCommand struct {
+	PlayerID domain.PlayerID
+	ShipID   domain.ShipID
+	Target   domain.EntityRef
+	// Class is the ammunition class: 2 (gt23 "Огненная Буря") or 3 (gt24
+	// "Святая Торпеда"). It selects the balance spec when sub-task .4 spawns
+	// the torpedo; the launch gates here do not depend on it (the handler maps
+	// class → goods type for the cargo debit).
+	Class int
+	// EnergyCost is the "action" energy a launch spends (phase 10.3.1), sourced
+	// from up_torpedo_launcher.energy_usage by the HTTP handler. The worker
+	// rejects the launch with ErrNotEnoughEnergy when Energy < EnergyCost and
+	// otherwise debits it. Zero (the test/legacy default) disables the gate.
+	EnergyCost int
+	Reply      chan<- LaunchTorpedoResult
+}
+
+func (c LaunchTorpedoCommand) apply(_ *Worker, s *sectorState) {
+	var res LaunchTorpedoResult
+
+	ship, ok := s.ships[c.ShipID]
+	switch {
+	case !ok:
+		res.Err = ErrShipNotFound
+	case ship.PlayerID != c.PlayerID:
+		res.Err = ErrForbidden
+	case ship.Docked != nil:
+		res.Err = ErrShipDocked
+	case shipEquipmentLevel(ship, "up_torpedo_launcher") < 1:
+		// Torpedoes require an installed launcher, mirroring up_launcher for
+		// missiles (ЧТЗ §3 FR-002).
+		res.Err = ErrEquipmentRequired
+	case !torpedoTargetable(c.ShipID, c.Target):
+		// A torpedo may strike a ship or any destructible static; gates are
+		// excluded (not destructible, ЧТЗ C-04). Self-targeting is rejected.
+		res.Err = ErrInvalidAttackTarget
+	}
+	if res.Err != nil {
+		replyLaunchTorpedo(c.Reply, res)
+		return
+	}
+
+	// Phase 10.3.1: a launch is an "action" energy expense. Reject when the
+	// pool cannot cover the launcher's cost; debit it on success so repeated
+	// fire drains the ship until it recharges. Cost 0 disables the gate (tests).
+	if ship.Energy < c.EnergyCost {
+		res.Err = ErrNotEnoughEnergy
+		replyLaunchTorpedo(c.Reply, res)
+		return
+	}
+	if c.EnergyCost > 0 {
+		ship.Energy -= c.EnergyCost
+		s.markDirty(c.ShipID)
+	}
+
+	// TODO(TASK-100.3.5.4): spawn the torpedo here — build it from
+	// combat.DefaultTorpedoSpec(c.Class), insert it into sectorState, persist
+	// via torpedoRepo.Create, run the homing tick, and set res.TorpedoID. This
+	// sub-task only enforces the launch gates and the action-energy cost.
+	replyLaunchTorpedo(c.Reply, res)
+}
+
+// torpedoTargetable reports whether ref is a legal torpedo target for a launch
+// from shipID: a different ship, or a destructible static (isStaticTargetKind).
+// Gates are excluded until they become destructible (ЧТЗ C-04, TASK-110).
+func torpedoTargetable(shipID domain.ShipID, ref domain.EntityRef) bool {
+	if ref.Kind == domain.EntityKindShip {
+		return domain.ShipID(ref.ID) != shipID
+	}
+	return isStaticTargetKind(ref.Kind)
+}
+
+func replyLaunchTorpedo(reply chan<- LaunchTorpedoResult, res LaunchTorpedoResult) {
+	if reply == nil {
+		return
+	}
+	select {
+	case reply <- res:
+	default:
+	}
+}
+
 // LaunchDroneResult reports how many drones were actually spawned. The
 // HTTP handler debits Count units up front and refunds (Count - Spawned)
 // so a partial DB failure does not silently swallow the player's cargo.

@@ -96,6 +96,9 @@ type Config struct {
 	// DroneCargo backs POST /api/cmd/launch-drone and
 	// /api/cmd/recall-drones. nil disables both with 503.
 	DroneCargo DroneCargo
+	// TorpedoCargo backs POST /api/cmd/launch-torpedo (cargo Consume / Refund
+	// around the sector command). nil disables the endpoint with 503.
+	TorpedoCargo TorpedoCargo
 	// SatelliteCargo backs POST /api/cmd/install-satellite (cargo Consume /
 	// Refund around the sector command, phase 10.15). nil disables the
 	// endpoint with 503.
@@ -147,15 +150,19 @@ type Server struct {
 	// 10.3.1), resolved once from the up_launcher catalog row. 0 when no catalog
 	// is wired (tests) — the worker's gate is then a no-op.
 	launchEnergyCost int
-	handoffBus       bus.Subscriber
-	eventBus         bus.Publisher
-	missileCargo     MissileCargo
-	droneCargo       DroneCargo
-	satelliteCargo   SatelliteCargo
-	activeShips      ActiveShipReader
-	activeShipWriter ActiveShipWriter
-	handoffPublisher bus.Publisher
-	fleet            FleetReader
+	// torpedoEnergyCost is the analogous "action" energy a torpedo launch spends
+	// (phase 10.3.5.3), resolved once from the up_torpedo_launcher catalog row.
+	torpedoEnergyCost int
+	handoffBus        bus.Subscriber
+	eventBus          bus.Publisher
+	missileCargo      MissileCargo
+	droneCargo        DroneCargo
+	torpedoCargo      TorpedoCargo
+	satelliteCargo    SatelliteCargo
+	activeShips       ActiveShipReader
+	activeShipWriter  ActiveShipWriter
+	handoffPublisher  bus.Publisher
+	fleet             FleetReader
 }
 
 func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
@@ -189,6 +196,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 		eventBus:          cfg.EventBus,
 		missileCargo:      cfg.MissileCargo,
 		droneCargo:        cfg.DroneCargo,
+		torpedoCargo:      cfg.TorpedoCargo,
 		satelliteCargo:    cfg.SatelliteCargo,
 		activeShips:       cfg.ActiveShips,
 		activeShipWriter:  cfg.ActiveShipWriter,
@@ -197,6 +205,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	}
 	s.hullCategories = buildHullCategoryIndex(cfg.ShipClasses)
 	s.launchEnergyCost = launchActionEnergyCost(cfg.Equipment)
+	s.torpedoEnergyCost = torpedoLaunchEnergyCost(cfg.Equipment)
 
 	s.mux.HandleFunc("GET /healthz", handleHealthz)
 	s.mux.Handle("POST /api/cmd/move", s.protect(http.HandlerFunc(s.handleMove)))
@@ -209,6 +218,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	s.mux.Handle("POST /api/cmd/cease-fire", s.protect(http.HandlerFunc(s.handleCeaseFire)))
 	s.mux.Handle("POST /api/cmd/launch-missile", s.protect(http.HandlerFunc(s.handleLaunchMissile)))
 	s.mux.Handle("POST /api/cmd/launch-drone", s.protect(http.HandlerFunc(s.handleLaunchDrone)))
+	s.mux.Handle("POST /api/cmd/launch-torpedo", s.protect(http.HandlerFunc(s.handleLaunchTorpedo)))
 	s.mux.Handle("POST /api/cmd/recall-drones", s.protect(http.HandlerFunc(s.handleRecallDrones)))
 	s.mux.Handle("POST /api/cmd/pickup-container", s.protect(http.HandlerFunc(s.handlePickupContainer)))
 	s.mux.Handle("POST /api/cmd/mine", s.protect(http.HandlerFunc(s.handleMine)))

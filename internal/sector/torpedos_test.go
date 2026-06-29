@@ -274,6 +274,118 @@ func TestUnit_Torpedo_DiesOnOwnerLoss(t *testing.T) {
 	require.GreaterOrEqual(t, repo.deletes, 1, "owner-loss persists the removal (Delete)")
 }
 
+// TestUnit_Torpedo_EndToEnd_LaunchHomingSplashFriendlyFire is the consolidated
+// acceptance scenario for TASK-100.3.5.9: it stitches the torpedo main thread —
+// launch → ammunition/energy debit → homing to a MOVING target → detonation with
+// indiscriminate splash → removal — into one readable narrative, the way the
+// system runs it (real LaunchTorpedoCommand + real ticks), rather than the
+// isolated unit slices around it.
+//
+// It closes the one gap those unit slices leave at the sector level: splash
+// friendly-fire that hits the FIRING PLAYER'S OWN ship. The combat-package unit
+// (ApplyDamageInRadius_FriendlyFireHitsOwnShips) proves the primitive is
+// indiscriminate; here a same-player ship caught in the blast really loses HP
+// through the full launch→tick→detonate pipeline (ЧТЗ AC-6, R-02).
+//
+// Coverage threaded through this single test:
+//   - AC-1: the ships carry up_torpedo_launcher, so the launch passes the gate.
+//   - AC-3: the launch debits the launcher's action energy from the firing ship.
+//   - AC-4: the torpedo homes over a series of ticks onto a moving target and
+//     detonates within HitRadius (the target really moved while being chased).
+//   - AC-6: the detonation deals splash to >1 target INCLUDING the firing
+//     player's own ship — friendly-fire, no owner/ally exclusion.
+//   - FR-009/AC-4: the spent torpedo is removed from the live set and persist-
+//     Deleted (the detonation's recorded end-of-life). The Hit-impact delta and
+//     its AOI delivery are covered by TestUnit_Worker_Subscribe_DeliversTorpedos.
+//
+// Ammunition (gt23/gt24) is debited in the HTTP handler, not the worker, so it
+// is exercised by the api launch_torpedo tests (AC-2); the energy debit is the
+// in-worker consumable this end-to-end asserts.
+func TestUnit_Torpedo_EndToEnd_LaunchHomingSplashFriendlyFire(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newFakeTorpedoRepo()
+
+	// Firing ship: far from the blast zone so it survives to detonation, with
+	// enough energy for exactly the launch.
+	owner := torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})
+	owner.Energy = 200
+	owner.MaxEnergy = 1000
+
+	// A genuinely moving target: Target==nil + a non-zero Vel makes moveShip
+	// coast it each tick, so the torpedo must keep steering onto a drifting mark.
+	const targetStartY = 0
+	target := torpedoShip(2, 999, domain.Vec2{X: 250, Y: targetStartY})
+	target.HP, target.MaxHP = 5000, 5000 // survives the blast so the splash is readable
+	target.Vel = domain.Vec2{X: 0, Y: 2}
+
+	// A friendly ship of the FIRING player parked in the blast zone — the
+	// friendly-fire victim (AC-6).
+	friendly := torpedoShip(4, 100, domain.Vec2{X: 250, Y: 15})
+	friendly.HP, friendly.MaxHP = 5000, 5000
+
+	// A third-party bystander also in the blast zone — proves the blast catches
+	// more than the homing target (≥2 splash victims).
+	bystander := torpedoShip(5, 555, domain.Vec2{X: 255, Y: 30})
+	bystander.HP, bystander.MaxHP = 5000, 5000
+
+	w := newTorpedoWorker(t, sector.Config{TickInterval: time.Second, AOIRadius: 100000},
+		clock.NewRealClock(), repo, []domain.Ship{owner, target, friendly, bystander})
+
+	// Launch (real LaunchTorpedoCommand path): class 3, with the action-energy
+	// cost the launcher catalog charges.
+	res := sendTorpedo(t, w, sector.LaunchTorpedoCommand{
+		PlayerID: 100, ShipID: 1, Class: 3, EnergyCost: 100,
+		Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+	})
+	require.NoError(t, res.Err)
+	require.NotZero(t, res.TorpedoID, "launch echoes the DB-assigned id")
+	require.Equal(t, 1, repo.creates, "launch persists the torpedo immediately (Create)")
+	require.Equal(t, 1, repo.liveCount(), "in flight after launch, not instantly detonated")
+	require.Equal(t, 100, shipEnergyByID(t, w, 1), "launch debits the action energy (200-100) — AC-3")
+
+	// Homing: tick until the torpedo reaches the drifting target and detonates.
+	for i := 0; i < 30 && repo.liveCount() > 0; i++ {
+		w.Tick(ctx)
+	}
+	require.Zero(t, repo.liveCount(), "torpedo detonates on the moving target and is removed — AC-4")
+	require.GreaterOrEqual(t, repo.deletes, 1, "detonation persists the removal (Delete) — FR-009")
+
+	shipByID := func(id domain.ShipID) (domain.Ship, bool) {
+		for _, s := range w.Snapshot(testSector).Ships {
+			if s.ID == id {
+				return s, true
+			}
+		}
+		return domain.Ship{}, false
+	}
+
+	// The target really moved while it was being chased (AC-4 "движущаяся цель").
+	tgt, ok := shipByID(2)
+	require.True(t, ok, "the tough target survives the blast and stays in the sector")
+	require.Greater(t, tgt.Pos.Y, float64(targetStartY), "the target drifted while the torpedo homed onto it")
+	require.Less(t, tgt.HP, 5000, "the homing target took splash damage")
+	require.Zero(t, tgt.Shield, "splash drains the shield first")
+
+	// Friendly-fire: the firing player's OWN ship in the blast took damage (AC-6).
+	fr, ok := shipByID(4)
+	require.True(t, ok, "the friendly ship survives the blast")
+	require.Less(t, fr.HP, 5000, "the firing player's own ship took splash damage — friendly-fire, AC-6")
+	require.Zero(t, fr.Shield)
+
+	// A second, unrelated victim in the same blast — splash is area, not single-target.
+	by, ok := shipByID(5)
+	require.True(t, ok, "the bystander survives the blast")
+	require.Less(t, by.HP, 5000, "a bystander in the blast radius also took splash damage")
+	require.Zero(t, by.Shield)
+
+	// The firing ship sat outside the blast: it is unharmed and still alive (so
+	// the torpedo died by detonation, not owner-loss).
+	own, ok := shipByID(1)
+	require.True(t, ok, "the firing ship is alive")
+	require.Equal(t, 200, own.HP, "the firing ship sat outside the blast radius — unharmed")
+}
+
 // TestUnit_LaunchTorpedo_DeadOrMissingTargetGate: a launch at a dead or
 // non-existent target is rejected BEFORE any energy or ammunition is spent
 // (carry-over from the .3 review). No torpedo is created.

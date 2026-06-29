@@ -81,6 +81,7 @@ func TestIntegration_Torpedos_CreateLoadAll(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, id, got[0].ID)
+	require.Equal(t, domain.SectorID(10), got[0].SectorID, "sector_id round-trips (also the LoadAll filter key)")
 	require.Equal(t, ship, got[0].OwnerShipID)
 	require.Equal(t, pid, got[0].PlayerID)
 	require.Equal(t, tp.Pos, got[0].Pos)
@@ -100,7 +101,12 @@ func TestIntegration_Torpedos_CreateLoadAll(t *testing.T) {
 }
 
 // TestIntegration_Torpedos_BatchUpdate persists the mutable fields and
-// leaves the static profile untouched.
+// leaves the static profile untouched. The payload deliberately carries
+// DIFFERENT static values (Class 2 / Damage 5) than the stored row (Class 3 /
+// Damage 1000000): if batchUpdateSQL ever started writing a static column the
+// row would flip to the payload's value, so the assertion that the ORIGINAL
+// statics survive is what catches that — a tautological payload (same statics)
+// would pass even with a buggy UPDATE.
 func TestIntegration_Torpedos_BatchUpdate(t *testing.T) {
 	t.Parallel()
 	pool := testdb.Setup(t)
@@ -117,6 +123,12 @@ func TestIntegration_Torpedos_BatchUpdate(t *testing.T) {
 	updated.Vel = domain.Vec2{X: -1, Y: -2}
 	updated.LastTargetPos = domain.Vec2{X: 77, Y: 66}
 	updated.HP = 7
+	// Static profile in the payload differs from the stored row — BatchUpdate
+	// must ignore these and keep the originals.
+	updated.Class = 2
+	updated.Damage = 5
+	updated.Speed = 1
+	updated.SplashRadius = 1
 	require.NoError(t, repo.BatchUpdate(context.Background(), []domain.Torpedo{updated}))
 
 	got, err := repo.LoadAll(context.Background(), 10)
@@ -126,9 +138,12 @@ func TestIntegration_Torpedos_BatchUpdate(t *testing.T) {
 	require.Equal(t, domain.Vec2{X: -1, Y: -2}, got[0].Vel)
 	require.Equal(t, domain.Vec2{X: 77, Y: 66}, got[0].LastTargetPos)
 	require.Equal(t, 7, got[0].HP)
-	// Static profile is not batched and must be unchanged.
-	require.Equal(t, 3, got[0].Class)
-	require.Equal(t, 1000000, got[0].Damage)
+	// Static profile is not batched: the ORIGINAL stored values must survive
+	// even though the payload tried to overwrite them.
+	require.Equal(t, 3, got[0].Class, "BatchUpdate must not write the static class column")
+	require.Equal(t, 1000000, got[0].Damage, "BatchUpdate must not write the static damage column")
+	require.Equal(t, float64(80), got[0].Speed, "BatchUpdate must not write the static speed column")
+	require.Equal(t, float64(40), got[0].SplashRadius, "BatchUpdate must not write the static splash_radius column")
 }
 
 // TestIntegration_Torpedos_Delete removes a row and reports missing ones.

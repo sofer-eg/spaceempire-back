@@ -1,11 +1,15 @@
 package combat_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"spaceempire/back/internal/balance"
 	"spaceempire/back/internal/combat"
+	"spaceempire/back/internal/domain"
 )
 
 // TestUnit_TorpedoSpecs_Profile pins the ЧТЗ §5.1 relative-parity profile of the
@@ -21,7 +25,11 @@ func TestUnit_TorpedoSpecs_Profile(t *testing.T) {
 
 	mis := combat.DefaultMissileSpec()
 	for name, s := range map[string]combat.TorpedoSpec{"class2": c2, "class3": c3} {
-		assert.Greaterf(t, s.Damage, mis.Damage, "%s: Damage must be >> missile (%d)", name, mis.Damage)
+		// "≫", not just ">": a torpedo is the kratno-mocnee heavy-hitter of
+		// §5.1, so pin a several-times margin over a missile rather than a
+		// one-point edge that a rebalance could erode while still passing.
+		assert.GreaterOrEqualf(t, s.Damage, 3*mis.Damage,
+			"%s: Damage must be >> missile (at least 3×%d)", name, mis.Damage)
 		assert.Lessf(t, s.Speed, mis.Speed, "%s: Speed must be < missile (slower)", name)
 		assert.Lessf(t, s.TurnRate, mis.TurnRate, "%s: TurnRate must be < missile (less nimble)", name)
 		assert.Positivef(t, s.SplashRadius, "%s: SplashRadius must be > 0 (area weapon)", name)
@@ -46,4 +54,30 @@ func TestUnit_TorpedoSpecs_Profile(t *testing.T) {
 func TestUnit_DefaultTorpedoSpec_UnknownClassFallsBack(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, combat.DefaultTorpedoSpec(2), combat.DefaultTorpedoSpec(99))
+}
+
+// TestUnit_TorpedoAmmo_Class3DearerThanClass2 pins the remaining §5.1 parity
+// axis — price. The combat magnitude spec carries no price (it is a balance-
+// config concern, not a kinematic one): class 2 is fired with gt23
+// "Огненная Буря", class 3 with gt24 "Святая Торпеда". This grounds the
+// "класс 3 ... заметно дороже класса 2" relation (ЧТЗ §5.1, by ratio not the
+// literal original numbers, C-01) on the real balance config, so a rebalance
+// that inverts the tiers trips here.
+func TestUnit_TorpedoAmmo_Class3DearerThanClass2(t *testing.T) {
+	t.Parallel()
+	b, err := balance.LoadFromFile(filepath.Join("..", "..", "configs", "balance.yaml"))
+	require.NoError(t, err)
+
+	const (
+		gt23 = domain.GoodsTypeID(23) // class-2 ammunition
+		gt24 = domain.GoodsTypeID(24) // class-3 ammunition
+	)
+	firestorm, ok := b.Get(gt23)
+	require.True(t, ok, "class-2 ammunition gt23 present in the goods catalog")
+	holy, ok := b.Get(gt24)
+	require.True(t, ok, "class-3 ammunition gt24 present in the goods catalog")
+
+	require.Positive(t, firestorm.AvgPrice, "class-2 ammunition has a price")
+	require.Greater(t, holy.AvgPrice, firestorm.AvgPrice,
+		"class-3 ammunition (gt24) is the pricier tier than class-2 (gt23) — §5.1 price axis")
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"spaceempire/back/internal/balance"
+	"spaceempire/back/internal/domain"
 )
 
 func TestUnit_NewEquipments_BuildsAndLooksUp(t *testing.T) {
@@ -94,5 +95,33 @@ func TestUnit_LoadEquipment_RealConfig(t *testing.T) {
 	for _, acc := range cat.EquipmentByType("up_accumulator") {
 		assert.Equal(t, "hold", acc.EnergyUseType)
 		assert.Equal(t, "up_generator", acc.Dependance)
+	}
+}
+
+// TestUnit_LoadEquipment_TorpedoLauncherWarGate verifies the rank gate of the
+// torpedo launcher (ids 123-128, one row per ship class): in StarWind torpedoes
+// were gated on military status (war_rate), the only axis ever enforced, while
+// min_race_rate was dead config (ЧТЗ doc-1 C-06, TASK-100.3.14). So every row
+// must gate min_war_rate=2 (not min_race_rate). Enforcement is the generic
+// ResolveInstall path (gatedInstall→422 ErrRankTooLow at the handler).
+func TestUnit_LoadEquipment_TorpedoLauncherWarGate(t *testing.T) {
+	cat, err := balance.LoadEquipmentFromFile("../../configs/equipment.yaml")
+	require.NoError(t, err)
+
+	rows := cat.EquipmentByType("up_torpedo_launcher")
+	require.Len(t, rows, 6, "one up_torpedo_launcher row per ship class (ids 123-128)")
+
+	// The launcher depends on up_accumulator; satisfy that so the rank gate is
+	// what the install resolves on.
+	installed := []domain.InstalledEquipment{{Type: "up_accumulator"}}
+	for _, row := range rows {
+		assert.Equalf(t, 2, row.MinWarRate, "row %d must gate min_war_rate=2", row.ID)
+		assert.Equalf(t, 0, row.MinRaceRate, "row %d must not gate min_race_rate", row.ID)
+
+		_, err := cat.ResolveInstall(row.ID, row.ShipClass, 0, 1, installed, balance.Reputation{War: 2})
+		require.NoErrorf(t, err, "row %d must install at war_rate=2", row.ID)
+
+		_, err = cat.ResolveInstall(row.ID, row.ShipClass, 0, 1, installed, balance.Reputation{War: 1})
+		require.ErrorIsf(t, err, balance.ErrRankTooLow, "row %d must reject war_rate=1", row.ID)
 	}
 }

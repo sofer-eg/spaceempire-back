@@ -1961,9 +1961,9 @@ equipment:
       class: 1
       price: 2000000
       price_per_level: 1000000
-      min_war_rate: 0
+      min_war_rate: 2
       min_trade_rate: 0
-      min_race_rate: 2
+      min_race_rate: 0
       is_base: 0
       position: 2
       dependance: up_accumulator
@@ -1977,9 +1977,9 @@ equipment:
       class: 2
       price: 1500000
       price_per_level: 1000000
-      min_war_rate: 0
+      min_war_rate: 2
       min_trade_rate: 0
-      min_race_rate: 2
+      min_race_rate: 0
       is_base: 0
       position: 2
       dependance: up_accumulator
@@ -1993,9 +1993,9 @@ equipment:
       class: 3
       price: 750000
       price_per_level: 1000000
-      min_war_rate: 0
+      min_war_rate: 2
       min_trade_rate: 0
-      min_race_rate: 2
+      min_race_rate: 0
       is_base: 0
       position: 2
       dependance: up_accumulator
@@ -2009,9 +2009,9 @@ equipment:
       class: 6
       price: 1000000
       price_per_level: 1000000
-      min_war_rate: 0
+      min_war_rate: 2
       min_trade_rate: 0
-      min_race_rate: 2
+      min_race_rate: 0
       is_base: 0
       position: 2
       dependance: up_accumulator
@@ -2025,9 +2025,9 @@ equipment:
       class: 7
       price: 2500000
       price_per_level: 1000000
-      min_war_rate: 0
+      min_war_rate: 2
       min_trade_rate: 0
-      min_race_rate: 2
+      min_race_rate: 0
       is_base: 0
       position: 2
       dependance: up_accumulator
@@ -2041,9 +2041,9 @@ equipment:
       class: 8
       price: 1500000
       price_per_level: 1000000
-      min_war_rate: 0
+      min_war_rate: 2
       min_trade_rate: 0
-      min_race_rate: 2
+      min_race_rate: 0
       is_base: 0
       position: 2
       dependance: up_accumulator

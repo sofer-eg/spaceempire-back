@@ -36,6 +36,15 @@ type Patch struct {
 	DronesRemoved []domain.DroneID
 	DroneImpacts  []DroneImpact
 
+	// Torpedo delta against the subscriber's previous frame within AOI, same
+	// shape as the drone delta (ЧТЗ doc-1 §3 FR-010). TorpedoImpacts carries the
+	// one-frame detonation/shot-down/expire events; a detonation event holds the
+	// splash centre + SplashRadius for the renderer. Phase 10.3.5.7.
+	TorpedosAdded   []domain.Torpedo
+	TorpedosUpdated []domain.Torpedo
+	TorpedosRemoved []domain.TorpedoID
+	TorpedoImpacts  []TorpedoImpact
+
 	// Container delta against the subscriber's previous frame within AOI.
 	// Containers are immutable once created, so there is no "updated"
 	// bucket — only added (full Container) and removed (id-only). Phase 4.6.
@@ -83,6 +92,8 @@ func (p Patch) IsEmpty() bool {
 		len(p.MissilesRemoved) == 0 && len(p.MissileImpacts) == 0 &&
 		len(p.DronesAdded) == 0 && len(p.DronesUpdated) == 0 &&
 		len(p.DronesRemoved) == 0 && len(p.DroneImpacts) == 0 &&
+		len(p.TorpedosAdded) == 0 && len(p.TorpedosUpdated) == 0 &&
+		len(p.TorpedosRemoved) == 0 && len(p.TorpedoImpacts) == 0 &&
 		len(p.ContainersAdded) == 0 && len(p.ContainersRemoved) == 0 &&
 		len(p.AsteroidsAdded) == 0 && len(p.AsteroidsUpdated) == 0 &&
 		len(p.AsteroidsRemoved) == 0 &&

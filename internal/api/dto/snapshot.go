@@ -48,6 +48,18 @@ type Snapshot struct {
 	// that fired this tick.
 	DroneImpacts []DroneImpact `json:"droneImpacts,omitempty"`
 
+	// TorpedosAdded / TorpedosUpdated / TorpedosRemoved is the torpedo diff
+	// against the subscriber's previous tick view, AOI-filtered by radar
+	// radius (ЧТЗ doc-1 §3 FR-010, NFR-003). Phase 10.3.5.7.
+	TorpedosAdded   []Torpedo `json:"torpedosAdded,omitempty"`
+	TorpedosUpdated []Torpedo `json:"torpedosUpdated,omitempty"`
+	TorpedosRemoved []int64   `json:"torpedosRemoved,omitempty"`
+
+	// TorpedoImpacts holds one-frame torpedo events (detonation / shot-down /
+	// expire) that fired this tick; a detonation carries the splash centre and
+	// SplashRadius for the blast animation.
+	TorpedoImpacts []TorpedoImpact `json:"torpedoImpacts,omitempty"`
+
 	// ContainersAdded / ContainersRemoved is the loot-container diff
 	// against the subscriber's previous tick view (immutable, so no
 	// "updated"). Phase 4.6.

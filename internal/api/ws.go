@@ -480,6 +480,37 @@ func (s *Server) buildSnapshotDTO(patch sector.Patch, sectorID int64) dto.Snapsh
 			}
 		}
 	}
+	if len(patch.TorpedosAdded) > 0 {
+		out.TorpedosAdded = dto.TorpedosFromDomain(patch.TorpedosAdded)
+	}
+	if len(patch.TorpedosUpdated) > 0 {
+		out.TorpedosUpdated = dto.TorpedosFromDomain(patch.TorpedosUpdated)
+	}
+	if len(patch.TorpedosRemoved) > 0 {
+		out.TorpedosRemoved = make([]int64, len(patch.TorpedosRemoved))
+		for i, id := range patch.TorpedosRemoved {
+			out.TorpedosRemoved[i] = int64(id)
+		}
+	}
+	if len(patch.TorpedoImpacts) > 0 {
+		out.TorpedoImpacts = make([]dto.TorpedoImpact, len(patch.TorpedoImpacts))
+		for i, imp := range patch.TorpedoImpacts {
+			out.TorpedoImpacts[i] = dto.TorpedoImpact{
+				TorpedoID: int64(imp.TorpedoID),
+				Owner:     int64(imp.OwnerShipID),
+				Target: dto.EntityRef{
+					Kind: int(imp.Target.Kind),
+					ID:   imp.Target.ID,
+				},
+				X:            imp.Pos.X,
+				Y:            imp.Pos.Y,
+				SplashRadius: imp.SplashRadius,
+				Hit:          imp.Hit,
+				Killed:       imp.Killed,
+				Expired:      imp.Expired,
+			}
+		}
+	}
 	if len(patch.ContainersAdded) > 0 {
 		out.ContainersAdded = dto.ContainersFromDomain(patch.ContainersAdded)
 	}

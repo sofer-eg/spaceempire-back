@@ -40,6 +40,7 @@ type Subscription struct {
 	lastSent          map[domain.ShipID]domain.Ship
 	lastSentMissile   map[domain.MissileID]domain.Missile
 	lastSentDrone     map[domain.DroneID]domain.Drone
+	lastSentTorpedo   map[domain.TorpedoID]domain.Torpedo
 	lastSentContainer map[domain.ContainerID]domain.Container
 	lastSentAsteroid  map[domain.AsteroidID]domain.Asteroid
 	// lastSentStatics is the set of static refs the subscriber currently has

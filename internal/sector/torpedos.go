@@ -133,6 +133,77 @@ func (w *Worker) tickTorpedos(ctx context.Context, s *sectorState, dt float64, n
 	}
 }
 
+// torpedosInRadius returns the subset of live torpedoes whose Pos lies within
+// radius of center (ЧТЗ doc-1 §3 FR-010, NFR-003). radius<=0 disables the filter.
+// Output is a value-type map; Torpedo has no slice/map/pointer fields (the
+// time.Time TTL is value-copied), so a plain copy is deep-safe and satisfies the
+// worker→subscriber isolation contract. Mirrors dronesInRadius / missilesInRadius.
+func torpedosInRadius(src map[domain.TorpedoID]*domain.Torpedo, center domain.Vec2, radius float64) map[domain.TorpedoID]domain.Torpedo {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[domain.TorpedoID]domain.Torpedo, len(src))
+	if radius <= 0 {
+		for id, t := range src {
+			out[id] = *t
+		}
+		return out
+	}
+	r2 := radius * radius
+	for id, t := range src {
+		dx := t.Pos.X - center.X
+		dy := t.Pos.Y - center.Y
+		if dx*dx+dy*dy <= r2 {
+			out[id] = *t
+		}
+	}
+	return out
+}
+
+// diffTorpedos produces the per-tick torpedo delta vs the subscriber's
+// previously-seen set. domain.Torpedo is a comparable value (ExpiresAt is its
+// only non-scalar field, a value-type time.Time fixed at launch), so "changed"
+// is a plain `!=` — exactly as diffMissiles compares Missile. Mirrors diffDrones.
+func diffTorpedos(prev, curr map[domain.TorpedoID]domain.Torpedo) (added, updated []domain.Torpedo, removed []domain.TorpedoID) {
+	for id, t := range curr {
+		pv, existed := prev[id]
+		switch {
+		case !existed:
+			added = append(added, t)
+		case pv != t:
+			updated = append(updated, t)
+		}
+	}
+	for id := range prev {
+		if _, still := curr[id]; !still {
+			removed = append(removed, id)
+		}
+	}
+	return added, updated, removed
+}
+
+// filterTorpedoImpactsForAOI keeps only impacts whose Pos is inside the
+// subscriber's AOI window (ЧТЗ doc-1 §3 FR-010). radius<=0 disables the filter.
+// Mirrors filterDroneImpactsForAOI / filterMissileImpactsForAOI.
+func filterTorpedoImpactsForAOI(imps []TorpedoImpact, center domain.Vec2, radius float64) []TorpedoImpact {
+	if len(imps) == 0 {
+		return nil
+	}
+	if radius <= 0 {
+		out := make([]TorpedoImpact, len(imps))
+		copy(out, imps)
+		return out
+	}
+	r2 := radius * radius
+	var out []TorpedoImpact
+	for _, imp := range imps {
+		if pointInRadius2(imp.Pos, center, r2) {
+			out = append(out, imp)
+		}
+	}
+	return out
+}
+
 // removeTorpedo deletes a torpedo from RAM and the DB (immediate), records the
 // supplied impact for the tick, and clears any dirty flag. Used by every
 // end-of-life path (detonation / expire / owner-loss).

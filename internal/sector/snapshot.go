@@ -230,6 +230,12 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 		patch.DronesUpdated = dUpdated
 		patch.DronesRemoved = dRemoved
 		patch.DroneImpacts = filterDroneImpactsForAOI(s.droneImpacts, sub.Center, sub.Radius)
+		currTorpedos := torpedosInRadius(s.torpedos, sub.Center, sub.Radius)
+		tAdded, tUpdated, tRemoved := diffTorpedos(sub.lastSentTorpedo, currTorpedos)
+		patch.TorpedosAdded = tAdded
+		patch.TorpedosUpdated = tUpdated
+		patch.TorpedosRemoved = tRemoved
+		patch.TorpedoImpacts = filterTorpedoImpactsForAOI(s.torpedoImpacts, sub.Center, sub.Radius)
 		currContainers := containersInRadius(s.containers, sub.Center, sub.Radius)
 		cAdded, cRemoved := diffContainers(sub.lastSentContainer, currContainers)
 		patch.ContainersAdded = cAdded
@@ -265,6 +271,7 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 			sub.lastSent = curr
 			sub.lastSentMissile = currMissiles
 			sub.lastSentDrone = currDrones
+			sub.lastSentTorpedo = currTorpedos
 			sub.lastSentContainer = currContainers
 			sub.lastSentAsteroid = currAsteroids
 			sub.lastSentStatics = currStatics

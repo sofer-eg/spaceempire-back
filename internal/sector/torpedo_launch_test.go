@@ -140,14 +140,15 @@ func TestUnit_LaunchTorpedo_AcceptsShipTarget(t *testing.T) {
 	require.NoError(t, res.Err)
 }
 
-// TestUnit_LaunchTorpedo_AcceptsStaticTarget: a destructible static (a station)
-// is a valid torpedo target (ЧТЗ AC-5, FR-006).
+// TestUnit_LaunchTorpedo_AcceptsStaticTarget: a live destructible static (a
+// station resident in the sector) is a valid torpedo target (ЧТЗ AC-5, FR-006).
+// The launch resolves the static's position from the live combat set, so the
+// target must actually exist (a phantom static is rejected, see the dead-target
+// gate test).
 func TestUnit_LaunchTorpedo_AcceptsStaticTarget(t *testing.T) {
 	t.Parallel()
-	w := newSingleSectorWorker(t,
-		sector.Config{TickInterval: time.Second},
-		clock.NewRealClock(), nil,
-		[]domain.Ship{torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})})
+	station := stationStatic(5, nil, domain.Vec2{X: 100, Y: 0}, 1000, 0, 0, 0)
+	w := staticCombatWorker(t, []domain.Ship{torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})}, station)
 
 	res := sendTorpedo(t, w, sector.LaunchTorpedoCommand{
 		PlayerID: 100, ShipID: 1, Class: 2,

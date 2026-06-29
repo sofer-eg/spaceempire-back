@@ -116,6 +116,27 @@ func (w *Worker) persistDirtyDrones(ctx context.Context, s *sectorState) {
 	s.lastDroneSnapshot = w.clock.Now()
 }
 
+// persistDirtyTorpedos is the torpedo counterpart of persistDirtyDrones: it
+// writes the mutable fields of every dirty torpedo in a single BatchUpdate on
+// the snapshot cadence (ЧТЗ NFR-002). No-op when persistence is disabled or
+// nothing is dirty.
+func (w *Worker) persistDirtyTorpedos(ctx context.Context, s *sectorState) {
+	if w.torpedoRepo == nil || len(s.torpedosDirty) == 0 {
+		return
+	}
+	if w.clock.Now().Sub(s.lastTorpedoSnapshot) < w.cfg.SnapshotInterval {
+		return
+	}
+	ts := s.collectDirtyTorpedos()
+	if err := w.torpedoRepo.BatchUpdate(ctx, ts); err != nil {
+		w.logger.ErrorContext(ctx, "torpedo snapshot batch update failed",
+			"err", err, "sector", int64(s.sectorID), "dirty_count", len(ts))
+		return
+	}
+	s.torpedosDirty = make(map[domain.TorpedoID]bool)
+	s.lastTorpedoSnapshot = w.clock.Now()
+}
+
 // persistAsteroids is the asteroid counterpart of persistDirtyDrones: it
 // writes the remaining mass of every dirty asteroid in a single BatchUpdate
 // on the snapshot cadence. Depleted asteroids are deleted immediately by the

@@ -79,6 +79,22 @@ type sectorState struct {
 	// laserEffects.
 	droneImpacts []DroneImpact
 
+	// torpedos holds the live homing torpedoes for this sector (ЧТЗ doc-1
+	// §3 FR-001). Like drones they are persistent state: launch INSERTs,
+	// death/detonation/expire DELETEs, torpedosDirty drives the periodic
+	// BatchUpdate. nextTorpedoID is only used as a fallback id allocator
+	// when no TorpedoRepo is wired (pure unit tests) — with a repo the id
+	// is the DB-assigned primary key.
+	torpedos            map[domain.TorpedoID]*domain.Torpedo
+	torpedosDirty       map[domain.TorpedoID]bool
+	nextTorpedoID       domain.TorpedoID
+	lastTorpedoSnapshot time.Time
+	// torpedoImpacts accumulates one-frame torpedo events (detonation /
+	// expire / owner-loss) for the current tick. Same one-frame lifecycle
+	// as droneImpacts; surfacing them in the Snapshot/AOI is a later
+	// sub-task (TASK-100.3.5.7), so they stay internal for now.
+	torpedoImpacts []TorpedoImpact
+
 	// containers holds the live loot containers in this sector (phase
 	// 4.6). Persistent (immediate writes via the container repo) but
 	// immutable once created — the cargo inside changes only on pickup,
@@ -129,7 +145,7 @@ type sectorState struct {
 	snap atomic.Pointer[Snapshot]
 }
 
-func newSectorState(id domain.SectorID, initial []domain.Ship, initialDrones []domain.Drone, initialContainers []domain.Container, initialAsteroids []domain.Asteroid, statics domain.SectorStatics, now time.Time) *sectorState {
+func newSectorState(id domain.SectorID, initial []domain.Ship, initialDrones []domain.Drone, initialTorpedos []domain.Torpedo, initialContainers []domain.Container, initialAsteroids []domain.Asteroid, statics domain.SectorStatics, now time.Time) *sectorState {
 	ships := make(map[domain.ShipID]*domain.Ship, len(initial))
 	for i := range initial {
 		s := initial[i]
@@ -158,6 +174,15 @@ func newSectorState(id domain.SectorID, initial []domain.Ship, initialDrones []d
 		drones[d.ID] = &d
 		if d.ID > maxDroneID {
 			maxDroneID = d.ID
+		}
+	}
+	torpedos := make(map[domain.TorpedoID]*domain.Torpedo, len(initialTorpedos))
+	var maxTorpedoID domain.TorpedoID
+	for i := range initialTorpedos {
+		tp := initialTorpedos[i]
+		torpedos[tp.ID] = &tp
+		if tp.ID > maxTorpedoID {
+			maxTorpedoID = tp.ID
 		}
 	}
 	containers := make(map[domain.ContainerID]*domain.Container, len(initialContainers))
@@ -189,6 +214,10 @@ func newSectorState(id domain.SectorID, initial []domain.Ship, initialDrones []d
 		dronesDirty:          make(map[domain.DroneID]bool),
 		nextDroneID:          maxDroneID,
 		lastDroneSnapshot:    now,
+		torpedos:             torpedos,
+		torpedosDirty:        make(map[domain.TorpedoID]bool),
+		nextTorpedoID:        maxTorpedoID,
+		lastTorpedoSnapshot:  now,
 		containers:           containers,
 		asteroids:            asteroids,
 		asteroidsDirty:       make(map[domain.AsteroidID]bool),
@@ -279,6 +308,62 @@ func (s *sectorState) collectDirtyDrones() []domain.Drone {
 		out = append(out, *d)
 	}
 	return out
+}
+
+func (s *sectorState) markTorpedoDirty(id domain.TorpedoID) {
+	s.torpedosDirty[id] = true
+}
+
+// addTorpedoImpact records a per-tick torpedo event (detonation / expire /
+// owner-loss) for the current tick. Same one-frame lifecycle as droneImpacts.
+func (s *sectorState) addTorpedoImpact(imp TorpedoImpact) {
+	s.torpedoImpacts = append(s.torpedoImpacts, imp)
+}
+
+// clearTorpedoImpacts drops the accumulated per-tick torpedo events after the
+// tick has consumed them.
+func (s *sectorState) clearTorpedoImpacts() {
+	s.torpedoImpacts = s.torpedoImpacts[:0]
+}
+
+// allocTorpedoID returns a fallback monotonic id, used only when no TorpedoRepo
+// is wired (pure unit tests). With a repo the TorpedoID is the DB-assigned
+// primary key returned by Create.
+func (s *sectorState) allocTorpedoID() domain.TorpedoID {
+	s.nextTorpedoID++
+	return s.nextTorpedoID
+}
+
+// collectDirtyTorpedos returns value copies of every currently-dirty torpedo.
+// Ids removed since being marked dirty are skipped.
+func (s *sectorState) collectDirtyTorpedos() []domain.Torpedo {
+	out := make([]domain.Torpedo, 0, len(s.torpedosDirty))
+	for id := range s.torpedosDirty {
+		tp, ok := s.torpedos[id]
+		if !ok {
+			continue
+		}
+		out = append(out, *tp)
+	}
+	return out
+}
+
+// torpedoTargetPos resolves the current position of a torpedo target and
+// whether it is present and alive. A ship target resolves from s.ships (HP>0);
+// any destructible static resolves from s.destructibles (HP>0). It gates both
+// the launch (a dead/missing target must not spend energy or ammunition) and
+// the per-tick homing destination.
+func (s *sectorState) torpedoTargetPos(ref domain.EntityRef) (domain.Vec2, bool) {
+	if ref.Kind == domain.EntityKindShip {
+		if ship, ok := s.ships[domain.ShipID(ref.ID)]; ok && ship.HP > 0 {
+			return ship.Pos, true
+		}
+		return domain.Vec2{}, false
+	}
+	if d, ok := s.destructibles[ref]; ok && d.HP > 0 {
+		return d.Pos, true
+	}
+	return domain.Vec2{}, false
 }
 
 func (s *sectorState) markAsteroidDirty(id domain.AsteroidID) {

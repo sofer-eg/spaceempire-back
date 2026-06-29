@@ -43,6 +43,7 @@ import (
 	satellitesrepo "spaceempire/back/internal/persistence/satellites"
 	shipsrepo "spaceempire/back/internal/persistence/ships"
 	stationsrepo "spaceempire/back/internal/persistence/stations"
+	torpedosrepo "spaceempire/back/internal/persistence/torpedos"
 	traderepo "spaceempire/back/internal/persistence/trade"
 	worldrepo "spaceempire/back/internal/persistence/world"
 	"spaceempire/back/internal/pkg/clock"
@@ -133,6 +134,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	shipRepo := shipsrepo.New(pool)
 	droneRepo := dronesrepo.New(pool)
+	torpedoRepo := torpedosrepo.New(pool)
 	aiStateRepo := aistaterepo.New(pool)
 	clansRepo := clans.NewRepository(pool)
 	worldRepo := worldrepo.New(pool)
@@ -224,6 +226,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// NPC rows the spawner just inserted).
 	initial := make(map[domain.SectorID][]domain.Ship, len(sectors))
 	initialDrones := make(map[domain.SectorID][]domain.Drone, len(sectors))
+	initialTorpedos := make(map[domain.SectorID][]domain.Torpedo, len(sectors))
 	initialContainers := make(map[domain.SectorID][]domain.Container, len(sectors))
 	initialAIState := make(map[domain.SectorID][]domain.AIState, len(sectors))
 	for _, s := range sectors {
@@ -238,6 +241,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			return fmt.Errorf("load drones sector %d: %w", s.ID, err)
 		}
 		initialDrones[s.ID] = sectorDrones
+
+		sectorTorpedos, err := torpedoRepo.LoadAll(ctx, s.ID)
+		if err != nil {
+			return fmt.Errorf("load torpedos sector %d: %w", s.ID, err)
+		}
+		initialTorpedos[s.ID] = sectorTorpedos
 
 		sectorContainers, err := containerRepo.LoadAll(ctx, s.ID)
 		if err != nil {
@@ -357,6 +366,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		sector.WithStatics(statics),
 		sector.WithProduction(productionSvc),
 		sector.WithDrones(droneRepo, initialDrones),
+		sector.WithTorpedos(torpedoRepo, initialTorpedos),
 		sector.WithContainers(containerRepo, initialContainers),
 		sector.WithAI(aiRegistry, aiStateRepo, initialAIState),
 		// 5.3: NPC traders' ai.Transfer hauls cargo between stations and ships

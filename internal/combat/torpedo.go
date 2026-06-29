@@ -3,6 +3,8 @@ package combat
 import (
 	"math"
 	"time"
+
+	"spaceempire/back/internal/domain"
 )
 
 // TorpedoSpec captures the per-class torpedo magnitudes for the spaceempire
@@ -69,4 +71,232 @@ var torpedoSpecsByClass = map[int]TorpedoSpec{
 		HP:           60, // sturdier
 		TTL:          60 * time.Second,
 	},
+}
+
+// Torpedo strafe / friction coefficients. Unlike per-class Damage/Speed these
+// are uniform across both classes (the TorpedoSpec carries no field for them),
+// so they live as package constants — same values the missile integrator uses
+// (SP mis_strafe = 0.8 * accel, mis_rub = -0.1 * speed).
+const (
+	torpedoStrafeK   = 0.8
+	torpedoFrictionK = 0.1
+)
+
+// DefaultTorpedoSpec returns the balance profile for an ammunition class: 2
+// (gt23 "Огненная Буря") or 3 (gt24 "Святая Торпеда"). The HTTP handler already
+// validates class ∈ {2,3} before a launch reaches the worker; an unknown class
+// falls back to the class-2 profile so this accessor never yields a degenerate
+// (zero-TTL, zero-Speed) spec. Consumed by LaunchTorpedo at spawn.
+func DefaultTorpedoSpec(class int) TorpedoSpec {
+	if spec, ok := torpedoSpecsByClass[class]; ok {
+		return spec
+	}
+	return torpedoSpecsByClass[2]
+}
+
+// TorpedoOutcome reports the per-tick verdict TickTorpedo returns to the sector
+// worker. Shoot-down (HP<=0) is a separate sub-task (TASK-100.3.5.6); this set
+// only covers the homing-and-detonation life-cycle.
+type TorpedoOutcome uint8
+
+const (
+	// TorpedoKeep means the torpedo is still in flight; the worker keeps it in
+	// the live set and marks it dirty for the periodic persistence batch.
+	TorpedoKeep TorpedoOutcome = iota
+	// TorpedoHit means the torpedo reached within HitRadius of an alive target
+	// this tick. The worker detonates it (emits an impact carrying the splash
+	// centre + radius and removes the torpedo). The area damage itself is
+	// applied by TASK-100.3.5.5; this sub-task only marks the detonation.
+	TorpedoHit
+	// TorpedoExpired means the torpedo's TTL ran out without reaching its
+	// target. The worker removes it without any damage.
+	TorpedoExpired
+)
+
+// LaunchTorpedo builds a fresh Torpedo fired from attacker at target. It mirrors
+// LaunchMissile: the torpedo spawns at the attacker's position, inherits its
+// velocity (a strafing pilot does not eject backwards-drifting ordnance) and
+// heading, and seeds LastTargetPos so it has a fallback course once the target
+// dies or leaves the sector. The per-class magnitudes (Damage/Speed/Accel/
+// TurnRate/HitRadius/SplashRadius/HP and TTL→ExpiresAt) are copied from spec
+// into the persisted row, so a torpedo restored from the DB ticks with its own
+// stored profile. Pure builder — the sector worker allocates the id (DB-assigned)
+// and inserts it into the live set.
+func LaunchTorpedo(
+	id domain.TorpedoID,
+	class int,
+	spec TorpedoSpec,
+	attacker *domain.Ship,
+	target domain.EntityRef,
+	targetPos domain.Vec2,
+	now time.Time,
+) *domain.Torpedo {
+	dir := attacker.Direction
+	if dir.IsZero() {
+		dir = domain.Vec2{X: 1, Y: 0}
+	}
+	return &domain.Torpedo{
+		ID:            id,
+		SectorID:      attacker.SectorID,
+		OwnerShipID:   attacker.ID,
+		PlayerID:      attacker.PlayerID,
+		Pos:           attacker.Pos,
+		Vel:           attacker.Vel,
+		Direction:     dir,
+		Target:        target,
+		LastTargetPos: targetPos,
+		Class:         class,
+		Damage:        spec.Damage,
+		Speed:         spec.Speed,
+		Accel:         spec.Accel,
+		TurnRate:      spec.TurnRate,
+		HitRadius:     spec.HitRadius,
+		SplashRadius:  spec.SplashRadius,
+		HP:            spec.HP,
+		ExpiresAt:     now.Add(spec.TTL),
+	}
+}
+
+// TickTorpedo integrates one torpedo by dt seconds, homing toward its target.
+// It is the heavy-ordnance sibling of TickMissile and reads its homing
+// magnitudes from the torpedo itself (TurnRate/Accel/Speed/HitRadius — copied
+// from the per-class spec at launch and persisted), so a torpedo restored from
+// the DB keeps its profile without a spec lookup. Strafe and friction
+// coefficients are uniform across classes (torpedoStrafeK / torpedoFrictionK).
+//
+// targetAlive=true when the sector worker found the target (a ship or a
+// destructible static) alive in its live set; targetPos must then be the
+// target's current Pos and the torpedo refreshes LastTargetPos before steering.
+// When targetAlive=false the torpedo steers blindly toward t.LastTargetPos and
+// hit checks are suppressed — a lost target can only run out the TTL (same
+// fallback as TickMissile).
+//
+// All mutations of t happen in this function; the worker relies on the
+// one-writer-per-sector invariant so no other goroutine touches t.
+func TickTorpedo(
+	t *domain.Torpedo,
+	targetPos domain.Vec2,
+	targetAlive bool,
+	dt float64,
+	now time.Time,
+) TorpedoOutcome {
+	if t == nil {
+		return TorpedoExpired
+	}
+	if !now.Before(t.ExpiresAt) {
+		return TorpedoExpired
+	}
+	if targetAlive {
+		t.LastTargetPos = targetPos
+	} else {
+		targetPos = t.LastTargetPos
+	}
+
+	delta := targetPos.Sub(t.Pos)
+	rangeEq := delta.Length()
+
+	noTurn := false
+	var targetDir domain.Vec2
+	if rangeEq > 1 {
+		targetDir = delta.Scale(1.0 / rangeEq)
+	} else {
+		targetDir = t.Direction
+		noTurn = true
+	}
+
+	speedEq := t.Vel.Length()
+	var speedDir domain.Vec2
+	if speedEq > 1 {
+		speedDir = t.Vel.Scale(1.0 / speedEq)
+	} else {
+		speedDir = t.Direction
+	}
+
+	// Rotate Direction toward the target by up to TurnRate·dt, snapping on
+	// overshoot (or instantly when TurnRate·dt >= π). `turning` records that we
+	// are mid-turn so acceleration can be braked on a bad turn below.
+	newDir := t.Direction
+	turning := false
+	radStep := t.TurnRate * dt
+	if !noTurn {
+		if radStep >= math.Pi {
+			newDir = targetDir
+		} else {
+			ckX := targetDir.X*t.Direction.X + targetDir.Y*t.Direction.Y
+			ckY := targetDir.X*(-t.Direction.Y) + targetDir.Y*t.Direction.X
+			if math.Abs(ckY) < 0.01 && ckX > 0 {
+				newDir = targetDir
+			} else {
+				step := radStep
+				if ckY < 0 {
+					step = -radStep
+				}
+				cs := math.Cos(step)
+				sn := math.Sin(step)
+				newDir = domain.Vec2{
+					X: cs*t.Direction.X - sn*t.Direction.Y,
+					Y: sn*t.Direction.X + cs*t.Direction.Y,
+				}
+				newCkY := targetDir.X*(-newDir.Y) + targetDir.Y*newDir.X
+				if (ckY > 0) != (newCkY > 0) {
+					newDir = targetDir
+				} else {
+					turning = true
+				}
+			}
+		}
+	}
+
+	// Acceleration along newDir, braked on a bad turn so the torpedo does not
+	// power through the corner (SP brake on dot < 0).
+	accel := t.Accel * dt
+	if turning {
+		if dot := newDir.X*targetDir.X + newDir.Y*targetDir.Y; dot < 0 {
+			accel = (torpedoFrictionK + t.Accel*0.1) * dt
+		}
+	}
+	acc := newDir.Scale(accel)
+
+	// Strafe compensation cancels the velocity component perpendicular to the
+	// target line, up to torpedoStrafeK*Accel*dt magnitude.
+	addStrafe := domain.Vec2{}
+	if strafeMax := torpedoStrafeK * t.Accel * dt; strafeMax > 0 {
+		perp := domain.Vec2{X: -targetDir.Y, Y: targetDir.X}
+		side := (t.Vel.X+acc.X)*perp.X + (t.Vel.Y+acc.Y)*perp.Y
+		if math.Abs(side) > 0.001 {
+			mag := math.Abs(side)
+			if mag > strafeMax {
+				mag = strafeMax
+			}
+			sign := 1.0
+			if side > 0 {
+				sign = -1.0
+			}
+			addStrafe = perp.Scale(sign * mag)
+		}
+	}
+
+	// Proportional friction against current velocity.
+	rub := speedDir.Scale(-torpedoFrictionK * speedEq * dt)
+
+	newVel := t.Vel.Add(acc).Add(rub).Add(addStrafe)
+	if mag := newVel.Length(); mag > t.Speed {
+		newVel = newVel.Scale(t.Speed / mag)
+	}
+
+	oldPos := t.Pos
+	newPos := t.Pos.Add(newVel.Scale(dt))
+	t.Pos = newPos
+	t.Vel = newVel
+	t.Direction = newDir
+
+	if targetAlive {
+		// Detonate when the swept segment oldPos→newPos passes within HitRadius
+		// of the target (a pure endpoint check would miss a fast torpedo that
+		// flies through the target between integration steps).
+		if pointSegmentDistance(targetPos, oldPos, newPos) <= t.HitRadius {
+			return TorpedoHit
+		}
+	}
+	return TorpedoKeep
 }

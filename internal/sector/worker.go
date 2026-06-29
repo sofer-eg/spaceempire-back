@@ -39,6 +39,16 @@ type DroneRepo interface {
 	Delete(ctx context.Context, id domain.DroneID) error
 }
 
+// TorpedoRepo is the persistence surface for homing torpedoes (TASK-100.3.5).
+// The real implementation lives in internal/persistence/torpedos. Wired via
+// WithTorpedos; nil disables persistence — torpedoes still launch and fly but
+// are not restored after a restart (used by unit tests). Mirrors DroneRepo.
+type TorpedoRepo interface {
+	Create(ctx context.Context, t domain.Torpedo) (domain.TorpedoID, error)
+	BatchUpdate(ctx context.Context, ts []domain.Torpedo) error
+	Delete(ctx context.Context, id domain.TorpedoID) error
+}
+
 // RNG is the randomness source the kill handler needs for the SP cargo
 // drop rolls (see kill_object.md §3). Aliased to combat.RNG so a single
 // source threads through. *math/rand.Rand satisfies it.
@@ -171,6 +181,11 @@ type Worker struct {
 	// Wired in via WithDrones together with initialDrones.
 	droneRepo DroneRepo
 
+	// torpedoRepo persists homing torpedoes (TASK-100.3.5). Nil disables
+	// torpedo persistence. Wired in via WithTorpedos together with
+	// initialTorpedos.
+	torpedoRepo TorpedoRepo
+
 	// containerRepo persists loot containers (phase 4.6). Nil disables
 	// persistence (ships still die, but no container drops). Wired via
 	// WithContainers together with initialContainers.
@@ -264,6 +279,11 @@ type Worker struct {
 	// the reference.
 	initialDrones map[domain.SectorID][]domain.Drone
 
+	// initialTorpedos is the per-sector cold-start torpedo set supplied via
+	// WithTorpedos. NewWorker consumes it once into sectorState and clears
+	// the reference, so live torpedoes survive a restart (ЧТЗ NFR-002).
+	initialTorpedos map[domain.SectorID][]domain.Torpedo
+
 	// initialContainers is the per-sector cold-start loot-container set
 	// supplied via WithContainers. NewWorker consumes it once into
 	// sectorState and clears the reference.
@@ -346,6 +366,18 @@ func WithDrones(repo DroneRepo, initial map[domain.SectorID][]domain.Drone) Opti
 	return func(w *Worker) {
 		w.droneRepo = repo
 		w.initialDrones = initial
+	}
+}
+
+// WithTorpedos enables persistent homing torpedoes: the worker writes launch
+// INSERTs / death DELETEs immediately and the periodic snapshot batch. initial
+// is the per-sector cold-start torpedo set (LoadAll'd by the caller); missing
+// keys start empty. Passing a nil repo with a non-nil initial still seeds the
+// live set but never persists changes. Mirrors WithDrones.
+func WithTorpedos(repo TorpedoRepo, initial map[domain.SectorID][]domain.Torpedo) Option {
+	return func(w *Worker) {
+		w.torpedoRepo = repo
+		w.initialTorpedos = initial
 	}
 }
 
@@ -511,10 +543,11 @@ func NewWorker(
 		w.rng = rand.New(rand.NewSource(now.UnixNano())) //nolint:gosec // loot RNG, not security-sensitive
 	}
 	for id, ships := range initial {
-		w.sectors[id] = newSectorState(id, ships, w.initialDrones[id], w.initialContainers[id], w.initialAsteroids[id], w.initialStatics[id], now)
+		w.sectors[id] = newSectorState(id, ships, w.initialDrones[id], w.initialTorpedos[id], w.initialContainers[id], w.initialAsteroids[id], w.initialStatics[id], now)
 	}
 	w.initialStatics = nil
 	w.initialDrones = nil
+	w.initialTorpedos = nil
 	w.initialContainers = nil
 	w.initialAsteroids = nil
 
@@ -637,6 +670,7 @@ func (w *Worker) flushAll() {
 			}
 		}
 		w.flushDrones(ctx, s)
+		w.flushTorpedos(ctx, s)
 		w.flushAsteroids(ctx, s)
 		w.flushAIState(ctx, s)
 	}
@@ -658,6 +692,25 @@ func (w *Worker) flushDrones(ctx context.Context, s *sectorState) {
 	if err := w.droneRepo.BatchUpdate(ctx, ds); err != nil {
 		w.logger.ErrorContext(ctx, "shutdown flush drones failed",
 			"err", err, "sector", int64(s.sectorID), "count", len(ds))
+	}
+}
+
+// flushTorpedos writes the live torpedo state of one sector in a single
+// BatchUpdate on graceful shutdown, so a clean run ends with fresh torpedo
+// coordinates/HP in the DB (the periodic batch only fires on the snapshot
+// interval). No-op when torpedo persistence is disabled or the sector has no
+// live torpedoes. Mirrors flushDrones.
+func (w *Worker) flushTorpedos(ctx context.Context, s *sectorState) {
+	if w.torpedoRepo == nil || len(s.torpedos) == 0 {
+		return
+	}
+	ts := make([]domain.Torpedo, 0, len(s.torpedos))
+	for _, t := range s.torpedos {
+		ts = append(ts, *t)
+	}
+	if err := w.torpedoRepo.BatchUpdate(ctx, ts); err != nil {
+		w.logger.ErrorContext(ctx, "shutdown flush torpedos failed",
+			"err", err, "sector", int64(s.sectorID), "count", len(ts))
 	}
 }
 
@@ -764,11 +817,13 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	w.tickTowers(s)
 	tickMissiles(s, dt, started)
 	w.tickDrones(ctx, s, dt, started)
+	w.tickTorpedos(ctx, s, dt, started)
 	w.sweepKilledShips(ctx, s)
 	w.tickContainers(ctx, s, started)
 	w.runProduction(ctx, s, started)
 	w.persistDirty(ctx, s)
 	w.persistDirtyDrones(ctx, s)
+	w.persistDirtyTorpedos(ctx, s)
 	w.persistAsteroids(ctx, s)
 	w.persistAIState(ctx, s)
 	s.tick++
@@ -787,6 +842,7 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	s.clearLaserEffects()
 	s.clearMissileImpacts()
 	s.clearDroneImpacts()
+	s.clearTorpedoImpacts()
 	s.clearStaticCombatDeltas()
 	// Clear one-tick stealth reveals (phase 10.20a) so they apply for
 	// exactly the snapshot where the missile was fired, not subsequent ticks.

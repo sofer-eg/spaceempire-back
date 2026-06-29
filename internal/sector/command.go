@@ -531,7 +531,7 @@ type LaunchTorpedoCommand struct {
 	Reply      chan<- LaunchTorpedoResult
 }
 
-func (c LaunchTorpedoCommand) apply(_ *Worker, s *sectorState) {
+func (c LaunchTorpedoCommand) apply(w *Worker, s *sectorState) {
 	var res LaunchTorpedoResult
 
 	ship, ok := s.ships[c.ShipID]
@@ -556,23 +556,59 @@ func (c LaunchTorpedoCommand) apply(_ *Worker, s *sectorState) {
 		return
 	}
 
+	// Resolve the target's current position and confirm it exists and is alive
+	// BEFORE spending energy or ammunition — a launch at a missing/dead target
+	// must not drain the launcher (mirrors LaunchMissileCommand's target gate).
+	// targetPos also seeds the torpedo's LastTargetPos fallback course.
+	targetPos, targetOK := s.torpedoTargetPos(c.Target)
+	if !targetOK {
+		res.Err = ErrInvalidAttackTarget
+		replyLaunchTorpedo(c.Reply, res)
+		return
+	}
+
 	// Phase 10.3.1: a launch is an "action" energy expense. Reject when the
-	// pool cannot cover the launcher's cost; debit it on success so repeated
-	// fire drains the ship until it recharges. Cost 0 disables the gate (tests).
+	// pool cannot cover the launcher's cost. Cost 0 disables the gate (tests).
 	if ship.Energy < c.EnergyCost {
 		res.Err = ErrNotEnoughEnergy
 		replyLaunchTorpedo(c.Reply, res)
 		return
 	}
+
+	// Spawn the torpedo from the class spec. Persist it immediately (the row's
+	// DB id is the authoritative TorpedoID that survives restarts); fall back to
+	// a worker-local id when no repo is wired (pure unit tests).
+	now := w.clock.Now()
+	spec := combat.DefaultTorpedoSpec(c.Class)
+	t := combat.LaunchTorpedo(0, c.Class, spec, ship, c.Target, targetPos, now)
+	var id domain.TorpedoID
+	if w.torpedoRepo != nil {
+		created, err := w.torpedoRepo.Create(context.Background(), *t)
+		if err != nil {
+			// Persist failed before the launch committed — surface the error so
+			// the HTTP handler refunds the ammunition. No energy was debited yet.
+			w.logger.Error("torpedo create failed",
+				"err", err, "ship", int64(c.ShipID), "sector", int64(s.sectorID))
+			res.Err = err
+			replyLaunchTorpedo(c.Reply, res)
+			return
+		}
+		id = created
+	} else {
+		id = s.allocTorpedoID()
+	}
+	t.ID = id
+	s.torpedos[id] = t
+	s.markTorpedoDirty(id)
+
+	// Debit the action energy only once the launch has committed, so a rejected
+	// or failed launch spends nothing (ЧТЗ AC-3).
 	if c.EnergyCost > 0 {
 		ship.Energy -= c.EnergyCost
 		s.markDirty(c.ShipID)
 	}
 
-	// TODO(TASK-100.3.5.4): spawn the torpedo here — build it from
-	// combat.DefaultTorpedoSpec(c.Class), insert it into sectorState, persist
-	// via torpedoRepo.Create, run the homing tick, and set res.TorpedoID. This
-	// sub-task only enforces the launch gates and the action-energy cost.
+	res.TorpedoID = id
 	replyLaunchTorpedo(c.Reply, res)
 }
 

@@ -91,3 +91,80 @@ func TestUnit_TickTorpedo_FallbackToLastTargetPos(t *testing.T) {
 	assert.Less(t, last.Sub(torp.Pos).Length(), startRange,
 		"torpedo must close on its remembered LastTargetPos when the target is lost")
 }
+
+// splashShip is a minimal damageable ship at pos with a given id, owner, and
+// shieldless hull for the area-damage tests (HP-only damage is easy to read).
+func splashShip(id, player int64, pos domain.Vec2, hp int) *domain.Ship {
+	return &domain.Ship{
+		ID:       domain.ShipID(id),
+		PlayerID: domain.PlayerID(player),
+		Pos:      pos,
+		HP:       hp,
+		MaxHP:    hp,
+	}
+}
+
+// TestUnit_ApplyDamageInRadius_HitsInRadiusSkipsOutside: a blast damages every
+// ship inside SplashRadius and leaves a ship outside it untouched, reporting
+// exactly the in-radius refs (ЧТЗ AC-6 N≥2 targets; AC #4 radius bound).
+func TestUnit_ApplyDamageInRadius_HitsInRadiusSkipsOutside(t *testing.T) {
+	t.Parallel()
+	center := domain.Vec2{X: 0, Y: 0}
+	near1 := splashShip(1, 100, domain.Vec2{X: 10, Y: 0}, 1000)
+	near2 := splashShip(2, 200, domain.Vec2{X: 0, Y: 30}, 1000)
+	far := splashShip(3, 300, domain.Vec2{X: 500, Y: 0}, 1000)
+	ships := map[domain.ShipID]*domain.Ship{1: near1, 2: near2, 3: far}
+
+	hits := combat.ApplyDamageInRadius(ships, nil, center, 40, 150, 999)
+
+	require.ElementsMatch(t, []domain.EntityRef{
+		{Kind: domain.EntityKindShip, ID: 1},
+		{Kind: domain.EntityKindShip, ID: 2},
+	}, hits, "only the two ships inside SplashRadius are reported hit")
+	require.Equal(t, 850, near1.HP, "in-radius ship took splash damage")
+	require.Equal(t, 850, near2.HP, "in-radius ship took splash damage")
+	require.Equal(t, 1000, far.HP, "a ship outside SplashRadius is untouched (proves the radius bound)")
+}
+
+// TestUnit_ApplyDamageInRadius_FriendlyFireHitsOwnShips: the splash is
+// indiscriminate — the firing player's own launching ship and another ship of
+// the same player, both in the blast, take damage and are attributed to the
+// firing player (ЧТЗ AC-6 friendly-fire, R-02). No owner/ally filtering exists.
+func TestUnit_ApplyDamageInRadius_FriendlyFireHitsOwnShips(t *testing.T) {
+	t.Parallel()
+	const attacker = domain.PlayerID(100)
+	center := domain.Vec2{X: 0, Y: 0}
+	owner := splashShip(1, int64(attacker), domain.Vec2{X: 5, Y: 0}, 500) // the launching ship
+	ally := splashShip(2, int64(attacker), domain.Vec2{X: 0, Y: 20}, 500) // another own ship
+	ships := map[domain.ShipID]*domain.Ship{1: owner, 2: ally}
+
+	hits := combat.ApplyDamageInRadius(ships, nil, center, 40, 100, attacker)
+
+	require.Len(t, hits, 2, "splash hits both friendly ships — no owner exclusion")
+	require.Equal(t, 400, owner.HP, "the firing player's own launching ship takes damage")
+	require.Equal(t, 400, ally.HP, "a friendly ship of the firing player takes damage")
+	require.Equal(t, attacker, owner.LastAttacker, "a self-hit is attributed to the firing player")
+	require.Equal(t, attacker, ally.LastAttacker)
+}
+
+// TestUnit_ApplyDamageInRadius_DamagesStatic: a destructible static inside the
+// blast takes damage through domain.Damageable, one outside is untouched, and a
+// dead ship in range is skipped (the kill sweep already owns it) — ЧТЗ AC #3.
+func TestUnit_ApplyDamageInRadius_DamagesStatic(t *testing.T) {
+	t.Parallel()
+	center := domain.Vec2{X: 0, Y: 0}
+	insideRef := domain.EntityRef{Kind: domain.EntityKindStation, ID: 5}
+	inside := &domain.DestructibleStatic{Ref: insideRef, Pos: domain.Vec2{X: 10, Y: 0}, HP: 10000}
+	outsideRef := domain.EntityRef{Kind: domain.EntityKindStation, ID: 6}
+	outside := &domain.DestructibleStatic{Ref: outsideRef, Pos: domain.Vec2{X: 500, Y: 0}, HP: 10000}
+	statics := map[domain.EntityRef]*domain.DestructibleStatic{insideRef: inside, outsideRef: outside}
+
+	dead := splashShip(1, 100, domain.Vec2{X: 0, Y: 0}, 0) // HP<=0, already dead
+	ships := map[domain.ShipID]*domain.Ship{1: dead}
+
+	hits := combat.ApplyDamageInRadius(ships, statics, center, 40, 600, 999)
+
+	require.Equal(t, []domain.EntityRef{insideRef}, hits, "only the in-radius static is hit; the dead ship is skipped")
+	require.Equal(t, 9400, inside.HP, "static in radius took splash damage via domain.Damageable")
+	require.Equal(t, 10000, outside.HP, "static outside SplashRadius is untouched")
+}

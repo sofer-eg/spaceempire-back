@@ -29,9 +29,9 @@ type TorpedoImpact struct {
 // torpedo it resolves the owner and the (ship or destructible-static) target,
 // homes via combat.TickTorpedo, and ends the torpedo's life on:
 //   - owner loss (owner ship gone or dead) → removal + Expired impact;
-//   - detonation (within HitRadius of an alive target) → removal + Hit impact
-//     carrying the splash centre/radius. The area damage itself is applied by
-//     TASK-100.3.5.5; this sub-task only marks the detonation;
+//   - detonation (within HitRadius of an alive target) → indiscriminate splash
+//     damage to everything inside SplashRadius (combat.ApplyDamageInRadius,
+//     TASK-100.3.5.5) + removal + Hit impact carrying the splash centre/radius;
 //   - TTL expiry → removal + Expired impact, no damage.
 //
 // Every removal writes the DELETE to the DB immediately (torpedoes are
@@ -57,9 +57,22 @@ func (w *Worker) tickTorpedos(ctx context.Context, s *sectorState, dt float64, n
 		case combat.TorpedoKeep:
 			s.markTorpedoDirty(id)
 		case combat.TorpedoHit:
-			// Detonate: emit the splash centre + radius for the future area
-			// damage / render passes and remove the torpedo. No damage applied
-			// here (TASK-100.3.5.5).
+			// Detonate: deal indiscriminate area damage to every ship and
+			// destructible static inside SplashRadius of the blast (TASK-100.3.5.5,
+			// ЧТЗ FR-007) — friendly-fire included, the owner's own ships among
+			// them. Damage only lowers HP; a target that drops to HP<=0 is reaped
+			// by sweepKilledShips next (it runs right after this step), exactly as
+			// a laser hit. Mark every hit target dirty so the WS combat delta and
+			// the persistence batch carry the new HP.
+			for _, ref := range combat.ApplyDamageInRadius(s.ships, s.destructibles, t.Pos, t.SplashRadius, t.Damage, t.PlayerID) {
+				if ref.Kind == domain.EntityKindShip {
+					s.markDirty(domain.ShipID(ref.ID))
+				} else {
+					s.markDestructibleDirty(ref)
+				}
+			}
+			// Emit the splash centre + radius for the render pass (TASK-100.3.5.7)
+			// and remove the torpedo.
 			w.removeTorpedo(ctx, s, id, TorpedoImpact{
 				TorpedoID:    id,
 				OwnerShipID:  t.OwnerShipID,

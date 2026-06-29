@@ -85,14 +85,17 @@ func TestUnit_LaunchTorpedo_SpawnsAndPersists(t *testing.T) {
 
 // TestUnit_Torpedo_DetonatesOnTarget: a torpedo launched at a ship homes over a
 // series of ticks and, at dist<=HitRadius, detonates — removed from the live set
-// and the DB (ЧТЗ AC-4). The area damage itself is a later sub-task, so the
-// target ship is left undamaged here.
+// and the DB (ЧТЗ AC-4) — and now deals splash damage to the target caught in
+// the blast (ЧТЗ AC-6). This is the .4→.5 guard: the assertion was previously
+// "target unharmed"; it is inverted here to "target took splash damage".
 func TestUnit_Torpedo_DetonatesOnTarget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := newFakeTorpedoRepo()
 	a := torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})
 	b := torpedoShip(2, 200, domain.Vec2{X: 200, Y: 0})
+	b.HP = 5000 // tough enough to survive the blast so the splash damage is readable
+	b.MaxHP = 5000
 	w := newTorpedoWorker(t, sector.Config{TickInterval: time.Second, AOIRadius: 100000},
 		clock.NewRealClock(), repo, []domain.Ship{a, b})
 
@@ -109,6 +112,17 @@ func TestUnit_Torpedo_DetonatesOnTarget(t *testing.T) {
 	}
 	require.Zero(t, repo.liveCount(), "torpedo detonates on the target and is removed")
 	require.GreaterOrEqual(t, repo.deletes, 1, "detonation persists the removal (Delete)")
+
+	// The target sat inside SplashRadius at detonation, so it lost shield then HP.
+	var target domain.Ship
+	for _, s := range w.Snapshot(testSector).Ships {
+		if s.ID == 2 {
+			target = s
+		}
+	}
+	require.Equal(t, domain.ShipID(2), target.ID, "target survives the blast (5000 HP) and stays in the sector")
+	require.Less(t, target.HP, 5000, "detonation deals splash damage to the target in radius")
+	require.Zero(t, target.Shield, "splash drains the target's shield first")
 }
 
 // TestUnit_Torpedo_ExpiresOnTTL: a torpedo that cannot reach its target dies

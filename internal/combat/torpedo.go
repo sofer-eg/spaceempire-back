@@ -300,3 +300,63 @@ func TickTorpedo(
 	}
 	return TorpedoKeep
 }
+
+// ApplyDamageInRadius deals damage to every alive Damageable — ships and
+// destructible statics alike — whose position lies within radius of center, and
+// returns the refs of every target it actually hit. This is the torpedo splash
+// primitive (ЧТЗ doc-1 §3 FR-007), the only area-of-effect path in the project;
+// every other weapon (laser/missile/drone) is single-target.
+//
+// The blast is INDISCRIMINATE: targets are never filtered by owner, ally, or
+// race, so the firing player's own ships — including the launching ship itself —
+// take damage if they sit in range (friendly-fire, ЧТЗ R-02 closed by the
+// owner). Damage only lowers HP: a target that crosses to HP<=0 is left for the
+// sector's own kill sweep, exactly as a laser hit does.
+//
+// Attribution mirrors the missile path: every ship hit has LastAttacker set to
+// attacker so a kill it causes pays out bounties / war reputation / police
+// standing. Statics carry no player attribution (matching killStatic).
+//
+// Only objects inside the radius are visited, via a squared-distance test — the
+// same in-radius spatial filter missilesInRadius / staticRefsInRadius use — so a
+// blast never pushes the whole sector through the damage pipeline (NFR-004).
+// A non-positive damage or radius is a no-op.
+func ApplyDamageInRadius(
+	ships map[domain.ShipID]*domain.Ship,
+	statics map[domain.EntityRef]*domain.DestructibleStatic,
+	center domain.Vec2,
+	radius float64,
+	damage int,
+	attacker domain.PlayerID,
+) []domain.EntityRef {
+	if damage <= 0 || radius <= 0 {
+		return nil
+	}
+	r2 := radius * radius
+	var hits []domain.EntityRef
+	for id, ship := range ships {
+		if ship.HP <= 0 || !inRadius2(ship.Pos, center, r2) {
+			continue
+		}
+		ApplyDamage(ship, damage)
+		ship.LastAttacker = attacker
+		hits = append(hits, domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(id)})
+	}
+	for ref, d := range statics {
+		if d.HP <= 0 || !inRadius2(d.Pos, center, r2) {
+			continue
+		}
+		ApplyDamage(d, damage)
+		hits = append(hits, ref)
+	}
+	return hits
+}
+
+// inRadius2 reports whether p lies within the circle of squared radius r2 about
+// center. Squared distance avoids a sqrt per candidate — the same test the AOI
+// filters use.
+func inRadius2(p, center domain.Vec2, r2 float64) bool {
+	dx := p.X - center.X
+	dy := p.Y - center.Y
+	return dx*dx+dy*dy <= r2
+}

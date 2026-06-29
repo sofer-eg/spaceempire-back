@@ -2,11 +2,13 @@ package sector_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"spaceempire/back/internal/bus"
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/pkg/clock"
 	"spaceempire/back/internal/sector"
@@ -123,6 +125,78 @@ func TestUnit_Torpedo_DetonatesOnTarget(t *testing.T) {
 	require.Equal(t, domain.ShipID(2), target.ID, "target survives the blast (5000 HP) and stays in the sector")
 	require.Less(t, target.HP, 5000, "detonation deals splash damage to the target in radius")
 	require.Zero(t, target.Shield, "splash drains the target's shield first")
+}
+
+// TestUnit_Torpedo_SplashReapsKilledStatic: a static dropped to HP<=0 by torpedo
+// splash is reaped inline (TASK-100.3.5.5) — there is no static sweep, so without
+// the inline reap it would zombie on. A fragile tower in the blast is removed
+// from the combat set + rendered layout, persist-deleted, and publishes
+// entity_killed; a tough station caught in the same blast survives and is only
+// damaged (dirtied, not reaped).
+func TestUnit_Torpedo_SplashReapsKilledStatic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	b := bus.NewInMemory(8)
+	t.Cleanup(b.Close)
+	got := make(chan sector.EntityKilledEvent, 1)
+	require.NoError(t, b.Subscribe(ctx, sector.EntityKilledTopic, func(payload []byte) {
+		var ev sector.EntityKilledEvent
+		if err := json.Unmarshal(payload, &ev); err == nil {
+			got <- ev
+		}
+	}))
+
+	repo := newFakeTorpedoRepo()
+	towerRepo := &fakeTowerRepo{}
+
+	a := torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})
+	target := torpedoShip(2, 200, domain.Vec2{X: 200, Y: 0})
+	target.HP = 100000 // survives the blast so the torpedo always has a live target to home onto
+	target.MaxHP = 100000
+
+	// A fragile tower in the blast: 50 HP < class-3 splash (600 dmg) → reaped.
+	tower := domain.LaserTower{ID: 5, OwnerID: ownerPtr(7), SectorID: testSector, Pos: domain.Vec2{X: 200, Y: 20}, HP: 50, Built: true}
+	// A tough station in the same blast: survives, must only be dirtied.
+	station := stationStatic(9, ownerPtr(7), domain.Vec2{X: 200, Y: 40}, 100000, 0, 0, 0)
+	statics := map[domain.SectorID]domain.SectorStatics{testSector: {
+		LaserTowers: []domain.LaserTower{tower},
+		Stations:    []domain.Station{station},
+	}}
+
+	w := newTorpedoWorker(t, sector.Config{TickInterval: time.Second, AOIRadius: 100000},
+		clock.NewRealClock(), repo, []domain.Ship{a, target},
+		sector.WithStatics(statics),
+		sector.WithTowerPersistence(towerRepo),
+		sector.WithHandoff(nil, b),
+	)
+
+	require.NoError(t, sendTorpedo(t, w, sector.LaunchTorpedoCommand{
+		PlayerID: 100, ShipID: 1, Class: 3,
+		Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+	}).Err)
+	for i := 0; i < 15 && repo.liveCount() > 0; i++ {
+		w.Tick(ctx)
+	}
+	require.Zero(t, repo.liveCount(), "torpedo detonated")
+
+	snap := w.Snapshot(testSector)
+	_, towerAlive := findDestructible(snap, domain.EntityRef{Kind: domain.EntityKindLaserTower, ID: 5})
+	require.False(t, towerAlive, "splash-killed tower reaped from the combat set")
+	require.Empty(t, snap.Statics.LaserTowers, "splash-killed tower gone from the rendered layout")
+	require.Equal(t, []domain.LaserTowerID{5}, towerRepo.deleted, "tower destruction persisted (delete)")
+
+	st, ok := findDestructible(snap, stationRef(9))
+	require.True(t, ok, "tough station survives the same blast, not reaped")
+	require.Less(t, st.HP, 100000, "surviving static still took splash damage (dirtied, not reaped)")
+
+	select {
+	case ev := <-got:
+		require.Equal(t, domain.EntityKindLaserTower, ev.Victim.Kind, "entity_killed carries the splash-killed tower")
+		require.Equal(t, int64(5), ev.Victim.ID)
+	case <-time.After(time.Second):
+		t.Fatal("entity_killed for the splash-killed tower was not published")
+	}
 }
 
 // TestUnit_Torpedo_ExpiresOnTTL: a torpedo that cannot reach its target dies

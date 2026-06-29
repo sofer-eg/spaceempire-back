@@ -67,6 +67,18 @@ func (w *Worker) tickTorpedos(ctx context.Context, s *sectorState, dt float64, n
 			for _, ref := range combat.ApplyDamageInRadius(s.ships, s.destructibles, t.Pos, t.SplashRadius, t.Damage, t.PlayerID) {
 				if ref.Kind == domain.EntityKindShip {
 					s.markDirty(domain.ShipID(ref.ID))
+					continue
+				}
+				// Splash is the second damage source to statics (lasers are the
+				// first). A static the blast drops to HP<=0 is reaped inline here,
+				// exactly as fireLaserAtStatic does on a killing beam — there is no
+				// static sweep (sweepKilledShips only sweeps ships), so without this
+				// the dead static lingers as a zombie: charging shields, staying a
+				// dock/trade target, and (towers) still firing. killStatic emits
+				// entity_killed, persist-deletes, and drops it from the live
+				// set/layout (TASK-100.3.5.5).
+				if d := s.destructibles[ref]; d.HP <= 0 {
+					w.killStatic(ctx, s, d)
 				} else {
 					s.markDestructibleDirty(ref)
 				}

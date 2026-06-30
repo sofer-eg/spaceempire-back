@@ -12,7 +12,7 @@ import (
 // HP, so a weapon can lock onto and destroy it. Keeping the projectile-as-target
 // logic here — rather than spreading a torpedo branch across every weapon —
 // means a future shoot-downable projectile is wired by extending this predicate
-// plus fireLaserAtProjectile alone. It mirrors isStaticTargetKind /
+// plus fireLaserAtProjectile alone. It mirrors IsStaticTargetKind /
 // fireLaserAtStatic (phase 6.2b), the precedent for adding a non-ship object to
 // the set of things a weapon can hit.
 func isProjectileTargetKind(k domain.EntityKind) bool {

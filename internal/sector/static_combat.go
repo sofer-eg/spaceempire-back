@@ -8,9 +8,13 @@ import (
 	"spaceempire/back/internal/domain"
 )
 
-// staticTargetKinds are the EntityKinds a weapon may lock onto besides ships
-// (phase 6.2b). Gates are intentionally excluded — they are not destructible.
-func isStaticTargetKind(k domain.EntityKind) bool {
+// IsStaticTargetKind reports whether k is a destructible static a weapon may
+// lock onto besides ships (phase 6.2b): station, shipyard, trade station,
+// pirbase, laser tower, satellite. Gates are intentionally excluded — they are
+// not destructible (ЧТЗ C-04, lifted by TASK-110). Exported so the HTTP launch
+// handlers gate on the exact same set the worker enforces (TASK-113 FR-06,
+// NFR-03 — one source of truth for the targetable-static set).
+func IsStaticTargetKind(k domain.EntityKind) bool {
 	switch k {
 	case domain.EntityKindStation, domain.EntityKindShipyard,
 		domain.EntityKindTradeStation, domain.EntityKindPirbase,

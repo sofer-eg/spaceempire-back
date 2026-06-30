@@ -348,12 +348,13 @@ func (s *sectorState) collectDirtyTorpedos() []domain.Torpedo {
 	return out
 }
 
-// torpedoTargetPos resolves the current position of a torpedo target and
+// resolveTargetPos resolves the current position of a homing-weapon target and
 // whether it is present and alive. A ship target resolves from s.ships (HP>0);
-// any destructible static resolves from s.destructibles (HP>0). It gates both
-// the launch (a dead/missing target must not spend energy or ammunition) and
-// the per-tick homing destination.
-func (s *sectorState) torpedoTargetPos(ref domain.EntityRef) (domain.Vec2, bool) {
+// any destructible static resolves from s.destructibles (HP>0). Shared by
+// torpedoes and missiles (TASK-113 FR-07/FR-08): it gates both the launch (a
+// dead/missing target must not spend energy or ammunition) and the per-tick
+// homing destination.
+func (s *sectorState) resolveTargetPos(ref domain.EntityRef) (domain.Vec2, bool) {
 	if ref.Kind == domain.EntityKindShip {
 		if ship, ok := s.ships[domain.ShipID(ref.ID)]; ok && ship.HP > 0 {
 			return ship.Pos, true

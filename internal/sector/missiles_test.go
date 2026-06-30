@@ -263,9 +263,11 @@ func TestUnit_LaunchMissile_RejectsSelfTarget(t *testing.T) {
 	require.Empty(t, w.Snapshot(testSector).Missiles)
 }
 
-// TestUnit_LaunchMissile_RejectsNonShipTarget: phase 4.3 only damages
-// ships — other kinds are rejected at the command boundary.
-func TestUnit_LaunchMissile_RejectsNonShipTarget(t *testing.T) {
+// TestUnit_LaunchMissile_RejectsNonTargetableKind: a kind that is neither a
+// ship nor a destructible static (a container here) is rejected at the command
+// boundary (TASK-113 FR-07: missileTargetable). Destructible statics are a
+// separate, accepted path — see TestUnit_LaunchMissile_StaticTargetGate.
+func TestUnit_LaunchMissile_RejectsNonTargetableKind(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	w := newSingleSectorWorker(t,
@@ -278,7 +280,7 @@ func TestUnit_LaunchMissile_RejectsNonShipTarget(t *testing.T) {
 	require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
 		PlayerID: 100,
 		ShipID:   1,
-		Target:   domain.EntityRef{Kind: domain.EntityKindStation, ID: 5},
+		Target:   domain.EntityRef{Kind: domain.EntityKindContainer, ID: 5},
 		Reply:    reply,
 	}))
 	w.Tick(ctx)

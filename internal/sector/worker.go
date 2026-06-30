@@ -815,7 +815,7 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	w.fireLasers(ctx, s)
 	w.tickPoliceScan(ctx, s)
 	w.tickTowers(s)
-	tickMissiles(s, dt, started)
+	w.tickMissiles(ctx, s, dt, started)
 	w.tickDrones(ctx, s, dt, started)
 	w.tickTorpedos(ctx, s, dt, started)
 	w.sweepKilledShips(ctx, s)
@@ -994,6 +994,9 @@ func cloneStatics(s domain.SectorStatics) domain.SectorStatics {
 	}
 	if len(s.Pirbases) > 0 {
 		out.Pirbases = append([]domain.Pirbase(nil), s.Pirbases...)
+	}
+	if len(s.LaserTowers) > 0 {
+		out.LaserTowers = append([]domain.LaserTower(nil), s.LaserTowers...)
 	}
 	if len(s.Satellites) > 0 {
 		out.Satellites = append([]domain.Satellite(nil), s.Satellites...)

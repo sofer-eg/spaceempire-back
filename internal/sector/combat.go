@@ -64,7 +64,7 @@ func (w *Worker) fireLasers(ctx context.Context, s *sectorState) {
 			continue
 		}
 		ref := *attacker.AttackTarget
-		if isStaticTargetKind(ref.Kind) {
+		if IsStaticTargetKind(ref.Kind) {
 			w.fireLaserAtStatic(ctx, s, id, attacker, ref)
 			continue
 		}

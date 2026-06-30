@@ -72,13 +72,22 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request fields")
 		return
 	}
+	// TASK-113 FR-06: a missile may strike a ship (not itself) or any
+	// destructible static (sector.IsStaticTargetKind — the same set the worker
+	// enforces); other kinds are rejected here before touching cargo. The
+	// self-target guard only applies to ship targets — a static and a ship may
+	// share a numeric id (separate id spaces).
 	targetKind := domain.EntityKind(req.TargetRef.Kind)
-	if targetKind != domain.EntityKindShip {
+	switch {
+	case targetKind == domain.EntityKindShip:
+		if req.TargetRef.ID == req.ShipID {
+			writeError(w, http.StatusBadRequest, "cannot target self")
+			return
+		}
+	case sector.IsStaticTargetKind(targetKind):
+		// ok — the worker resolves the static's liveness/position.
+	default:
 		writeError(w, http.StatusBadRequest, "invalid target kind")
-		return
-	}
-	if req.TargetRef.ID == req.ShipID {
-		writeError(w, http.StatusBadRequest, "cannot target self")
 		return
 	}
 

@@ -394,9 +394,10 @@ type LaunchMissileResult struct {
 }
 
 // LaunchMissileCommand spawns one homing missile from ShipID at Target.
-// Ownership is enforced (PlayerID must match the launcher's owner).
-// Phase 4.3 only accepts EntityKindShip targets in the same sector;
-// other kinds and self-targeting are rejected with ErrInvalidAttackTarget.
+// Ownership is enforced (PlayerID must match the launcher's owner). The target
+// must be in the same sector and either a different ship or a destructible
+// static (TASK-113: missileTargetable); other kinds, self-targeting, and a
+// dead/missing target are rejected with ErrInvalidAttackTarget.
 // Cargo accounting (1 missile consumed) happens outside the worker —
 // the HTTP handler debits cargo before Send, refunds on reply.Err.
 type LaunchMissileCommand struct {
@@ -439,18 +440,20 @@ func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
 		res.Err = ErrEquipmentRequired
 		replyLaunchMissile(c.Reply, res)
 		return
-	case c.Target.Kind != domain.EntityKindShip:
-		res.Err = ErrInvalidAttackTarget
-		replyLaunchMissile(c.Reply, res)
-		return
-	case domain.ShipID(c.Target.ID) == c.ShipID:
+	case !missileTargetable(c.ShipID, c.Target):
+		// TASK-113: a missile may strike a ship (not itself) or any destructible
+		// static (IsStaticTargetKind); gates are excluded (ЧТЗ C-04).
 		res.Err = ErrInvalidAttackTarget
 		replyLaunchMissile(c.Reply, res)
 		return
 	}
 
-	target, ok := s.ships[domain.ShipID(c.Target.ID)]
-	if !ok || target.HP <= 0 {
+	// Resolve the target's current position and confirm it exists and is alive
+	// BEFORE spending energy or ammunition — a launch at a missing/dead target
+	// must not drain the launcher (TASK-113 FR-07, AC-7). targetPos also seeds
+	// the missile's homing course. Mirrors LaunchTorpedoCommand.
+	targetPos, targetOK := s.resolveTargetPos(c.Target)
+	if !targetOK {
 		res.Err = ErrInvalidAttackTarget
 		replyLaunchMissile(c.Reply, res)
 		return
@@ -474,7 +477,7 @@ func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
 		now = w.clock.Now()
 	}
 	id := s.allocMissileID()
-	m := combat.LaunchMissile(id, missileSpec, ship, c.Target, target.Pos, now)
+	m := combat.LaunchMissile(id, missileSpec, ship, c.Target, targetPos, now)
 	s.missiles[id] = m
 	res.MissileID = id
 	if ship.IsHidden {
@@ -507,7 +510,7 @@ type LaunchTorpedoResult struct {
 // FR-002/004/006). Modelled on LaunchMissileCommand: ownership is enforced, the
 // ship must carry up_torpedo_launcher and be undocked, and a launch spends the
 // launcher's "action" energy. Unlike a missile, a torpedo may also strike a
-// destructible static (isStaticTargetKind), not just a ship. Cargo accounting
+// destructible static (IsStaticTargetKind), not just a ship. Cargo accounting
 // (1 unit of the class's goods type) happens in the HTTP handler, which refunds
 // on reply.Err.
 //
@@ -560,7 +563,7 @@ func (c LaunchTorpedoCommand) apply(w *Worker, s *sectorState) {
 	// BEFORE spending energy or ammunition — a launch at a missing/dead target
 	// must not drain the launcher (mirrors LaunchMissileCommand's target gate).
 	// targetPos also seeds the torpedo's LastTargetPos fallback course.
-	targetPos, targetOK := s.torpedoTargetPos(c.Target)
+	targetPos, targetOK := s.resolveTargetPos(c.Target)
 	if !targetOK {
 		res.Err = ErrInvalidAttackTarget
 		replyLaunchTorpedo(c.Reply, res)
@@ -613,13 +616,21 @@ func (c LaunchTorpedoCommand) apply(w *Worker, s *sectorState) {
 }
 
 // torpedoTargetable reports whether ref is a legal torpedo target for a launch
-// from shipID: a different ship, or a destructible static (isStaticTargetKind).
+// from shipID: a different ship, or a destructible static (IsStaticTargetKind).
 // Gates are excluded until they become destructible (ЧТЗ C-04, TASK-110).
 func torpedoTargetable(shipID domain.ShipID, ref domain.EntityRef) bool {
 	if ref.Kind == domain.EntityKindShip {
 		return domain.ShipID(ref.ID) != shipID
 	}
-	return isStaticTargetKind(ref.Kind)
+	return IsStaticTargetKind(ref.Kind)
+}
+
+// missileTargetable reports whether ref is a legal missile target for a launch
+// from shipID. Missiles and torpedoes share the same target set (a different
+// ship, or a destructible static; gates excluded until TASK-110), so this
+// mirrors torpedoTargetable (TASK-113 FR-07).
+func missileTargetable(shipID domain.ShipID, ref domain.EntityRef) bool {
+	return torpedoTargetable(shipID, ref)
 }
 
 func replyLaunchTorpedo(reply chan<- LaunchTorpedoResult, res LaunchTorpedoResult) {

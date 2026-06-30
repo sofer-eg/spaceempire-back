@@ -79,7 +79,7 @@ func (w *Worker) tickTorpedos(ctx context.Context, s *sectorState, dt float64, n
 			continue
 		}
 
-		targetPos, targetAlive := s.torpedoTargetPos(t.Target)
+		targetPos, targetAlive := s.resolveTargetPos(t.Target)
 
 		switch combat.TickTorpedo(t, targetPos, targetAlive, dt, now) {
 		case combat.TorpedoKeep:

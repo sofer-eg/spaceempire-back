@@ -152,7 +152,10 @@ func TestUnit_LaunchMissile_NoCargo(t *testing.T) {
 	require.Equal(t, 0, refund, "no refund when Consume itself failed")
 }
 
-func TestUnit_LaunchMissile_NonShipTarget(t *testing.T) {
+// TestUnit_LaunchMissile_NonTargetableKind: a kind that is neither a ship nor a
+// destructible static (e.g. a container) is rejected at the handler boundary
+// before any cargo is touched (TASK-113 FR-06 "прочие → 400").
+func TestUnit_LaunchMissile_NonTargetableKind(t *testing.T) {
 	t.Parallel()
 	srv, _, fake := newMissileTestServer(t,
 		[]domain.Ship{missileTestShip()},
@@ -160,7 +163,7 @@ func TestUnit_LaunchMissile_NonShipTarget(t *testing.T) {
 	)
 	body, _ := json.Marshal(dto.LaunchMissileRequest{
 		ShipID:    1,
-		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindStation), ID: 7},
+		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindContainer), ID: 7},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -170,6 +173,34 @@ func TestUnit_LaunchMissile_NonShipTarget(t *testing.T) {
 	stock, consume, _ := fake.snapshot()
 	require.EqualValues(t, 5, stock)
 	require.Equal(t, 0, consume, "request rejected before touching cargo")
+}
+
+// TestUnit_LaunchMissile_StaticTargetForwarded: a destructible-static kind now
+// passes the handler boundary (TASK-113 FR-06) and is forwarded to the worker.
+// With no such static in the sector the worker rejects it (ErrInvalidAttackTarget
+// → 400), so the handler must have debited the ammo and then refunded it — proof
+// it crossed the boundary rather than being rejected at it.
+func TestUnit_LaunchMissile_StaticTargetForwarded(t *testing.T) {
+	t.Parallel()
+	srv, w, fake := newMissileTestServer(t,
+		[]domain.Ship{missileTestShip()}, // no station 7 → worker rejects
+		3,
+	)
+	runWorker(t, w)
+
+	body, _ := json.Marshal(dto.LaunchMissileRequest{
+		ShipID:    1,
+		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindStation), ID: 7},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	stock, consume, refund := fake.snapshot()
+	require.EqualValues(t, 3, stock, "ammo restored after the worker rejected the phantom static")
+	require.Equal(t, 1, consume, "static kind crossed the boundary and debited ammo")
+	require.Equal(t, 1, refund)
 }
 
 func TestUnit_LaunchMissile_SelfTarget(t *testing.T) {

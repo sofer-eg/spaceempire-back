@@ -1,6 +1,7 @@
 package sector
 
 import (
+	"context"
 	"sort"
 	"time"
 
@@ -36,29 +37,22 @@ type MissileImpact struct {
 }
 
 // tickMissiles integrates every missile in the sector for dt seconds.
-// For each missile it resolves the live target (same-sector ship,
-// alive), invokes combat.TickMissile, and on a hit/expire records a
-// MissileImpact + removes the missile.
+// For each missile it resolves the live target (same-sector ship or
+// destructible static, alive), invokes combat.TickMissile, and on a
+// hit/expire records a MissileImpact + removes the missile.
 //
-// Damage routing is intentionally narrow: phase 4.3 only supports
-// EntityKindShip targets (see spec §4 and §11 — non-ship damage routing
-// arrives in 4.6 with the kill handler). A missile chasing a non-ship
-// kind, or a ship that left the sector / died, falls back to its
-// LastTargetPos and can only expire via TTL.
-func tickMissiles(s *sectorState, dt float64, now time.Time) {
+// A missile homes to either a ship (s.ships) or a destructible static
+// (s.destructibles) per TASK-113 FR-08; the resolve is shared with
+// torpedoes via resolveTargetPos. On a hit the point damage routes
+// through the same domain.Damageable path the laser/torpedo use
+// (combat.ApplyDamage / TakeDamage) — a ship is left for sweepKilledShips
+// to reap while a static dropped to HP<=0 is reaped inline via killStatic
+// (there is no static sweep). Unlike a torpedo a missile deals POINT
+// damage only — no splash (ЧТЗ C-02). A missile whose target left the
+// sector / died falls back to its LastTargetPos and can only expire via TTL.
+func (w *Worker) tickMissiles(ctx context.Context, s *sectorState, dt float64, now time.Time) {
 	for id, m := range s.missiles {
-		var (
-			targetPos   domain.Vec2
-			targetAlive bool
-			targetShip  *domain.Ship
-		)
-		if m.Target.Kind == domain.EntityKindShip {
-			if ship, ok := s.ships[domain.ShipID(m.Target.ID)]; ok && ship.HP > 0 {
-				targetShip = ship
-				targetPos = ship.Pos
-				targetAlive = true
-			}
-		}
+		targetPos, targetAlive := s.resolveTargetPos(m.Target)
 
 		outcome := combat.TickMissile(m, targetPos, targetAlive, missileSpec, dt, now)
 		switch outcome {
@@ -74,22 +68,47 @@ func tickMissiles(s *sectorState, dt float64, now time.Time) {
 			})
 			delete(s.missiles, id)
 		case combat.MissileHit:
-			// Apply damage to the (live) ship target. targetAlive==true
-			// is the precondition for MissileHit, so targetShip is non-nil
-			// at this point.
-			res := combat.ApplyDamage(targetShip, m.Damage)
-			// Attribute the kill for bounty payout (6.3) to the missile owner.
-			targetShip.LastAttacker = m.PlayerID
-			s.addMissileImpact(MissileImpact{
-				MissileID:      id,
-				AttackerShipID: m.OwnerShipID,
-				Target:         m.Target,
-				Pos:            m.Pos,
-				Damage:         res.ShieldAbsorbed + res.HPAbsorbed,
-				Killed:         res.Killed,
-			})
-			s.markDirty(targetShip.ID)
+			// targetAlive==true is the precondition for MissileHit, so the
+			// resolved target (ship or static) is present and alive here.
+			w.applyMissileHit(ctx, s, id, m)
 			delete(s.missiles, id)
 		}
+	}
+}
+
+// applyMissileHit deals one missile's point damage to its (live) target and
+// records the impact. A ship target is damaged and left for sweepKilledShips;
+// a destructible static is damaged through the same Damageable path the laser
+// uses and, when the blow kills it, reaped inline via killStatic (statics have
+// no sweep) — TASK-113 FR-08. Point damage only, no splash (ЧТЗ C-02).
+func (w *Worker) applyMissileHit(ctx context.Context, s *sectorState, id domain.MissileID, m *domain.Missile) {
+	imp := MissileImpact{
+		MissileID:      id,
+		AttackerShipID: m.OwnerShipID,
+		Target:         m.Target,
+		Pos:            m.Pos,
+	}
+	if m.Target.Kind == domain.EntityKindShip {
+		ship := s.ships[domain.ShipID(m.Target.ID)]
+		res := combat.ApplyDamage(ship, m.Damage)
+		// Attribute the kill for bounty payout (6.3) to the missile owner.
+		ship.LastAttacker = m.PlayerID
+		imp.Damage = res.ShieldAbsorbed + res.HPAbsorbed
+		imp.Killed = res.Killed
+		s.addMissileImpact(imp)
+		s.markDirty(ship.ID)
+		return
+	}
+	// Destructible static: route point damage through Damageable (mirror of
+	// fireLaserAtStatic). Static kills carry no player attribution.
+	d := s.destructibles[m.Target]
+	res := combat.ApplyDamage(d, m.Damage)
+	imp.Damage = res.ShieldAbsorbed + res.HPAbsorbed
+	imp.Killed = res.Killed
+	s.addMissileImpact(imp)
+	if res.Killed {
+		w.killStatic(ctx, s, d)
+	} else {
+		s.markDestructibleDirty(m.Target)
 	}
 }

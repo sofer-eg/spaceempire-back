@@ -31,11 +31,6 @@ type Config struct {
 	// jump affordance for gate targets. Mirrors cfg.Sector.GateRange.
 	// Zero falls back to 50 in handleWS.
 	GateRange float64
-	// MaxHP / MaxShield are the ship hull/shield maxima surfaced in the
-	// welcome so the SPA can fill the КОРПУС/ЩИТЫ bars. Mirror the
-	// spawner's StartHP/StartShld. Zero falls back to 100 in handleWS.
-	MaxHP     int
-	MaxShield int
 	// AckTimeout caps how long a command handler waits for the worker
 	// to apply the command and reply. Default 1s.
 	AckTimeout time.Duration

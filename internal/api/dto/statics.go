@@ -113,14 +113,8 @@ type StaticsMessage struct {
 	// in TargetsPanel on the same constants the worker validates
 	// against — keeps the affordance honest without a roundtrip per
 	// hover.
-	DockRange float64 `json:"dockRange"`
-	GateRange float64 `json:"gateRange"`
-	// MaxHP / MaxShield are the ship hull/shield maxima the SPA uses as
-	// the denominator for the КОРПУС/ЩИТЫ bars. Currently the spawn
-	// constants (no per-class ships yet); when ship classes land these
-	// move onto the per-ship snapshot.
-	MaxHP     int           `json:"maxHP"`
-	MaxShield int           `json:"maxShield"`
+	DockRange float64       `json:"dockRange"`
+	GateRange float64       `json:"gateRange"`
 	Statics   SectorStatics `json:"statics"`
 }
 

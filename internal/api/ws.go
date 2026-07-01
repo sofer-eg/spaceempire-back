@@ -246,14 +246,6 @@ func (s *Server) sendStatics(ctx context.Context, conn *websocket.Conn, sectorID
 	if gateRange <= 0 {
 		gateRange = 50
 	}
-	maxHP := s.cfg.MaxHP
-	if maxHP <= 0 {
-		maxHP = 100
-	}
-	maxShield := s.cfg.MaxShield
-	if maxShield <= 0 {
-		maxShield = 100
-	}
 	msg := dto.StaticsMessage{
 		Type:               "statics",
 		SectorID:           int64(sectorID),
@@ -262,8 +254,6 @@ func (s *Server) sendStatics(ctx context.Context, conn *websocket.Conn, sectorID
 		NearZoomRadius:     nearZoom,
 		DockRange:          dockRange,
 		GateRange:          gateRange,
-		MaxHP:              maxHP,
-		MaxShield:          maxShield,
 		Statics:            dto.StaticsFromDomain(snap.Statics),
 	}
 	payload, err := json.Marshal(msg)

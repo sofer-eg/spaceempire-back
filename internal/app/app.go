@@ -448,8 +448,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		NearZoomRadius:     cfg.Sector.NearZoomRadius,
 		DockRange:          cfg.Sector.DockRange,
 		GateRange:          cfg.Sector.GateRange,
-		MaxHP:              spawnCfg.StartHP,
-		MaxShield:          spawnCfg.StartShld,
 		// Commands are drained once per tick, so the handler must wait at
 		// least one full tick for the worker to apply and reply. Phase 3.9
 		// pushed TickInterval to 3s — keep AckTimeout = TickInterval + 1s

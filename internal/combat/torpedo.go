@@ -318,7 +318,7 @@ func TickTorpedo(
 // standing. Statics carry no player attribution (matching killStatic).
 //
 // Only objects inside the radius are visited, via a squared-distance test — the
-// same in-radius spatial filter missilesInRadius / staticRefsInRadius use — so a
+// same in-radius spatial filter missilesInRadius / visibleStaticRefs use — so a
 // blast never pushes the whole sector through the damage pipeline (NFR-004).
 // A non-positive damage or radius is a no-op.
 func ApplyDamageInRadius(

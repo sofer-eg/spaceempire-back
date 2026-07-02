@@ -629,15 +629,24 @@ func (s *sectorState) liveStaticRefs() map[domain.EntityRef]struct{} {
 	return out
 }
 
-// staticRefsInRadius returns the refs of live statics within radius of center
-// (phase 10.20 L2 big radar). radius<=0 yields the empty set.
-func (s *sectorState) staticRefsInRadius(center domain.Vec2, radius float64) map[domain.EntityRef]struct{} {
+// visibleStaticRefs returns the refs of live statics a subscriber centred at
+// center with personal radar radius should see (TASK-117). Two groups:
+//   - Large orientation statics (station / shipyard / trade_station / pirbase)
+//     are ALWAYS visible, regardless of distance — they are the map's fixed
+//     landmarks.
+//   - Radar-gated statics (laser tower / satellite) obey the personal radar
+//     like ships: included only when within radius (radius<=0 excludes them).
+func (s *sectorState) visibleStaticRefs(center domain.Vec2, radius float64) map[domain.EntityRef]struct{} {
 	out := make(map[domain.EntityRef]struct{})
-	if radius <= 0 {
-		return out
-	}
 	r2 := radius * radius
 	for ref, d := range s.destructibles {
+		if alwaysVisibleStatic(ref.Kind) {
+			out[ref] = struct{}{}
+			continue
+		}
+		if radius <= 0 {
+			continue
+		}
 		dx := d.Pos.X - center.X
 		dy := d.Pos.Y - center.Y
 		if dx*dx+dy*dy <= r2 {
@@ -645,6 +654,19 @@ func (s *sectorState) staticRefsInRadius(center domain.Vec2, radius float64) map
 		}
 	}
 	return out
+}
+
+// alwaysVisibleStatic reports whether a static kind is a large orientation
+// object shown regardless of radar distance (TASK-117): stations, shipyards,
+// trade stations and pirbases. Laser towers and satellites are radar-gated.
+func alwaysVisibleStatic(k domain.EntityKind) bool {
+	switch k {
+	case domain.EntityKindStation, domain.EntityKindShipyard,
+		domain.EntityKindTradeStation, domain.EntityKindPirbase:
+		return true
+	default:
+		return false
+	}
 }
 
 // collectStaticsByRefs builds a SectorStatics subset holding the full typed

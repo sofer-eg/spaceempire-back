@@ -86,13 +86,15 @@ type Ship struct {
 	LaserDamage     int
 	LaserRange      float64
 	LaserEnergyCost int
-	// RadarRange is the personal small-radar radius (phase 10.20): the AOI
+	// RadarRange is the personal radar radius (phase 10.20 / TASK-117): the AOI
 	// window the player's subscription uses to see ships/missiles/drones/
-	// containers around this ship. Sourced from the ship class
-	// (balance.ShipClass.Radar, defaulted by category) at spawn and folded with
-	// up_scanner via the equipment-effect pipeline (L3). 0 = legacy/spacesuit —
-	// the subscription then falls back to cfg.AOIRadius. Large objects use
-	// RadarRange × cfg.RadarBigMultiplier (L2). Persisted as ships.radar_range.
+	// containers/laser-towers/satellites around this ship. Stations, shipyards,
+	// trade stations, pirbases and asteroids are always visible regardless of
+	// this radius. Sourced from the ship class (balance.ShipClass.Radar,
+	// defaulted by category) at spawn and folded with up_scanner via the
+	// equipment-effect pipeline (L3). 0 = legacy/spacesuit — the subscription
+	// then falls back to cfg.AOIRadius (a sane radar, not the whole sector).
+	// Persisted as ships.radar_range.
 	RadarRange float64
 	// CargoBay is the ship's cargo hold capacity in space units. Sourced from the
 	// ship class (balance.ShipClass.CargoBay) at spawn — before phase 10.3.17 the

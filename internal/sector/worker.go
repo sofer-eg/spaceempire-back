@@ -830,7 +830,6 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	snapStarted := w.clock.Now()
 	broadcastPatches(w.logger, s, w.cfg.AOIRadius*aoiCellFactor, aoiParams{
 		fallbackRadius:  w.cfg.AOIRadius,
-		bigMult:         w.cfg.RadarBigMultiplier,
 		stealthDetect:   w.cfg.StealthDetectRange,
 		relations:       w.relations,
 		satelliteReveal: w.cfg.SatelliteRevealRadius,

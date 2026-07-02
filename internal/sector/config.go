@@ -19,11 +19,14 @@ type Config struct {
 	// still player-issued only. Smaller than GateRange because manual docking
 	// is a deliberate act, so a tight tolerance prevents stray clicks.
 	DockRange float64
-	// AOIRadius is the per-player Area of Interest radius in world units.
-	// Each subscription only receives patches for ships within this radius
-	// of the player's own ship (or of the world origin while the player has
-	// no ship in the sector). Default mirrors phase-3.5 balance.yaml — to be
-	// reconciled with config.tp.php during balance port.
+	// AOIRadius is the radar-less fallback view radius in world units: the
+	// per-player Area of Interest radius used when the player's own ship has no
+	// class radar (legacy/spacesuit, RadarRange<=0) or has no ship in the sector
+	// (observer, centred on the world origin). It also sizes the spatial grid
+	// cell. Default is radarDefault (2800), a sane radar below the ±5000 sector
+	// half-extent so the fallback stays a real visibility limit — it must NOT
+	// reveal the whole sector (TASK-117). Ships with a class radar use their own
+	// RadarRange, not this.
 	AOIRadius float64
 	// ShutdownTimeout bounds the graceful-shutdown flush (Worker.flushAll),
 	// which persists every ship's live position when Run's context is
@@ -43,16 +46,12 @@ type Config struct {
 	// (up_hide, phase 10.20 L4) surfaces in their AOI. Smaller than any radar so
 	// stealth is meaningful but not absolute. Default 400.
 	StealthDetectRange float64
-	// RadarBigMultiplier scales the personal radar into the big-object radar
-	// (phase 10.20 L2): large statics (stations/shipyards/TS/pirbases/towers)
-	// are visible within RadarRange × this. Calibrated down from the original ×5
-	// so statics still enter/leave by movement within a sector. Default 2.5.
-	RadarBigMultiplier float64
 	// SatelliteRevealRadius is the AOI radius every subscriber gets while at
 	// least one live navigation satellite (phase 10.15) is present in the
 	// sector. Default 10000 — twice the ±5000 sector half-extent, so it covers
-	// the whole sector from any interior point (both the ship AOI window and,
-	// via RadarBigMultiplier, the big-object static window).
+	// the whole sector from any interior point (widening the personal-radar
+	// window so far ships and radar-gated statics — towers/satellites — become
+	// visible; stations/shipyards/TS/pirbases and asteroids are always visible).
 	SatelliteRevealRadius float64
 	// MineRange is how close a player ship must be to an asteroid to keep
 	// sustained mining (phase 10.3.6). Matches the NPC miner's MineRange so
@@ -98,7 +97,9 @@ func (c Config) withDefaults() Config {
 		c.DockRange = 3
 	}
 	if c.AOIRadius <= 0 {
-		c.AOIRadius = 5000
+		// radarDefault (balance): a sane radar below the sector half-extent, so
+		// the radar-less fallback does not reveal the whole sector (TASK-117).
+		c.AOIRadius = 2800
 	}
 	if c.ShutdownTimeout <= 0 {
 		c.ShutdownTimeout = 10 * time.Second
@@ -111,9 +112,6 @@ func (c Config) withDefaults() Config {
 	}
 	if c.StealthDetectRange <= 0 {
 		c.StealthDetectRange = 400
-	}
-	if c.RadarBigMultiplier <= 0 {
-		c.RadarBigMultiplier = 2.5
 	}
 	if c.SatelliteRevealRadius <= 0 {
 		c.SatelliteRevealRadius = 10000

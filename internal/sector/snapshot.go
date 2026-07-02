@@ -170,7 +170,6 @@ func (w *Worker) persistAsteroids(ctx context.Context, s *sectorState) {
 // 10.20), so the signature stays small as layers add fields.
 type aoiParams struct {
 	fallbackRadius  float64   // cfg.AOIRadius, used when a ship has no class radar
-	bigMult         float64   // cfg.RadarBigMultiplier — big-object radar = small × this
 	stealthDetect   float64   // cfg.StealthDetectRange — close-detect a cloaked ship
 	relations       Relations // ship-vs-ship hostility oracle for stealth/ally checks
 	satelliteReveal float64   // cfg.SatelliteRevealRadius — radius while a satellite reveals the sector (10.15)
@@ -205,10 +204,11 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 			sub.Radius = ap.fallbackRadius
 		}
 		// A live navigation satellite reveals the whole sector to its owner and
-		// allies (phase 10.20 L5): widen the AOI radius so ships and big-radar
-		// statics across the sector become visible, but only for a subscriber who
-		// owns a satellite here or is allied to an owner. Stealth (hideStealthed)
-		// still applies on the boosted window.
+		// allies (phase 10.20 L5): widen the radar radius so far ships and
+		// radar-gated statics (towers/satellites) across the sector become
+		// visible, but only for a subscriber who owns a satellite here or is
+		// allied to an owner. Stealth (hideStealthed) still applies on the
+		// boosted window.
 		if hasSatellites && ap.satelliteReveal > sub.Radius &&
 			s.satelliteRevealsFor(sub.PlayerID, ap.relations) {
 			sub.Radius = ap.satelliteReveal
@@ -240,19 +240,22 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 		cAdded, cRemoved := diffContainers(sub.lastSentContainer, currContainers)
 		patch.ContainersAdded = cAdded
 		patch.ContainersRemoved = cRemoved
-		currAsteroids := asteroidsInRadius(s.asteroids, sub.Center, sub.Radius)
+		// Asteroids are always visible regardless of distance (TASK-117), like
+		// the large orientation statics — radius 0 disables the distance filter.
+		currAsteroids := asteroidsInRadius(s.asteroids, sub.Center, 0)
 		aAdded, aUpdated, aRemoved := diffAsteroids(sub.lastSentAsteroid, currAsteroids)
 		patch.AsteroidsAdded = aAdded
 		patch.AsteroidsUpdated = aUpdated
 		patch.AsteroidsRemoved = aRemoved
 		patch.StaticsUpdated = staticUpdates
-		// Big-object radar (phase 10.20 L2): large statics are visible within
-		// RadarRange × bigMult. Diff this window against what the subscriber
-		// already has: newly-in-range statics ship in StaticsAdded (full
+		// Static visibility (TASK-117): stations/shipyards/TS/pirbases are always
+		// visible; laser towers and satellites are gated on the personal radar
+		// (sub.Radius, the same window as ships). Diff this set against what the
+		// subscriber already has: newly-visible statics ship in StaticsAdded (full
 		// objects), ones that left are appended to StaticsRemoved (alongside the
 		// sector-global destruction list — a fresh per-sub copy so subs don't
 		// share a slice).
-		currStatics := s.staticRefsInRadius(sub.Center, sub.Radius*ap.bigMult)
+		currStatics := s.visibleStaticRefs(sub.Center, sub.Radius)
 		addedRefs := diffStaticRefs(sub.lastSentStatics, currStatics)
 		subStaticsRemoved := append([]domain.EntityRef(nil), staticsRemoved...)
 		subStaticsRemoved = append(subStaticsRemoved, diffStaticRefs(currStatics, sub.lastSentStatics)...)

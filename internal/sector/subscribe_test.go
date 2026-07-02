@@ -377,10 +377,11 @@ revealed:
 	}
 }
 
-// Phase 10.20 L2: large statics are visible within RadarRange × bigMult and
-// arrive/leave as deltas. A station beyond the big radar is trimmed on the
-// first patch; flying next to it brings it back via StaticsAdded.
-func TestUnit_Worker_Statics_BigRadarDeltas(t *testing.T) {
+// TASK-117: stations are always visible regardless of distance — the big-radar
+// concept for large orientation statics is gone. A station far beyond the
+// player's radar is never trimmed, and stays put even when the player flies
+// further away.
+func TestUnit_Worker_Statics_StationsAlwaysVisible(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -389,7 +390,7 @@ func TestUnit_Worker_Statics_BigRadarDeltas(t *testing.T) {
 	stationA := domain.Station{ID: 1, SectorID: testSector, Pos: domain.Vec2{X: 1000, Y: 0}, HP: 100, Built: true}
 	stationB := domain.Station{ID: 2, SectorID: testSector, Pos: domain.Vec2{X: 8000, Y: 0}, HP: 100, Built: true}
 	w := sector.NewWorker(0,
-		sector.Config{TickInterval: 5 * time.Millisecond, InboxCapacity: 64, AOIRadius: 5000, RadarBigMultiplier: 2.5},
+		sector.Config{TickInterval: 5 * time.Millisecond, InboxCapacity: 64, AOIRadius: 5000},
 		clock.NewRealClock(), nil, nil,
 		map[domain.SectorID][]domain.Ship{testSector: {
 			{ID: 1, PlayerID: 7, Pos: domain.Vec2{X: 0, Y: 0}, MaxSpeed: 1e6, RadarRange: 1000},
@@ -404,40 +405,30 @@ func TestUnit_Worker_Statics_BigRadarDeltas(t *testing.T) {
 
 	refB := domain.EntityRef{Kind: domain.EntityKindStation, ID: 2}
 	refA := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
-	containsRef := func(refs []domain.EntityRef, want domain.EntityRef) bool {
-		for _, r := range refs {
-			if r == want {
-				return true
-			}
-		}
-		return false
-	}
 
-	// First patch: station B (8000, beyond radar 1000×2.5=2500) is trimmed; A stays.
+	// First patch: neither station is trimmed even though B (8000) is far beyond
+	// the 1000-unit radar — stations are always visible.
 	select {
 	case p := <-sub.Patch:
-		assert.True(t, containsRef(p.StaticsRemoved, refB), "far station B trimmed on first patch")
-		assert.False(t, containsRef(p.StaticsRemoved, refA), "near station A stays")
-		assert.Empty(t, p.StaticsAdded.Stations, "A came via the welcome, not re-added")
+		assert.False(t, refIn(p.StaticsRemoved, refB), "far station B must stay (always visible)")
+		assert.False(t, refIn(p.StaticsRemoved, refA), "near station A stays")
+		assert.Empty(t, p.StaticsAdded.Stations, "stations came via the welcome, not re-added")
 	case <-time.After(time.Second):
 		t.Fatal("no initial patch within 1s")
 	}
 
-	// Fly next to B → it enters the big radar → StaticsAdded.
+	// Fly to the far corner, away from both stations — they must never be trimmed.
 	require.NoError(t, w.Send(testSector, sector.MoveCommand{
-		PlayerID: 7, ShipID: 1, Target: domain.Vec2{X: 7500, Y: 0},
+		PlayerID: 7, ShipID: 1, Target: domain.Vec2{X: -4000, Y: 0},
 	}))
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(500 * time.Millisecond)
 	for {
 		select {
 		case p := <-sub.Patch:
-			for _, st := range p.StaticsAdded.Stations {
-				if st.ID == 2 {
-					return // success: B entered the big radar
-				}
-			}
+			assert.False(t, refIn(p.StaticsRemoved, refA), "station A never trimmed on the move")
+			assert.False(t, refIn(p.StaticsRemoved, refB), "station B never trimmed on the move")
 		case <-deadline:
-			t.Fatal("station B never entered the big radar after approach")
+			return // no removal ever surfaced — success
 		}
 	}
 }

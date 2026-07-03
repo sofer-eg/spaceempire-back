@@ -97,23 +97,27 @@ func (s ShipClass) Category() ShipClassCategory {
 func CategoryLabel(c ShipClassCategory) string { return categoryLabel[c] }
 
 // radarByCategory is the default personal radar radius per gameplay category
-// (phase 10.20). Calibrated to the spaceempire sector (radius 5000); all under
-// 5000 so visibility is genuinely limited. Scouts see farthest. See
-// back/docs/specs/radar.md.
+// (phase 10.20). Re-calibrated (TASK-123) to the real sector geometry — the map
+// content sits within ~±1000 units — so the radar is a genuine visibility limit
+// instead of covering the whole sector (StarWind's original was a flat 640 per
+// ship, on a slightly larger sector). Per-class balance values 350–500: scouts
+// see farthest; heavy/light fighters and capitals also scan well; corvettes a
+// touch less; transports and freighters least. up_scanner adds a flat +50/level
+// on top. See back/docs/specs/radar.md.
 var radarByCategory = map[ShipClassCategory]int{
-	CategoryScout:        3500,
-	CategoryCorvette:     3000,
-	CategoryHeavyFighter: 2800,
-	CategoryFighter:      2800,
-	CategoryFreighter:    2600,
-	CategoryCarrier:      2400,
-	CategoryDestroyer:    2400,
-	CategoryTransport:    2200,
-	CategorySpecial:      2800,
+	CategoryScout:        500,
+	CategoryCorvette:     420,
+	CategoryHeavyFighter: 450,
+	CategoryFighter:      450,
+	CategoryFreighter:    350,
+	CategoryCarrier:      450,
+	CategoryDestroyer:    450,
+	CategoryTransport:    380,
+	CategorySpecial:      450,
 }
 
 // radarDefault is the fallback when a category has no entry.
-const radarDefault = 2800
+const radarDefault = 370
 
 // radarForCategory returns the default radar radius for a category.
 func radarForCategory(c ShipClassCategory) int {

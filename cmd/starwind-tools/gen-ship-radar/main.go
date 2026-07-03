@@ -35,14 +35,15 @@ import (
 func main() {
 	classesFile := flag.String("classes", "configs/ship_classes.yaml", "path to the ship-class catalog")
 	out := flag.String("out", "migrations/0055_ship_radar_backfill.sql", "output migration path")
+	overwrite := flag.Bool("overwrite", false, "recalibration mode: overwrite every class ship's radar_range (drop the radar_range<=0 guard)")
 	flag.Parse()
-	if err := run(*classesFile, *out); err != nil {
+	if err := run(*classesFile, *out, *overwrite); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(classesFile, outPath string) error {
+func run(classesFile, outPath string, overwrite bool) error {
 	classes, err := balance.LoadShipClassesFromFile(classesFile)
 	if err != nil {
 		return fmt.Errorf("load ship classes: %w", err)
@@ -63,7 +64,7 @@ func run(classesFile, outPath string) error {
 	}
 	sort.Ints(radars)
 
-	migration, updates := render(byRadar, radars)
+	migration, updates := render(byRadar, radars, overwrite)
 	if err := os.WriteFile(outPath, []byte(migration), 0o644); err != nil {
 		return fmt.Errorf("write migration: %w", err)
 	}
@@ -71,16 +72,34 @@ func run(classesFile, outPath string) error {
 	return nil
 }
 
-func render(byRadar map[int][]int, radars []int) (string, int) {
+func render(byRadar map[int][]int, radars []int, overwrite bool) (string, int) {
+	// The WHERE guard differs by mode: initial backfill only fills ships still
+	// at radar_range<=0 (leaving correctly-spawned ships alone); recalibration
+	// overwrites every class ship so the whole fleet moves to the new numbers.
+	guard := "radar_range <= 0 AND is_spacesuit = false"
+	if overwrite {
+		guard = "is_spacesuit = false"
+	}
+
 	var b strings.Builder
 	b.WriteString("-- +goose Up\n-- +goose StatementBegin\n")
-	b.WriteString("-- Backfill ships.radar_range for existing class ships (TASK-117), generated\n")
-	b.WriteString("-- by cmd/starwind-tools/gen-ship-radar. Migration 0046 added the column with\n")
-	b.WriteString("-- DEFAULT 0 and no backfill, so pre-0046 ships (incl. the player's own) sat at\n")
-	b.WriteString("-- radar_range=0 and fell back to the whole-sector radius. Each UPDATE assigns\n")
-	b.WriteString("-- the ship class's radar (balance category default) to the ships of that class\n")
-	b.WriteString("-- that still have no radar. Spacesuits and already-set ships are left alone.\n")
-	b.WriteString("-- Do not edit by hand — rerun the generator.\n\n")
+	if overwrite {
+		b.WriteString("-- Recalibrate ships.radar_range for every class ship (TASK-123), generated\n")
+		b.WriteString("-- by cmd/starwind-tools/gen-ship-radar -overwrite. The radar defaults were\n")
+		b.WriteString("-- re-anchored to the real sector geometry (~±1000), so this overwrites the\n")
+		b.WriteString("-- old inflated values with each class's new radar. up_scanner is not folded\n")
+		b.WriteString("-- (no ship has one installed); the outfit path recomputes it on install.\n")
+		b.WriteString("-- Spacesuits (radar_range 0) are left alone.\n")
+		b.WriteString("-- Do not edit by hand — rerun the generator.\n\n")
+	} else {
+		b.WriteString("-- Backfill ships.radar_range for existing class ships (TASK-117), generated\n")
+		b.WriteString("-- by cmd/starwind-tools/gen-ship-radar. Migration 0046 added the column with\n")
+		b.WriteString("-- DEFAULT 0 and no backfill, so pre-0046 ships (incl. the player's own) sat at\n")
+		b.WriteString("-- radar_range=0 and fell back to the whole-sector radius. Each UPDATE assigns\n")
+		b.WriteString("-- the ship class's radar (balance category default) to the ships of that class\n")
+		b.WriteString("-- that still have no radar. Spacesuits and already-set ships are left alone.\n")
+		b.WriteString("-- Do not edit by hand — rerun the generator.\n\n")
+	}
 
 	for _, r := range radars {
 		ids := append([]int(nil), byRadar[r]...)
@@ -90,8 +109,8 @@ func render(byRadar map[int][]int, radars []int) (string, int) {
 			strIDs[i] = strconv.Itoa(id)
 		}
 		fmt.Fprintf(&b,
-			"UPDATE ships SET radar_range = %d\nWHERE radar_range <= 0 AND is_spacesuit = false AND ship_class_id IN (%s);\n",
-			r, strings.Join(strIDs, ", "))
+			"UPDATE ships SET radar_range = %d\nWHERE %s AND ship_class_id IN (%s);\n",
+			r, guard, strings.Join(strIDs, ", "))
 	}
 
 	b.WriteString("-- +goose StatementEnd\n\n")

@@ -77,8 +77,11 @@ func ApplyEquipmentEffects(base ShipStats, eq []domain.InstalledEquipment) ShipS
 		case "up_weapon_control", "up_turret_control":
 			out.LaserDamage += int(math.Round(float64(base.LaserDamage) * 0.08 * l))
 		case "up_scanner":
-			// Phase 10.20 L3: the scanner widens the personal radar +40 %/level.
-			out.RadarRange += base.RadarRange * 0.4 * l
+			// Phase 10.20 L3 / TASK-123: the scanner widens the personal radar a
+			// flat +50 units per level (catalog max_level 2 → up to +100).
+			// Additive off the class base, not a percentage, so it stays a
+			// meaningful boost on the re-calibrated ~300–500 class radars.
+			out.RadarRange += 50 * l
 		}
 	}
 	return out

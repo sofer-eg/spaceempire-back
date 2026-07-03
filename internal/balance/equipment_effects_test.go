@@ -25,11 +25,11 @@ func base() balance.ShipStats {
 }
 
 func TestUnit_ApplyEquipmentEffects_ScannerWidensRadar(t *testing.T) {
-	// up_scanner widens the personal radar +40% per level (phase 10.20 L3).
+	// up_scanner widens the personal radar a flat +50 units per level (TASK-123).
 	got := balance.ApplyEquipmentEffects(base(), []domain.InstalledEquipment{
 		{Type: "up_scanner", Level: 2},
 	})
-	require.InDelta(t, 3000+3000*0.4*2, got.RadarRange, 0.001) // 5400
+	require.InDelta(t, 3000+50*2, got.RadarRange, 0.001) // 3100
 	require.Equal(t, base().MaxSpeed, got.MaxSpeed, "scanner touches only radar")
 }
 

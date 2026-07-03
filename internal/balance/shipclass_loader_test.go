@@ -44,12 +44,12 @@ func TestUnit_LoadShipClasses_RadarDefaultByCategory(t *testing.T) {
 	scout, ok := cat.GetShipClass(1)
 	require.True(t, ok)
 	require.Equal(t, balance.CategoryScout, scout.Category())
-	require.Equal(t, 3500, scout.Radar, "M5 scout gets the scout default")
+	require.Equal(t, 500, scout.Radar, "M5 scout gets the scout default")
 
 	carrier, ok := cat.GetShipClass(2)
 	require.True(t, ok)
 	require.Equal(t, balance.CategoryCarrier, carrier.Category())
-	require.Equal(t, 2400, carrier.Radar, "M1 carrier gets the capital default")
+	require.Equal(t, 450, carrier.Radar, "M1 carrier gets the capital default")
 
 	custom, ok := cat.GetShipClass(3)
 	require.True(t, ok)

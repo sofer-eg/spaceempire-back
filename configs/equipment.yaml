@@ -1652,7 +1652,7 @@ equipment:
     - id: 104
       type: up_scanner
       description: Сканирующее устройство
-      max_level: 1
+      max_level: 2
       race: 0
       class: 1
       price: 151345
@@ -1668,7 +1668,7 @@ equipment:
     - id: 105
       type: up_scanner
       description: Сканирующее устройство
-      max_level: 1
+      max_level: 2
       race: 0
       class: 2
       price: 151345
@@ -1684,7 +1684,7 @@ equipment:
     - id: 106
       type: up_scanner
       description: Сканирующее устройство
-      max_level: 1
+      max_level: 2
       race: 0
       class: 3
       price: 72312
@@ -1700,7 +1700,7 @@ equipment:
     - id: 107
       type: up_scanner
       description: Сканирующее устройство
-      max_level: 1
+      max_level: 2
       race: 0
       class: 4
       price: 72312
@@ -1716,7 +1716,7 @@ equipment:
     - id: 108
       type: up_scanner
       description: Сканирующее устройство
-      max_level: 1
+      max_level: 2
       race: 0
       class: 5
       price: 72312
@@ -1732,7 +1732,7 @@ equipment:
     - id: 109
       type: up_scanner
       description: Сканирующее устройство
-      max_level: 1
+      max_level: 2
       race: 0
       class: 6
       price: 151345
@@ -1764,7 +1764,7 @@ equipment:
     - id: 111
       type: up_scanner
       description: Сканирующее устройство
-      max_level: 1
+      max_level: 2
       race: 0
       class: 8
       price: 72312

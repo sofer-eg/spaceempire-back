@@ -23,9 +23,9 @@ type Config struct {
 	// per-player Area of Interest radius used when the player's own ship has no
 	// class radar (legacy/spacesuit, RadarRange<=0) or has no ship in the sector
 	// (observer, centred on the world origin). It also sizes the spatial grid
-	// cell. Default is radarDefault (2800), a sane radar below the ±5000 sector
-	// half-extent so the fallback stays a real visibility limit — it must NOT
-	// reveal the whole sector (TASK-117). Ships with a class radar use their own
+	// cell. Default 400 (TASK-123), a sane radar below the sector half-extent
+	// (~1000) so the fallback stays a real visibility limit — it must NOT reveal
+	// the whole sector (TASK-117). Ships with a class radar use their own
 	// RadarRange, not this.
 	AOIRadius float64
 	// ShutdownTimeout bounds the graceful-shutdown flush (Worker.flushAll),
@@ -97,9 +97,10 @@ func (c Config) withDefaults() Config {
 		c.DockRange = 3
 	}
 	if c.AOIRadius <= 0 {
-		// radarDefault (balance): a sane radar below the sector half-extent, so
-		// the radar-less fallback does not reveal the whole sector (TASK-117).
-		c.AOIRadius = 2800
+		// A sane radar below the sector half-extent (~1000), so the radar-less
+		// fallback (spacesuit/observer) does not reveal the whole sector
+		// (TASK-117, re-calibrated TASK-123). Mirrors the balance radarDefault.
+		c.AOIRadius = 400
 	}
 	if c.ShutdownTimeout <= 0 {
 		c.ShutdownTimeout = 10 * time.Second

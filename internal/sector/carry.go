@@ -23,6 +23,10 @@ func carryDockedShips(s *sectorState) {
 		}
 		if ship.Pos != host.Pos {
 			ship.Pos = host.Pos
+			// Riding the host is not self-propelled motion — no course vector
+			// (TASK-119). applyMovement skips docked ships, so moveShip's defer
+			// never runs for them; zero LastStep here explicitly.
+			ship.LastStep = domain.Vec2{}
 			s.markDirty(id)
 		}
 	}

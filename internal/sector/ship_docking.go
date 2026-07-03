@@ -75,6 +75,9 @@ func (w *Worker) applyShipDock(s *sectorState, ship, host *domain.Ship) error {
 	ship.Docked = &ref
 	ship.Pos = host.Pos
 	ship.Vel = domain.Vec2{}
+	// Docked into the host hangar: carried, not thrusting — no course vector
+	// (TASK-119). carryDockedShips keeps LastStep zero on subsequent ticks.
+	ship.LastStep = domain.Vec2{}
 	ship.Target = nil
 	ship.FinalTarget = nil
 	ship.CurrentTargetRef = nil

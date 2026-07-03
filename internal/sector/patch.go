@@ -138,6 +138,12 @@ func shipEqual(a, b domain.Ship) bool {
 	if a.Pos != b.Pos || a.Vel != b.Vel || a.Direction != b.Direction {
 		return false
 	}
+	// LastStep drives the client's course-vector arrow (DTO Vx/Vy, TASK-119).
+	// Include it so the moving->stopped transition (Pos/Vel already equal, but
+	// LastStep goes non-zero -> zero) still emits a patch and the arrow clears.
+	if a.LastStep != b.LastStep {
+		return false
+	}
 	if a.HP != b.HP || a.Shield != b.Shield || a.MaxSpeed != b.MaxSpeed {
 		return false
 	}

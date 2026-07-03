@@ -118,6 +118,9 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 	relocated.SectorID = targetSector
 	relocated.Pos = exitPos
 	relocated.Vel = domain.Vec2{}
+	// A gate jump is a discrete teleport, not a thrust step — no course vector
+	// (TASK-119). The next tick in the target sector recomputes LastStep.
+	relocated.LastStep = domain.Vec2{}
 	relocated.Target = nil
 	relocated.FinalTarget = cloneCourse(ship.FinalTarget)
 	relocated.Docked = cloneEntityRef(ship.Docked)

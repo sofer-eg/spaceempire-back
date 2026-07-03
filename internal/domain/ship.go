@@ -21,6 +21,16 @@ type Ship struct {
 	SectorID SectorID
 	Pos      Vec2
 	Vel      Vec2
+	// LastStep is the ship's actual position delta over the last tick
+	// (Pos_after - Pos_before). It is the DISPLAY velocity the DTO exposes as
+	// Vx/Vy for the client's course-vector arrow — decoupled from the
+	// integrator Vel, which the movement/arrival snap zeroes even on ticks the
+	// ship really moved (a re-targeted chase/waypoint crawls via the overshoot
+	// snap with Vel=0). In the per-tick kinematic model LastStep == Vel on a
+	// normal thrust step; they differ only on an arrival/overshoot snap, where
+	// LastStep correctly reflects the step taken. RAM-only, recomputed every
+	// tick, never persisted (cold-start = zero = at rest until it moves).
+	LastStep Vec2
 	// MaxSpeed is the upper bound on |Vel| the ship can reach under its
 	// own thrust, in world units **per tick**. The original StarWind SP
 	// `TO_ShipMovement` integrates pos += vel every tick (no dt scaling),

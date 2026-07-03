@@ -29,6 +29,14 @@ import (
 //     pre-3.18 tests that pass `Ship{MaxSpeed: N}` without physics —
 //     same shortcut the SP takes for "perfect ships".
 func moveShip(ship *domain.Ship, dt float64) bool {
+	// LastStep is the display velocity (TASK-119): the actual per-tick position
+	// delta, computed over every exit path so an arrival/overshoot snap — which
+	// zeroes the integrator Vel even when the ship really stepped rangeEq units —
+	// still reports a non-zero course vector. On a no-op tick (dt<=0, coasting at
+	// rest) the delta is zero, so the client correctly drops the arrow.
+	startPos := ship.Pos
+	defer func() { ship.LastStep = ship.Pos.Sub(startPos) }()
+
 	if dt <= 0 {
 		return false
 	}

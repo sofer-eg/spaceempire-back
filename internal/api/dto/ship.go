@@ -14,8 +14,12 @@ type Ship struct {
 	SectorID int64   `json:"sectorID"`
 	X        float64 `json:"x"`
 	Y        float64 `json:"y"`
-	// Vx/Vy is the instantaneous velocity; the SPA extrapolates between
-	// snapshots so the ship visually drifts under inertia.
+	// Vx/Vy is the per-tick position delta (domain.Ship.LastStep) — the ship's
+	// actual movement this tick, used by the client for the course-vector arrow.
+	// It equals the integrator Vel on a normal thrust step and correctly stays
+	// non-zero on arrival-snap ticks where Vel is zeroed (TASK-119). The SPA
+	// extrapolates position from x/y + prevX/prevY, not from this, so decoupling
+	// the arrow's source from Vel does not affect drift.
 	Vx float64 `json:"vx"`
 	Vy float64 `json:"vy"`
 	// DirectionX/Y is the ship's nose unit vector (mirrors the SP's
@@ -141,8 +145,8 @@ func ShipFromDomain(s domain.Ship, hull HullCategoryResolver) Ship {
 		SectorID:     int64(s.SectorID),
 		X:            s.Pos.X,
 		Y:            s.Pos.Y,
-		Vx:           s.Vel.X,
-		Vy:           s.Vel.Y,
+		Vx:           s.LastStep.X,
+		Vy:           s.LastStep.Y,
 		DirectionX:   s.Direction.X,
 		DirectionY:   s.Direction.Y,
 		MaxSpeed:     s.MaxSpeed,

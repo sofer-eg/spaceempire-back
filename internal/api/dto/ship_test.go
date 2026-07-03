@@ -1,6 +1,7 @@
 package dto_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,6 +53,34 @@ func TestUnit_ShipFromDomain_MiningTarget(t *testing.T) {
 
 	idle := dto.ShipFromDomain(domain.Ship{ID: 2}, nil)
 	assert.Nil(t, idle.MiningTarget, "non-mining ship omits miningTarget")
+}
+
+// TestUnit_ShipFromDomain_VelocityVectorFromLastStep pins the DTO course-vector
+// source to domain.Ship.LastStep, decoupled from the integrator Vel (TASK-119).
+// A ship that stepped this tick exposes a non-zero Vx/Vy even when Vel is zero
+// (arrival/overshoot snap); a ship at rest exposes zero.
+func TestUnit_ShipFromDomain_VelocityVectorFromLastStep(t *testing.T) {
+	t.Parallel()
+
+	// Overshoot-snap tick: the ship really stepped (LastStep set) but the
+	// integrator Vel was zeroed by the snap. The arrow must still show.
+	moving := dto.ShipFromDomain(domain.Ship{
+		ID:       1,
+		LastStep: domain.Vec2{X: 4, Y: 3},
+		Vel:      domain.Vec2{},
+	}, nil)
+	assert.Equal(t, 4.0, moving.Vx)
+	assert.Equal(t, 3.0, moving.Vy)
+	assert.Positive(t, math.Hypot(moving.Vx, moving.Vy), "moving ship must expose a course vector")
+
+	// At rest: no step this tick → no arrow, regardless of a stale Vel.
+	stopped := dto.ShipFromDomain(domain.Ship{
+		ID:       2,
+		LastStep: domain.Vec2{},
+		Vel:      domain.Vec2{X: 9, Y: 9},
+	}, nil)
+	assert.Zero(t, stopped.Vx)
+	assert.Zero(t, stopped.Vy)
 }
 
 // TestUnit_ShipsFromDomain_AppliesResolver checks the batch path stamps every

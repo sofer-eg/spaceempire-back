@@ -142,6 +142,8 @@ func executeDock(w *Worker, s *sectorState, ship *domain.Ship, target domain.Doc
 	ship.Docked = &ref
 	ship.Pos = target.ObjectPos()
 	ship.Vel = domain.Vec2{}
+	// Docked: at rest on the static, no course vector (TASK-119).
+	ship.LastStep = domain.Vec2{}
 	ship.Target = nil
 	ship.FinalTarget = nil
 	ship.CurrentTargetRef = nil

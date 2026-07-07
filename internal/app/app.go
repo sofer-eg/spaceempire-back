@@ -113,6 +113,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	logger.Info("equipment loaded", "path", cfg.Balance.EquipmentPath, "rows", equipment.EquipmentCount())
 
+	shipLoadouts, err := balance.LoadShipLoadoutsFromFile(cfg.Balance.ShipLoadoutPath)
+	if err != nil {
+		return fmt.Errorf("load ship loadouts: %w", err)
+	}
+	logger.Info("ship loadouts loaded", "path", cfg.Balance.ShipLoadoutPath, "loadouts", shipLoadouts.LoadoutCount())
+
 	pool, err := database.NewPool(ctx, database.Config{
 		DSN:         cfg.Postgres.DSN,
 		MaxConns:    cfg.Postgres.MaxConns,
@@ -431,7 +437,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// player-race reader; buildHomeShipyards maps race → home shipyard from the
 	// loaded statics; shipClasses names the starter ship.
 	authRepo := auth.NewRepository(pool)
-	spawner := newShipSpawner(shipRepo, cargoRepoPersistence, sectorPool, spawnCfg, authRepo, buildHomeShipyards(statics), shipClasses)
+	spawner := newShipSpawner(shipRepo, cargoRepoPersistence, sectorPool, spawnCfg, authRepo, buildHomeShipyards(statics), shipClasses, equipment, shipLoadouts)
 
 	authSvc := auth.NewService(authRepo, realClock, spawner, auth.ServiceConfig{
 		SessionTTL: cfg.Auth.SessionTTL,
@@ -492,7 +498,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// install/remove ct_updates modules on a docked ship. Shares the spawn
 	// config (base stats), the ship-class/equipment catalogs and authRepo (race
 	// reader) with the spawner; runs cash debit + persist in a tx via txManager.
-	newOutfitServer(sectorPool, shipRepo, playersRepoPersistence, txManager, shipClasses, equipment, authRepo, standingSvc, spawnCfg, logger).
+	newOutfitServer(sectorPool, shipRepo, playersRepoPersistence, txManager, shipClasses, equipment, shipLoadouts, authRepo, standingSvc, spawnCfg, logger).
 		RegisterRoutes(srv.Mux(), authSrv.RequireAuth)
 
 	// EVA (10.23): exit ship into a spacesuit, ship access toggle, board / ride

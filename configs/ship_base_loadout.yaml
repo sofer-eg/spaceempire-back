@@ -1,0 +1,1437 @@
+# Auto-generated from sql/db.sql (ct_npc_ship_modules) by cmd/starwind-tools/convert-ship-loadout.
+# Do not edit by hand; rerun the converter against the source dump.
+loadouts:
+    - race: 1
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 1
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 1
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 1
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 1
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 1
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 1
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 1
+      type: 8
+      modules:
+        - equipment_id: 65
+          type: up_engine
+          level: 1
+        - equipment_id: 45
+          type: up_shield
+          level: 1
+        - equipment_id: 74
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 138
+          type: up_turret_control
+          level: 3
+        - equipment_id: 8
+          type: up_launcher
+          level: 5
+        - equipment_id: 17
+          type: up_pro
+          level: 5
+    - race: 1
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 2
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 2
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 2
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 2
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 2
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 2
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 2
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 2
+      type: 8
+      modules:
+        - equipment_id: 65
+          type: up_engine
+          level: 1
+        - equipment_id: 45
+          type: up_shield
+          level: 1
+        - equipment_id: 74
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 138
+          type: up_turret_control
+          level: 3
+        - equipment_id: 8
+          type: up_launcher
+          level: 5
+        - equipment_id: 17
+          type: up_pro
+          level: 5
+    - race: 2
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 3
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 3
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 3
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 3
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 3
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 3
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 3
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 3
+      type: 8
+      modules:
+        - equipment_id: 65
+          type: up_engine
+          level: 1
+        - equipment_id: 45
+          type: up_shield
+          level: 1
+        - equipment_id: 74
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 138
+          type: up_turret_control
+          level: 3
+        - equipment_id: 8
+          type: up_launcher
+          level: 5
+        - equipment_id: 17
+          type: up_pro
+          level: 5
+    - race: 3
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 4
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 4
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 4
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 4
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 4
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 4
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 4
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 4
+      type: 8
+      modules:
+        - equipment_id: 65
+          type: up_engine
+          level: 1
+        - equipment_id: 45
+          type: up_shield
+          level: 1
+        - equipment_id: 74
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 138
+          type: up_turret_control
+          level: 3
+        - equipment_id: 8
+          type: up_launcher
+          level: 5
+        - equipment_id: 17
+          type: up_pro
+          level: 5
+    - race: 4
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 5
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 5
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 5
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 5
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 5
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 5
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 5
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 5
+      type: 8
+      modules:
+        - equipment_id: 65
+          type: up_engine
+          level: 1
+        - equipment_id: 45
+          type: up_shield
+          level: 1
+        - equipment_id: 74
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 138
+          type: up_turret_control
+          level: 3
+        - equipment_id: 8
+          type: up_launcher
+          level: 5
+        - equipment_id: 17
+          type: up_pro
+          level: 5
+    - race: 5
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 6
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 6
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 6
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 6
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 6
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 6
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 6
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 6
+      type: 8
+      modules:
+        - equipment_id: 65
+          type: up_engine
+          level: 1
+        - equipment_id: 45
+          type: up_shield
+          level: 1
+        - equipment_id: 74
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 138
+          type: up_turret_control
+          level: 3
+        - equipment_id: 8
+          type: up_launcher
+          level: 5
+        - equipment_id: 17
+          type: up_pro
+          level: 5
+    - race: 6
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 7
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 7
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 7
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 7
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 7
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 7
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 7
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 7
+      type: 8
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 115
+          type: up_turret_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 7
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 8
+      type: 1
+      modules:
+        - equipment_id: 58
+          type: up_engine
+          level: 1
+        - equipment_id: 38
+          type: up_shield
+          level: 1
+        - equipment_id: 67
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 113
+          type: up_turret_control
+          level: 3
+        - equipment_id: 1
+          type: up_launcher
+          level: 5
+        - equipment_id: 10
+          type: up_pro
+          level: 5
+    - race: 8
+      type: 2
+      modules:
+        - equipment_id: 59
+          type: up_engine
+          level: 1
+        - equipment_id: 39
+          type: up_shield
+          level: 1
+        - equipment_id: 68
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 114
+          type: up_turret_control
+          level: 3
+        - equipment_id: 2
+          type: up_launcher
+          level: 5
+        - equipment_id: 11
+          type: up_pro
+          level: 5
+    - race: 8
+      type: 3
+      modules:
+        - equipment_id: 60
+          type: up_engine
+          level: 1
+        - equipment_id: 40
+          type: up_shield
+          level: 1
+        - equipment_id: 69
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 3
+          type: up_launcher
+          level: 5
+        - equipment_id: 12
+          type: up_pro
+          level: 5
+    - race: 8
+      type: 4
+      modules:
+        - equipment_id: 61
+          type: up_engine
+          level: 1
+        - equipment_id: 41
+          type: up_shield
+          level: 1
+        - equipment_id: 70
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 4
+          type: up_launcher
+          level: 4
+        - equipment_id: 13
+          type: up_pro
+          level: 4
+    - race: 8
+      type: 5
+      modules:
+        - equipment_id: 62
+          type: up_engine
+          level: 1
+        - equipment_id: 42
+          type: up_shield
+          level: 1
+        - equipment_id: 71
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 5
+          type: up_launcher
+          level: 2
+        - equipment_id: 14
+          type: up_pro
+          level: 4
+    - race: 8
+      type: 6
+      modules:
+        - equipment_id: 63
+          type: up_engine
+          level: 1
+        - equipment_id: 43
+          type: up_shield
+          level: 1
+        - equipment_id: 72
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 116
+          type: up_turret_control
+          level: 2
+        - equipment_id: 6
+          type: up_launcher
+          level: 5
+        - equipment_id: 15
+          type: up_pro
+          level: 5
+    - race: 8
+      type: 7
+      modules:
+        - equipment_id: 64
+          type: up_engine
+          level: 1
+        - equipment_id: 44
+          type: up_shield
+          level: 1
+        - equipment_id: 73
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 117
+          type: up_turret_control
+          level: 1
+        - equipment_id: 7
+          type: up_launcher
+          level: 5
+        - equipment_id: 16
+          type: up_pro
+          level: 4
+    - race: 8
+      type: 8
+      modules:
+        - equipment_id: 65
+          type: up_engine
+          level: 1
+        - equipment_id: 45
+          type: up_shield
+          level: 1
+        - equipment_id: 74
+          type: up_weapon_control
+          level: 1
+        - equipment_id: 138
+          type: up_turret_control
+          level: 2
+        - equipment_id: 8
+          type: up_launcher
+          level: 5
+        - equipment_id: 17
+          type: up_pro
+          level: 5
+    - race: 8
+      type: 9
+      modules:
+        - equipment_id: 66
+          type: up_engine
+          level: 1
+        - equipment_id: 46
+          type: up_shield
+          level: 1
+        - equipment_id: 9
+          type: up_launcher
+          level: 5
+        - equipment_id: 18
+          type: up_pro
+          level: 2
+    - race: 3
+      type: 10
+      modules: []
+    - race: 8
+      type: 10
+      modules: []
+    - race: 100
+      type: 10
+      modules: []
+    - race: 100
+      type: 11
+      modules: []
+    - race: 100
+      type: 12
+      modules: []
+    - race: 100
+      type: 13
+      modules: []
+    - race: 100
+      type: 14
+      modules: []
+    - race: 100
+      type: 15
+      modules: []
+    - race: 100
+      type: 16
+      modules: []
+    - race: 100
+      type: 17
+      modules: []
+    - race: 100
+      type: 18
+      modules: []
+    - race: 100
+      type: 19
+      modules: []
+    - race: 100
+      type: 20
+      modules: []
+    - race: 100
+      type: 21
+      modules: []

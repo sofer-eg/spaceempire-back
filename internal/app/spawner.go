@@ -167,14 +167,22 @@ type shipSpawner struct {
 	// classes is the ship-class catalog (8.14) used to name the starter ship
 	// after its race's M5 model. nil → no name (client falls back to #id).
 	classes *balance.ShipClasses
+	// equipment + loadouts fit the starter ship with its class's base module
+	// set (ct_npc_ship_modules, TASK-100.3.25): loadouts supplies the modules,
+	// equipment resolves their per-tick EnergyDelta. Both nil → the starter
+	// spawns bare (pre-TASK-100.3.25 behaviour, kept for classless fallback and
+	// minimal deployments/tests).
+	equipment *balance.Equipments
+	loadouts  *balance.ShipLoadouts
 }
 
 // newShipSpawner wires the dependencies. cargoRepo is allowed to be nil
 // when starter cargo is disabled (tests, deployments without the cargo
 // table) — `SpawnFor` skips the cargo step in that case. players, homeYards
 // and classes (all phase 10.10) may be nil/empty — the spawner then falls
-// back to the pre-10.10 neutral-ship-in-config-sector behaviour.
-func newShipSpawner(repo *shipsrepo.Repository, cargoRepo *cargorepo.Repository, pool *sector.Pool, cfg ShipSpawnerConfig, players playerRaceReader, homeYards map[domain.RaceID]homeShipyard, classes *balance.ShipClasses) *shipSpawner {
+// back to the pre-10.10 neutral-ship-in-config-sector behaviour. equipment and
+// loadouts (TASK-100.3.25) may be nil — the starter then spawns bare.
+func newShipSpawner(repo *shipsrepo.Repository, cargoRepo *cargorepo.Repository, pool *sector.Pool, cfg ShipSpawnerConfig, players playerRaceReader, homeYards map[domain.RaceID]homeShipyard, classes *balance.ShipClasses, equipment *balance.Equipments, loadouts *balance.ShipLoadouts) *shipSpawner {
 	return &shipSpawner{
 		repo:  repo,
 		cargo: cargoRepo,
@@ -185,6 +193,8 @@ func newShipSpawner(repo *shipsrepo.Repository, cargoRepo *cargorepo.Repository,
 		players:   players,
 		homeYards: homeYards,
 		classes:   classes,
+		equipment: equipment,
+		loadouts:  loadouts,
 	}
 }
 
@@ -294,61 +304,10 @@ func baseShipStats(cls balance.ShipClass, cfg ShipSpawnerConfig) balance.ShipSta
 	}
 }
 
-// spawnStarter persists a starter ship (full class stats + missile cargo) at
-// the given location and mirrors it into the sector's worker. When the M5
-// catalog entry is available for the race, it supplies the combat stats
-// (speed, hull, shield, laser); otherwise falls back to cfg values.
+// spawnStarter persists a starter ship (full class stats + base loadout +
+// missile cargo) at the given location and mirrors it into the sector's worker.
 func (s *shipSpawner) spawnStarter(ctx context.Context, playerID domain.PlayerID, race domain.RaceID, name string, sectorID domain.SectorID, pos domain.Vec2) error {
-	maxSpeed := s.cfg.StartMaxSpeed
-	accel := s.cfg.StartAccel
-	hp := s.cfg.StartHP
-	shield := s.cfg.StartShld
-	shieldCharge := s.cfg.StartShldCharge
-	laserDmg := s.cfg.StartLaserDamage
-	var classID domain.ShipClassID
-	var radarRange float64 // 0 → subscription falls back to cfg.AOIRadius
-	cargoBay := 100.0      // phase 10.3.17: class overrides below; 100 keeps the legacy hold for classless ships
-
-	if cls, ok := s.starterClass(race); ok && cls.Hull > 0 {
-		maxSpeed = cls.Speed
-		accel = cls.Acceleration
-		hp = cls.Hull
-		shield = cls.Shield
-		shieldCharge = cls.ShieldCharge
-		laserDmg = cls.Laser / warshipLaserDivisor
-		if laserDmg < s.cfg.StartLaserDamage {
-			laserDmg = s.cfg.StartLaserDamage
-		}
-		classID = cls.ID
-		radarRange = float64(cls.Radar)  // phase 10.20 L1
-		cargoBay = float64(cls.CargoBay) // phase 10.3.17: hold capacity from class
-	}
-
-	ship := domain.Ship{
-		PlayerID:        playerID,
-		Race:            race,
-		Name:            name,
-		ShipClassID:     classID,
-		SectorID:        sectorID,
-		Pos:             pos,
-		MaxSpeed:        maxSpeed,
-		Acceleration:    accel,
-		TurnRate:        s.cfg.StartTurnRate,
-		Direction:       domain.Vec2{X: 1, Y: 0},
-		HP:              hp,
-		MaxHP:           hp,
-		Shield:          shield,
-		MaxShield:       shield,
-		ShieldRecharge:  shieldCharge,
-		Energy:          s.cfg.StartEnergy,
-		MaxEnergy:       s.cfg.StartEnergy,
-		EnergyRecharge:  s.cfg.StartEnergyChrg,
-		LaserDamage:     laserDmg,
-		LaserRange:      s.cfg.StartLaserRange,
-		LaserEnergyCost: s.cfg.StartLaserECost,
-		RadarRange:      radarRange,
-		CargoBay:        cargoBay,
-	}
+	ship := s.buildStarterShip(playerID, race, name, sectorID, pos)
 	id, err := s.repo.Create(ctx, ship)
 	if err != nil {
 		return fmt.Errorf("ship insert: %w", err)
@@ -380,6 +339,99 @@ func (s *shipSpawner) spawnStarter(ctx context.Context, playerID domain.PlayerID
 	case <-waitCtx.Done():
 		return errors.New("worker add-ship: ack timeout")
 	}
+}
+
+// buildStarterShip assembles the starter ship struct (no persistence). When the
+// M5 catalog entry is available for the race it supplies the combat stats
+// (speed, hull, shield, laser); otherwise cfg values are used. The class's base
+// loadout (ct_npc_ship_modules, TASK-100.3.25) is folded on top exactly as the
+// shipyard outfit path does. Extracted from spawnStarter so the resolved kit +
+// folded stats are unit-testable without a DB/worker.
+func (s *shipSpawner) buildStarterShip(playerID domain.PlayerID, race domain.RaceID, name string, sectorID domain.SectorID, pos domain.Vec2) domain.Ship {
+	maxSpeed := s.cfg.StartMaxSpeed
+	accel := s.cfg.StartAccel
+	turnRate := s.cfg.StartTurnRate
+	hp := s.cfg.StartHP
+	shield := s.cfg.StartShld
+	shieldCharge := s.cfg.StartShldCharge
+	energy := s.cfg.StartEnergy
+	energyRch := s.cfg.StartEnergyChrg
+	energyDelta := 0
+	laserDmg := s.cfg.StartLaserDamage
+	var classID domain.ShipClassID
+	var radarRange float64 // 0 → subscription falls back to cfg.AOIRadius
+	cargoBay := 100.0      // phase 10.3.17: class overrides below; 100 keeps the legacy hold for classless ships
+	var loadout []domain.InstalledEquipment
+
+	if cls, ok := s.starterClass(race); ok && cls.Hull > 0 {
+		maxSpeed = cls.Speed
+		accel = cls.Acceleration
+		hp = cls.Hull
+		shield = cls.Shield
+		shieldCharge = cls.ShieldCharge
+		laserDmg = cls.Laser / warshipLaserDivisor
+		if laserDmg < s.cfg.StartLaserDamage {
+			laserDmg = s.cfg.StartLaserDamage
+		}
+		classID = cls.ID
+		radarRange = float64(cls.Radar)  // phase 10.20 L1
+		cargoBay = float64(cls.CargoBay) // phase 10.3.17: hold capacity from class
+
+		// TASK-100.3.25: fit the class's base module set (ct_npc_ship_modules)
+		// and fold its stat effects exactly as the shipyard outfit path does, so
+		// the equipment JSONB and the persisted stat columns stay in sync (a
+		// later uninstall recomputes from the same baseShipStats baseline). The
+		// set is applied directly, bypassing the dependance/rank gates — those
+		// only guard interactive installs, not the spawn kit.
+		if s.loadouts != nil {
+			if lo := s.loadouts.BaseLoadout(cls.Race, cls.Type); len(lo) > 0 {
+				eff := balance.ApplyEquipmentEffects(baseShipStats(cls, s.cfg), lo)
+				loadout = lo
+				maxSpeed = eff.MaxSpeed
+				accel = eff.Acceleration
+				turnRate = eff.TurnRate
+				shield = eff.MaxShield
+				shieldCharge = eff.ShieldRecharge
+				energy = eff.MaxEnergy
+				energyRch = eff.EnergyRecharge
+				laserDmg = eff.LaserDamage
+				radarRange = eff.RadarRange
+				cargoBay = eff.CargoBay
+				if s.equipment != nil {
+					energyDelta = s.equipment.EnergyDelta(lo)
+				}
+			}
+		}
+	}
+
+	ship := domain.Ship{
+		PlayerID:        playerID,
+		Race:            race,
+		Name:            name,
+		ShipClassID:     classID,
+		SectorID:        sectorID,
+		Pos:             pos,
+		MaxSpeed:        maxSpeed,
+		Acceleration:    accel,
+		TurnRate:        turnRate,
+		Direction:       domain.Vec2{X: 1, Y: 0},
+		HP:              hp,
+		MaxHP:           hp,
+		Shield:          shield,
+		MaxShield:       shield,
+		ShieldRecharge:  shieldCharge,
+		Energy:          energy,
+		MaxEnergy:       energy,
+		EnergyRecharge:  energyRch,
+		EnergyDelta:     energyDelta,
+		LaserDamage:     laserDmg,
+		LaserRange:      s.cfg.StartLaserRange,
+		LaserEnergyCost: s.cfg.StartLaserECost,
+		RadarRange:      radarRange,
+		CargoBay:        cargoBay,
+		Equipment:       loadout,
+	}
+	return ship
 }
 
 // SpawnSpacesuit creates a weak spacesuit ship for the player at the given

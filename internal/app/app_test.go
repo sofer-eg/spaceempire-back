@@ -42,6 +42,7 @@ func TestIntegration_App_StartsAndShutsDownGracefully(t *testing.T) {
 			ShipClassesPath:  "../../configs/ship_classes.yaml",
 			StationTypesPath: "../../configs/station_types.yaml",
 			EquipmentPath:    "../../configs/equipment.yaml",
+			ShipLoadoutPath:  "../../configs/ship_base_loadout.yaml",
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -62,6 +62,20 @@ var ErrEmptyEquipmentType = errors.New("balance: equipment type must not be empt
 // ErrDuplicateEquipmentID is returned when two equipment rows share an id.
 var ErrDuplicateEquipmentID = errors.New("balance: duplicate equipment id")
 
+// --- ship base loadout (TASK-100.3.25) ------------------------------------
+
+// ErrDuplicateShipLoadout is returned when two base-loadout entries share the
+// same race+type key.
+var ErrDuplicateShipLoadout = errors.New("balance: duplicate ship loadout race+type")
+
+// ErrInvalidLoadoutEquipmentID is returned when a base-loadout module has a
+// non-positive equipment id (EnergyDelta resolves the module by id).
+var ErrInvalidLoadoutEquipmentID = errors.New("balance: loadout module equipment id must be positive")
+
+// ErrEmptyLoadoutModuleType is returned when a base-loadout module has a blank
+// type.
+var ErrEmptyLoadoutModuleType = errors.New("balance: loadout module type must not be empty")
+
 // --- equipment install validation (phase 10.14) ---------------------------
 
 // ErrEquipmentNotFound is returned when an install references an equipment id

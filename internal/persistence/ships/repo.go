@@ -195,18 +195,22 @@ INSERT INTO ships (
     final_target_sector, final_target_x, final_target_y,
     final_target_dock_kind, final_target_dock_id,
     hp, max_hp, shield, max_shield, shield_recharge,
-    energy, max_energy, energy_recharge,
+    energy, max_energy, energy_recharge, energy_delta,
     laser_damage, laser_range, laser_energy_cost,
     attack_kind, attack_id,
     docked_kind, docked_id,
     is_spacesuit, name, ship_class_id, equipment, radar_range, is_open, cargobay
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)
 RETURNING id
 `
 
 // Create inserts a new ship row and returns its database-assigned id.
 // Caller passes ID==0; non-zero ID is preserved for explicit ids (tests).
+// energy_delta is persisted here (not just at SaveEquipment) so a ship spawned
+// with a base loadout (TASK-100.3.25) keeps its folded per-tick delta across a
+// cold restart — otherwise LoadAll would read the DEFAULT 0 and desync the stat
+// columns from the equipment JSONB.
 func (r *Repository) Create(ctx context.Context, s domain.Ship) (domain.ShipID, error) {
 	targetX, targetY := vec2ToNullable(s.Target)
 	finalSector, finalX, finalY, finalApproachKind, finalApproachID := courseToNullable(s.FinalTarget)
@@ -225,7 +229,7 @@ func (r *Repository) Create(ctx context.Context, s domain.Ship) (domain.ShipID, 
 		finalSector, finalX, finalY,
 		finalApproachKind, finalApproachID,
 		s.HP, s.MaxHP, s.Shield, s.MaxShield, s.ShieldRecharge,
-		s.Energy, s.MaxEnergy, s.EnergyRecharge,
+		s.Energy, s.MaxEnergy, s.EnergyRecharge, s.EnergyDelta,
 		s.LaserDamage, s.LaserRange, s.LaserEnergyCost,
 		attackKind, attackID,
 		dockedKind, dockedID,

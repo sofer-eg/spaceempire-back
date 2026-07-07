@@ -96,6 +96,11 @@ type BalanceConfig struct {
 	// by cmd/starwind-tools/convert-equipment. Loaded at startup and exposed
 	// via GET /api/equipment.
 	EquipmentPath string `default:"configs/equipment.yaml"`
+	// ShipLoadoutPath is the base-loadout catalog YAML (ct_npc_ship_modules),
+	// converted by cmd/starwind-tools/convert-ship-loadout. Loaded at startup:
+	// it supplies the module set a freshly spawned / purchased ship is fitted
+	// with (TASK-100.3.25).
+	ShipLoadoutPath string `default:"configs/ship_base_loadout.yaml"`
 }
 
 type AuthConfig struct {

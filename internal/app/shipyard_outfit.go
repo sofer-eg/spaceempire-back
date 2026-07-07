@@ -43,13 +43,14 @@ type outfitServer struct {
 	tx         *database.TxManager
 	classes    *balance.ShipClasses
 	equipment  *balance.Equipments
+	loadouts   *balance.ShipLoadouts
 	raceReader playerRaceReader
 	standing   raceStandingReader
 	cfg        ShipSpawnerConfig
 	logger     *slog.Logger
 }
 
-func newOutfitServer(pool shipyardLocator, ships *shipsrepo.Repository, players *playersrepo.Repository, tx *database.TxManager, classes *balance.ShipClasses, equipment *balance.Equipments, raceReader playerRaceReader, standing raceStandingReader, cfg ShipSpawnerConfig, logger *slog.Logger) *outfitServer {
+func newOutfitServer(pool shipyardLocator, ships *shipsrepo.Repository, players *playersrepo.Repository, tx *database.TxManager, classes *balance.ShipClasses, equipment *balance.Equipments, loadouts *balance.ShipLoadouts, raceReader playerRaceReader, standing raceStandingReader, cfg ShipSpawnerConfig, logger *slog.Logger) *outfitServer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -60,6 +61,7 @@ func newOutfitServer(pool shipyardLocator, ships *shipsrepo.Repository, players 
 		tx:         tx,
 		classes:    classes,
 		equipment:  equipment,
+		loadouts:   loadouts,
 		raceReader: raceReader,
 		standing:   standing,
 		cfg:        cfg.withDefaults(),
@@ -147,10 +149,24 @@ func (s *outfitServer) handleBuyShip(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildPurchasedShip assembles a fresh ship of the given class, docked at the
-// shipyard. Stats come from baseShipStats (class + spawn config); the ship
-// starts with no equipment, so its effective stats equal the baseline.
+// shipyard. Stats come from baseShipStats (class + spawn config) with the
+// class's base loadout (ct_npc_ship_modules, TASK-100.3.25) folded on top — the
+// same kit and folding the starter spawn uses — so a bought ship arrives fitted
+// like the original CreateStandartPilotShip, and its equipment JSONB stays in
+// sync with the persisted stat columns. Classes with no base loadout keep the
+// bare baseline.
 func (s *outfitServer) buildPurchasedShip(player domain.PlayerID, cls balance.ShipClass, race domain.RaceID, sectorID domain.SectorID, pos domain.Vec2, shipyardID int64) domain.Ship {
 	base := baseShipStats(cls, s.cfg)
+	eff := base
+	var loadout []domain.InstalledEquipment
+	energyDelta := 0
+	if s.loadouts != nil {
+		if lo := s.loadouts.BaseLoadout(cls.Race, cls.Type); len(lo) > 0 {
+			loadout = lo
+			eff = balance.ApplyEquipmentEffects(base, lo)
+			energyDelta = s.equipment.EnergyDelta(lo)
+		}
+	}
 	hp := cls.Hull
 	if hp <= 0 {
 		hp = s.cfg.StartHP
@@ -163,22 +179,24 @@ func (s *outfitServer) buildPurchasedShip(player domain.PlayerID, cls balance.Sh
 		SectorID:        sectorID,
 		Pos:             pos,
 		Direction:       domain.Vec2{X: 1, Y: 0},
-		MaxSpeed:        base.MaxSpeed,
-		Acceleration:    base.Acceleration,
-		TurnRate:        base.TurnRate, // phase 10.3.15: from baseShipStats, consistent with the up_rudder recompute baseline
+		MaxSpeed:        eff.MaxSpeed,
+		Acceleration:    eff.Acceleration,
+		TurnRate:        eff.TurnRate, // phase 10.3.15: from baseShipStats, consistent with the up_rudder recompute baseline
 		HP:              hp,
 		MaxHP:           hp,
-		Shield:          base.MaxShield,
-		MaxShield:       base.MaxShield,
-		ShieldRecharge:  base.ShieldRecharge,
-		Energy:          base.MaxEnergy,
-		MaxEnergy:       base.MaxEnergy,
-		EnergyRecharge:  base.EnergyRecharge,
-		LaserDamage:     base.LaserDamage,
+		Shield:          eff.MaxShield,
+		MaxShield:       eff.MaxShield,
+		ShieldRecharge:  eff.ShieldRecharge,
+		Energy:          eff.MaxEnergy,
+		MaxEnergy:       eff.MaxEnergy,
+		EnergyRecharge:  eff.EnergyRecharge,
+		EnergyDelta:     energyDelta,
+		LaserDamage:     eff.LaserDamage,
 		LaserRange:      s.cfg.StartLaserRange,
 		LaserEnergyCost: s.cfg.StartLaserECost,
-		RadarRange:      base.RadarRange, // phase 10.20: bought ships get the class radar too
-		CargoBay:        base.CargoBay,   // phase 10.3.17: hold capacity from class
+		RadarRange:      eff.RadarRange, // phase 10.20: bought ships get the class radar too
+		CargoBay:        eff.CargoBay,   // phase 10.3.17: hold capacity from class
+		Equipment:       loadout,
 		Docked:          &domain.EntityRef{Kind: domain.EntityKindShipyard, ID: shipyardID},
 	}
 }

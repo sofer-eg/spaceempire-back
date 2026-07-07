@@ -76,13 +76,26 @@ func TestUnit_ApplyEquipmentEffects_ShieldAndProStackOffBaseline(t *testing.T) {
 
 func TestUnit_ApplyEquipmentEffects_EnergyAndLaser(t *testing.T) {
 	got := balance.ApplyEquipmentEffects(base(), []domain.InstalledEquipment{
-		{Type: "up_accumulator", Level: 1}, // +25% of 200 = 50
+		{Type: "up_accumulator", Level: 1}, // ×2 pool: +base*(2^1-1)=200 → 400
 		{Type: "up_generator", Level: 1},   // +25% of 4 = 1 (rounded)
 		{Type: "up_lb", Level: 1},          // +10% of 50 = 5
 	})
-	require.Equal(t, 250, got.MaxEnergy)
+	require.Equal(t, 400, got.MaxEnergy)
 	require.Equal(t, 5, got.EnergyRecharge)
 	require.Equal(t, 55, got.LaserDamage)
+}
+
+// TestUnit_ApplyEquipmentEffects_AccumulatorDoublesPerLevel pins the
+// TASK-100.3.25 energy-model rule: level L multiplies the pool by 2^L
+// (base×(2^L−1) added off the baseline), so it doubles the laser's fire duration
+// each level. Catalog max_level is 3.
+func TestUnit_ApplyEquipmentEffects_AccumulatorDoublesPerLevel(t *testing.T) {
+	for level, want := range map[int]int{1: 400, 2: 800, 3: 1600} {
+		got := balance.ApplyEquipmentEffects(base(), []domain.InstalledEquipment{
+			{Type: "up_accumulator", Level: level},
+		})
+		require.Equalf(t, want, got.MaxEnergy, "level %d → pool ×2^%d", level, level)
+	}
 }
 
 func TestUnit_ApplyEquipmentEffects_CapabilityModulesDoNotChangeStats(t *testing.T) {

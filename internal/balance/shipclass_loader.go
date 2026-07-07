@@ -23,6 +23,8 @@ type yamlShipClass struct {
 	Shield          int     `yaml:"shield"`
 	Hull            int     `yaml:"hull"`
 	ShieldCharge    int     `yaml:"shield_charge"`
+	MaxEnergy       int     `yaml:"max_energy"`      // TASK-100.3.25 per-class energy pool
+	EnergyRecharge  int     `yaml:"energy_recharge"` // TASK-100.3.25 per-class recharge
 	Maneuverability float64 `yaml:"maneuverability"`
 	CargoBay        int     `yaml:"cargobay"`
 	BasePrice       int64   `yaml:"base_price"`
@@ -69,6 +71,8 @@ func LoadShipClassesFromFile(path string) (*ShipClasses, error) {
 			Shield:          c.Shield,
 			Hull:            c.Hull,
 			ShieldCharge:    c.ShieldCharge,
+			MaxEnergy:       c.MaxEnergy,
+			EnergyRecharge:  c.EnergyRecharge,
 			Maneuverability: c.Maneuverability,
 			CargoBay:        c.CargoBay,
 			BasePrice:       c.BasePrice,

@@ -164,7 +164,9 @@ func (s *outfitServer) buildPurchasedShip(player domain.PlayerID, cls balance.Sh
 		if lo := s.loadouts.BaseLoadout(cls.Race, cls.Type); len(lo) > 0 {
 			loadout = lo
 			eff = balance.ApplyEquipmentEffects(base, lo)
-			energyDelta = s.equipment.EnergyDelta(lo)
+			if s.equipment != nil {
+				energyDelta = s.equipment.EnergyDelta(lo)
+			}
 		}
 	}
 	hp := cls.Hull

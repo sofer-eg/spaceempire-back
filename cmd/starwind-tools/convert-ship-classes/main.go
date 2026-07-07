@@ -27,17 +27,25 @@ import (
 
 // yamlShipClass mirrors the ct_ship_classes columns, in dump order.
 type yamlShipClass struct {
-	ID              int     `yaml:"id"`
-	Race            int     `yaml:"race"`
-	Type            int     `yaml:"type"`
-	Class           int     `yaml:"class"`
-	Name            string  `yaml:"name"`
-	Speed           float64 `yaml:"speed"`
-	Acceleration    float64 `yaml:"acceleration"`
-	Laser           int     `yaml:"laser"`
-	Shield          int     `yaml:"shield"`
-	Hull            int     `yaml:"hull"`
-	ShieldCharge    int     `yaml:"shield_charge"`
+	ID           int     `yaml:"id"`
+	Race         int     `yaml:"race"`
+	Type         int     `yaml:"type"`
+	Class        int     `yaml:"class"`
+	Name         string  `yaml:"name"`
+	Speed        float64 `yaml:"speed"`
+	Acceleration float64 `yaml:"acceleration"`
+	Laser        int     `yaml:"laser"`
+	Shield       int     `yaml:"shield"`
+	Hull         int     `yaml:"hull"`
+	ShieldCharge int     `yaml:"shield_charge"`
+	// MaxEnergy / EnergyRecharge are the per-class energy pool and per-tick
+	// recharge (TASK-100.3.25 energy model). ct_ship_classes carries no energy
+	// columns, so they are not parsed from the dump — they come from the
+	// energyCalibration table keyed on the gameplay class number, sized so the
+	// laser's continuous-fire duration matches the per-class target. See
+	// back/docs/specs/energy_model.md.
+	MaxEnergy       int     `yaml:"max_energy"`
+	EnergyRecharge  int     `yaml:"energy_recharge"`
 	Maneuverability float64 `yaml:"maneuverability"`
 	CargoBay        int     `yaml:"cargobay"`
 	BasePrice       int64   `yaml:"base_price"`
@@ -51,6 +59,30 @@ type yamlShipClass struct {
 
 type yamlFile struct {
 	ShipClasses []yamlShipClass `yaml:"ship_classes"`
+}
+
+// classEnergy is a per-class energy pool + per-tick recharge (TASK-100.3.25).
+type classEnergy struct {
+	pool, recharge int
+}
+
+// energyCalibration maps the gameplay class number (ct_ship_classes.class, 1..9)
+// to its energy pool and recharge. Sized so a ship firing its laser continuously
+// (energy/tick = recharge + Σreverse − Σalways, minus LaserEnergyCost=5 per shot)
+// drains its pool over the per-class target duration, while at rest recharge
+// out-paces the always-drain so the pool never sticks at 0. Race-100 specials
+// reuse a 1..9 class number, so they inherit its energy too. See
+// back/docs/specs/energy_model.md for the T = Pool/(L−(R−D)) derivation.
+var energyCalibration = map[int]classEnergy{
+	1: {pool: 100, recharge: 10}, // M1 Носитель  — fire ~100 ticks
+	2: {pool: 100, recharge: 10}, // M2 Эсминец   — fire ~100 ticks
+	3: {pool: 70, recharge: 6},   // M3 тяж.истр. — fire ~25 ticks
+	4: {pool: 50, recharge: 6},   // M4 истр.     — fire ~15 ticks
+	5: {pool: 40, recharge: 5},   // M5 разведчик — fire ~10 ticks
+	6: {pool: 95, recharge: 9},   // M6 корвет    — fire ~50 ticks
+	7: {pool: 120, recharge: 9},  // TL супертр.  — fire ~60 ticks
+	8: {pool: 120, recharge: 9},  // XX спец.     — fire ~60 ticks
+	9: {pool: 50, recharge: 6},   // TS транспорт — fire ~15 ticks
 }
 
 func main() {
@@ -286,6 +318,11 @@ func parseTuple(t string) (yamlShipClass, error) {
 	}
 	if sc.JumpFuel, err = atof(f[19]); err != nil {
 		return sc, fmt.Errorf("jump_fuel: %w", err)
+	}
+	// TASK-100.3.25: attach the per-class energy pool/recharge (not in the dump).
+	if e, ok := energyCalibration[sc.Class]; ok {
+		sc.MaxEnergy = e.pool
+		sc.EnergyRecharge = e.recharge
 	}
 	return sc, nil
 }

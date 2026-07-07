@@ -160,7 +160,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 11
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -176,7 +176,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 12
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -192,7 +192,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 13
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -208,7 +208,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 14
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -224,7 +224,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 15
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -240,7 +240,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 16
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -256,7 +256,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 17
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -272,7 +272,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 18
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -288,7 +288,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 19
       type: up_docking
       description: Стыковочная система
@@ -304,7 +304,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 20
       type: up_docking
       description: Стыковочная система
@@ -320,7 +320,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 21
       type: up_docking
       description: Стыковочная система
@@ -336,7 +336,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 22
       type: up_docking
       description: Стыковочная система
@@ -352,7 +352,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 23
       type: up_docking
       description: Стыковочная система
@@ -368,7 +368,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 24
       type: up_docking
       description: Стыковочная система
@@ -384,7 +384,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 25
       type: up_docking
       description: Стыковочная система
@@ -400,7 +400,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 26
       type: up_docking
       description: Стыковочная система
@@ -416,7 +416,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 27
       type: up_docking
       description: Стыковочная система
@@ -432,7 +432,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 28
       type: up_hide
       description: Маскировочная система
@@ -448,7 +448,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 29
       type: up_hide
       description: Маскировочная система
@@ -464,7 +464,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 30
       type: up_hide
       description: Маскировочная система
@@ -480,7 +480,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 31
       type: up_hide
       description: Маскировочная система
@@ -496,7 +496,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 32
       type: up_hide
       description: Маскировочная система
@@ -512,7 +512,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 33
       type: up_hide
       description: Маскировочная система
@@ -528,7 +528,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 34
       type: up_hide
       description: Маскировочная система
@@ -544,7 +544,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 35
       type: up_hide
       description: Маскировочная система
@@ -560,7 +560,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 36
       type: up_hide
       description: Маскировочная система
@@ -576,7 +576,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 37
       type: up_lb
       description: Система управления ЛБ
@@ -592,7 +592,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 38
       type: up_shield
       description: Проектор защитного поля
@@ -608,7 +608,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 39
       type: up_shield
       description: Проектор защитного поля
@@ -624,7 +624,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 40
       type: up_shield
       description: Проектор защитного поля
@@ -640,7 +640,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 41
       type: up_shield
       description: Проектор защитного поля
@@ -656,7 +656,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 42
       type: up_shield
       description: Проектор защитного поля
@@ -672,7 +672,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 43
       type: up_shield
       description: Проектор защитного поля
@@ -688,7 +688,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 44
       type: up_shield
       description: Проектор защитного поля
@@ -704,7 +704,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 45
       type: up_shield
       description: Проектор защитного поля
@@ -720,7 +720,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 46
       type: up_shield
       description: Проектор защитного поля
@@ -736,7 +736,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 47
       type: up_capture
       description: Система захвата кораблей
@@ -912,7 +912,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 58
       type: up_engine
       description: Двигатель
@@ -1216,7 +1216,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 77
       type: up_generator
       description: Генератор энергии
@@ -1232,7 +1232,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 78
       type: up_generator
       description: Генератор энергии
@@ -1248,7 +1248,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 79
       type: up_generator
       description: Генератор энергии
@@ -1264,7 +1264,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 80
       type: up_generator
       description: Генератор энергии
@@ -1280,7 +1280,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 81
       type: up_generator
       description: Генератор энергии
@@ -1296,7 +1296,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 82
       type: up_generator
       description: Генератор энергии
@@ -1312,7 +1312,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 83
       type: up_generator
       description: Генератор энергии
@@ -1328,7 +1328,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 84
       type: up_generator
       description: Генератор энергии
@@ -1344,7 +1344,7 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 85
       type: up_generator
       description: Генератор энергии
@@ -1360,11 +1360,11 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: reverse
-      energy_usage: 100
+      energy_usage: 6
     - id: 86
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 1
       price: 221460
@@ -1380,7 +1380,7 @@ equipment:
     - id: 87
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 2
       price: 156432
@@ -1396,7 +1396,7 @@ equipment:
     - id: 88
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 3
       price: 14241
@@ -1412,7 +1412,7 @@ equipment:
     - id: 89
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 4
       price: 2123
@@ -1428,7 +1428,7 @@ equipment:
     - id: 90
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 5
       price: 786
@@ -1444,7 +1444,7 @@ equipment:
     - id: 91
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 6
       price: 87862
@@ -1460,7 +1460,7 @@ equipment:
     - id: 92
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 7
       price: 112320
@@ -1476,7 +1476,7 @@ equipment:
     - id: 93
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 8
       price: 20000
@@ -1492,7 +1492,7 @@ equipment:
     - id: 94
       type: up_accumulator
       description: Аккумулятор энергии
-      max_level: 1
+      max_level: 3
       race: 0
       class: 9
       price: 4456
@@ -1808,7 +1808,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 114
       type: up_turret_control
       description: Устройство управления орудийными башнями
@@ -1824,7 +1824,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 115
       type: up_turret_control
       description: Устройство управления орудийными башнями
@@ -1840,7 +1840,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 116
       type: up_turret_control
       description: Устройство управления орудийными башнями
@@ -1856,7 +1856,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 117
       type: up_turret_control
       description: Устройство управления орудийными башнями
@@ -1872,7 +1872,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 118
       type: up_exdocking
       description: Модуль внешней стыковки
@@ -2208,7 +2208,7 @@ equipment:
       position: 1
       dependance: up_accumulator
       energy_use_type: always
-      energy_usage: 100
+      energy_usage: 2
     - id: 139
       type: up_antijump
       description: Генератор гипер-помех, портативный

@@ -51,7 +51,7 @@
 | `up_shield`        | MaxShield                      | +0.15            |
 | `up_shield`        | ShieldRecharge                 | +0.10            |
 | `up_generator`     | EnergyRecharge                 | +0.25            |
-| `up_accumulator`   | MaxEnergy                      | +0.25            |
+| `up_accumulator`   | MaxEnergy (×2/уровень)         | +(2^level−1)     |
 | `up_lb`            | LaserDamage                    | +0.10            |
 | `up_pro`           | MaxShield (противоракетный)    | +0.10            |
 | `up_weapon_control`| LaserDamage                    | +0.08            |
@@ -69,11 +69,21 @@
 `up_scanner`/`up_hide`). Фабриковать им ТТХ-дельты было бы недостоверно, так
 что в 10.14 они install-only.
 
-### Энергомодель (phase 10.3.1)
+### Энергомодель (phase 10.3.1; калибровка — TASK-100.3.25)
 
 `ct_updates_energy` из оригинала не портируется по величинам — `energy_use_type`
 (`always`/`hold`/`reverse`/`action`) и `energy_usage` берутся из
-`configs/equipment.yaml`, магнитуды — баланс-решение Go-версии. Модель:
+`configs/equipment.yaml`, магнитуды — баланс-решение Go-версии.
+
+> **Калибровка длительности огня — `energy_model.md`.** `always`-дренаж и
+> `reverse`-feed переписаны калибровочной таблицей `convert-equipment`
+> (`always`→2, `reverse`→6), пул/recharge заданы per-class в
+> `convert-ship-classes`, `up_accumulator` удваивает пул за уровень
+> (`max_level 3`). Так лазер даёт управляемую длительность огня по классам, а
+> корабль не залипает на 0 от базового набора. Формула `T = Pool/(L−(R−D))` и
+> таблица per-class — в `energy_model.md`.
+
+Модель:
 
 - **Per-tick дельта.** `balance.Equipments.EnergyDelta(eq)` =
   `Σ reverse(energy_usage) − Σ always(energy_usage)`: `reverse`-модули

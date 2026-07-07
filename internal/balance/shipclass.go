@@ -61,12 +61,20 @@ type ShipClass struct {
 	Class int    // gameplay class number → Category
 	Name  string // ship name, e.g. "Колосс", "Меркурий"
 
-	Speed           float64
-	Acceleration    float64
-	Laser           int // laser power budget
-	Shield          int // max shield
-	Hull            int // max HP
-	ShieldCharge    int
+	Speed        float64
+	Acceleration float64
+	Laser        int // laser power budget
+	Shield       int // max shield
+	Hull         int // max HP
+	ShieldCharge int
+	// MaxEnergy / EnergyRecharge are the per-class energy pool and per-tick
+	// recharge (TASK-100.3.25 energy model). ct_ship_classes has no energy
+	// columns; the converter fills these from a per-class calibration table so
+	// the laser's continuous-fire duration lands on the class target. 0 (an
+	// unmapped/classless row) → the spawner falls back to the flat StartEnergy /
+	// StartEnergyChrg config. See back/docs/specs/energy_model.md.
+	MaxEnergy       int
+	EnergyRecharge  int
 	Maneuverability float64
 	CargoBay        int
 	BasePrice       int64

@@ -111,11 +111,13 @@ MaxShield`, `Energy = MaxEnergy` (свежий корабль заряжен). �
 `max_shield = class base + модули`).
 
 `EnergyDelta` для базового набора **отрицателен**: `up_shield`, `up_pro` и
-`up_turret_control` имеют `energy_use_type = "always"`, `energy_usage = 100`,
-т.е. постоянно потребляют по 100/тик. Это свойство `equipment.yaml`,
-идентичное тому, что происходит при ручной установке этих модулей на верфи —
-не регрессия порта. (Балансировка величины `energy_usage` — вне объёма задачи;
-`ct_updates_energy` помечена out‑of‑MVP в `convert-equipment`.)
+`up_turret_control` имеют `energy_use_type = "always"`, т.е. постоянно
+потребляют энергию (`EnergyDelta = −Σ always.energy_usage`). После калибровки
+энергомодели (TASK-100.3.25) `always.energy_usage = 2`, поэтому базовый дренаж
+набора мал: −4 (два `always`) или −6 (три). Пул/recharge заданы per-class, так
+что лазер даёт управляемую длительность огня и корабль не залипает на 0 — детали
+в `energy_model.md`. (Раньше `energy_usage = 100` давало −200/−300 и
+обесточивало лазер.)
 
 `energy_delta` теперь пишется и в `ships.Create` (раньше только в
 `SaveEquipment`), иначе cold‑start прочитал бы `DEFAULT 0` и рассинхронил

@@ -71,7 +71,11 @@ func ApplyEquipmentEffects(base ShipStats, eq []domain.InstalledEquipment) ShipS
 		case "up_generator":
 			out.EnergyRecharge += int(math.Round(float64(base.EnergyRecharge) * 0.25 * l))
 		case "up_accumulator":
-			out.MaxEnergy += int(math.Round(float64(base.MaxEnergy) * 0.25 * l))
+			// TASK-100.3.25 energy model: each accumulator level doubles the pool,
+			// so it doubles the laser's continuous-fire duration. Level L → pool
+			// ×2^L, i.e. += base×(2^L − 1) off the class baseline (scout 40 → 80 →
+			// 160 → 320 at L1/2/3). Catalog max_level is 3.
+			out.MaxEnergy += int(math.Round(float64(base.MaxEnergy) * (math.Pow(2, l) - 1)))
 		case "up_lb":
 			out.LaserDamage += int(math.Round(float64(base.LaserDamage) * 0.10 * l))
 		case "up_weapon_control", "up_turret_control":

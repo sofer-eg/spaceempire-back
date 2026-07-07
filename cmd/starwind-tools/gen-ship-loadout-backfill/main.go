@@ -151,12 +151,21 @@ func render(classes *balance.ShipClasses, loadouts *balance.ShipLoadouts, equipm
 }
 
 // baseStats reproduces internal/app.baseShipStats with the default spawn config:
-// class supplies speed/accel/shield/laser/radar/cargo; energy pool + turn rate
+// class supplies speed/accel/shield/laser/radar/cargo and (TASK-100.3.25) the
+// per-class energy pool/recharge; turn rate and the classless energy fallback
 // come from the spawn-config defaults.
 func baseStats(cls balance.ShipClass) balance.ShipStats {
 	laser := cls.Laser / warshipLaserDivisor
 	if laser < startLaserDamage {
 		laser = startLaserDamage
+	}
+	maxEnergy := cls.MaxEnergy
+	if maxEnergy <= 0 {
+		maxEnergy = startEnergy
+	}
+	energyRch := cls.EnergyRecharge
+	if energyRch <= 0 {
+		energyRch = startEnergyRecharge
 	}
 	return balance.ShipStats{
 		MaxSpeed:       cls.Speed,
@@ -164,8 +173,8 @@ func baseStats(cls balance.ShipClass) balance.ShipStats {
 		TurnRate:       startTurnRate,
 		MaxShield:      cls.Shield,
 		ShieldRecharge: cls.ShieldCharge,
-		MaxEnergy:      startEnergy,
-		EnergyRecharge: startEnergyRecharge,
+		MaxEnergy:      maxEnergy,
+		EnergyRecharge: energyRch,
 		LaserDamage:    laser,
 		RadarRange:     float64(cls.Radar),
 		CargoBay:       float64(cls.CargoBay),

@@ -87,14 +87,25 @@ func TestUnit_LoadEquipment_RealConfig(t *testing.T) {
 	assert.Equal(t, "up_accumulator", e.Dependance)
 
 	// Energy chain: up_generator produces (reverse, no dependency); the
-	// accumulator holds and depends on the generator.
+	// accumulator holds and depends on the generator. The TASK-100.3.25 energy
+	// calibration rewrote the DEFAULT-100 steady draws: reverse feed → 6, and the
+	// accumulator can double the pool up to three times (max_level 3).
 	for _, gen := range cat.EquipmentByType("up_generator") {
 		assert.Equal(t, "reverse", gen.EnergyUseType)
 		assert.Equal(t, "none", gen.Dependance)
+		assert.Equal(t, 6, gen.EnergyUsage, "generator reverse feed calibrated to 6")
 	}
 	for _, acc := range cat.EquipmentByType("up_accumulator") {
 		assert.Equal(t, "hold", acc.EnergyUseType)
 		assert.Equal(t, "up_generator", acc.Dependance)
+		assert.Equal(t, 3, acc.MaxLevel, "accumulator max_level calibrated to 3")
+	}
+	// Every `always` module drains a calibrated 2/tick (was DEFAULT 100), so a
+	// ship's base kit costs a few points/tick, not −100 each.
+	for _, e := range cat.AllEquipment() {
+		if e.EnergyUseType == "always" {
+			assert.Equalf(t, 2, e.EnergyUsage, "always module %d (%s) calibrated to 2/tick", e.ID, e.Type)
+		}
 	}
 }
 

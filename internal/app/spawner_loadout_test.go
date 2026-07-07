@@ -68,10 +68,13 @@ func TestUnit_BuildStarterShip_ArgonScoutLoadout(t *testing.T) {
 	assert.Greater(t, ship.LaserDamage, base.LaserDamage, "up_weapon_control raised laser")
 
 	// Fresh ship arrives fully charged; the two "always" modules (up_shield,
-	// up_pro) give a −200 per-tick energy delta (100 each), like the outfit path.
+	// up_pro) give a −4 per-tick energy delta (calibrated 2 each, TASK-100.3.25),
+	// like the outfit path. Per-class pool: scout (cls5) = 40.
 	assert.Equal(t, ship.MaxShield, ship.Shield)
 	assert.Equal(t, ship.MaxEnergy, ship.Energy)
-	assert.Equal(t, -200, ship.EnergyDelta)
+	assert.Equal(t, 40, ship.MaxEnergy, "scout gets the per-class energy pool")
+	assert.Equal(t, 5, ship.EnergyRecharge, "scout gets the per-class recharge")
+	assert.Equal(t, -4, ship.EnergyDelta)
 }
 
 // TestUnit_BuildStarterShip_NoLoadoutNilDeps keeps the pre-task behaviour: with
@@ -107,7 +110,8 @@ func TestUnit_BuildPurchasedShip_FoldsBaseLoadout(t *testing.T) {
 	}, got.Equipment)
 	assert.False(t, hasType(got.Equipment, "up_generator"))
 	assert.False(t, hasType(got.Equipment, "up_accumulator"))
-	assert.Equal(t, -300, got.EnergyDelta, "up_shield + up_turret_control + up_pro drain 100 each")
+	assert.Equal(t, -6, got.EnergyDelta, "up_shield + up_turret_control + up_pro drain 2 each (calibrated)")
+	assert.Equal(t, 100, got.MaxEnergy, "carrier (cls1) gets the per-class energy pool")
 	assert.Equal(t, got.MaxShield, got.Shield, "bought ship arrives fully charged")
 	assert.Greater(t, got.MaxShield, baseShipStats(carrier, cfg).MaxShield)
 
@@ -119,5 +123,6 @@ func TestUnit_BuildPurchasedShip_FoldsBaseLoadout(t *testing.T) {
 	assert.False(t, hasType(gotT.Equipment, "up_weapon_control"), "type 9 has no weapon control")
 	assert.False(t, hasType(gotT.Equipment, "up_turret_control"))
 	assert.Equal(t, baseShipStats(transport, cfg).LaserDamage, gotT.LaserDamage, "no weapon control → laser unchanged")
-	assert.Equal(t, -200, gotT.EnergyDelta)
+	assert.Equal(t, -4, gotT.EnergyDelta)
+	assert.Equal(t, 50, gotT.MaxEnergy, "transport (cls9) gets the per-class energy pool")
 }

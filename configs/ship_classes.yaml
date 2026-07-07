@@ -12,6 +12,8 @@ ship_classes:
       shield: 690000
       hull: 204000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 20.34
       cargobay: 68260
       base_price: 74132000
@@ -32,6 +34,8 @@ ship_classes:
       shield: 384000
       hull: 173000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 26
       cargobay: 3300
       base_price: 39588500
@@ -52,6 +56,8 @@ ship_classes:
       shield: 40000
       hull: 22200
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 126
       cargobay: 176
       base_price: 249100
@@ -72,6 +78,8 @@ ship_classes:
       shield: 17920
       hull: 12300
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 161
       cargobay: 114
       base_price: 92088
@@ -92,6 +100,8 @@ ship_classes:
       shield: 6900
       hull: 4040
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 189
       cargobay: 50
       base_price: 24417
@@ -112,6 +122,8 @@ ship_classes:
       shield: 161000
       hull: 66000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 50
       cargobay: 1000
       base_price: 5225682
@@ -132,6 +144,8 @@ ship_classes:
       shield: 403000
       hull: 165000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 18.6
       cargobay: 20000
       base_price: 17787000
@@ -152,6 +166,8 @@ ship_classes:
       shield: 2500000
       hull: 52359
       shield_charge: 5195
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 150
       cargobay: 852357
       base_price: 0
@@ -172,6 +188,8 @@ ship_classes:
       shield: 37800
       hull: 33000
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 42
       cargobay: 2000
       base_price: 63000
@@ -192,6 +210,8 @@ ship_classes:
       shield: 600000
       hull: 196000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 20.7
       cargobay: 61760
       base_price: 75492000
@@ -212,6 +232,8 @@ ship_classes:
       shield: 285000
       hull: 135000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 29
       cargobay: 2260
       base_price: 38692500
@@ -232,6 +254,8 @@ ship_classes:
       shield: 26400
       hull: 17400
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 141.6
       cargobay: 164
       base_price: 242660
@@ -252,6 +276,8 @@ ship_classes:
       shield: 15400
       hull: 12870
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 182
       cargobay: 65
       base_price: 106752
@@ -272,6 +298,8 @@ ship_classes:
       shield: 5520
       hull: 3520
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 225
       cargobay: 27
       base_price: 31255
@@ -292,6 +320,8 @@ ship_classes:
       shield: 110400
       hull: 42000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 61
       cargobay: 1220
       base_price: 5107410
@@ -312,6 +342,8 @@ ship_classes:
       shield: 420000
       hull: 135000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 32
       cargobay: 24000
       base_price: 22115170
@@ -332,6 +364,8 @@ ship_classes:
       shield: 1
       hull: 1
       shield_charge: 5195
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 1
       cargobay: 0
       base_price: 0
@@ -352,6 +386,8 @@ ship_classes:
       shield: 40500
       hull: 27000
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 36.5
       cargobay: 3000
       base_price: 118200
@@ -372,6 +408,8 @@ ship_classes:
       shield: 630000
       hull: 170000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 19.44
       cargobay: 65000
       base_price: 72660000
@@ -392,6 +430,8 @@ ship_classes:
       shield: 345000
       hull: 143000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 26
       cargobay: 2700
       base_price: 40593000
@@ -412,6 +452,8 @@ ship_classes:
       shield: 37000
       hull: 18600
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 117.6
       cargobay: 112
       base_price: 255140
@@ -432,6 +474,8 @@ ship_classes:
       shield: 16800
       hull: 12650
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 159.6
       cargobay: 85
       base_price: 97064
@@ -452,6 +496,8 @@ ship_classes:
       shield: 3900
       hull: 4400
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 221.4
       cargobay: 25
       base_price: 27900
@@ -472,6 +518,8 @@ ship_classes:
       shield: 150000
       hull: 69000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 49
       cargobay: 700
       base_price: 5358276
@@ -492,6 +540,8 @@ ship_classes:
       shield: 375000
       hull: 140000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 28
       cargobay: 16000
       base_price: 18896570
@@ -512,6 +562,8 @@ ship_classes:
       shield: 410000
       hull: 201200
       shield_charge: 5195
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 30
       cargobay: 3500
       base_price: 1
@@ -532,6 +584,8 @@ ship_classes:
       shield: 35000
       hull: 28000
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 50
       cargobay: 1600
       base_price: 73068
@@ -552,6 +606,8 @@ ship_classes:
       shield: 540000
       hull: 162000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 18.9
       cargobay: 59800
       base_price: 76932000
@@ -572,6 +628,8 @@ ship_classes:
       shield: 270000
       hull: 112000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 26.75
       cargobay: 2260
       base_price: 43792000
@@ -592,6 +650,8 @@ ship_classes:
       shield: 20700
       hull: 12200
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 135.6
       cargobay: 122
       base_price: 290740
@@ -612,6 +672,8 @@ ship_classes:
       shield: 13300
       hull: 9200
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 175
       cargobay: 55
       base_price: 116296
@@ -632,6 +694,8 @@ ship_classes:
       shield: 4800
       hull: 3120
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 208.8
       cargobay: 38
       base_price: 31692
@@ -652,6 +716,8 @@ ship_classes:
       shield: 114000
       hull: 54000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 55
       cargobay: 620
       base_price: 6734574
@@ -672,6 +738,8 @@ ship_classes:
       shield: 312000
       hull: 111000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 38
       cargobay: 14800
       base_price: 21117404
@@ -692,6 +760,8 @@ ship_classes:
       shield: 1
       hull: 1
       shield_charge: 5195
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 1
       cargobay: 0
       base_price: 0
@@ -712,6 +782,8 @@ ship_classes:
       shield: 23700
       hull: 22200
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 72
       cargobay: 1380
       base_price: 85920
@@ -732,6 +804,8 @@ ship_classes:
       shield: 720000
       hull: 213000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 19.8
       cargobay: 72800
       base_price: 66528000
@@ -752,6 +826,8 @@ ship_classes:
       shield: 402000
       hull: 188000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 28
       cargobay: 4060
       base_price: 45692500
@@ -772,6 +848,8 @@ ship_classes:
       shield: 46000
       hull: 25000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 118.8
       cargobay: 194
       base_price: 188580
@@ -792,6 +870,8 @@ ship_classes:
       shield: 20300
       hull: 15400
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 162.4
       cargobay: 97
       base_price: 70488
@@ -812,6 +892,8 @@ ship_classes:
       shield: 8000
       hull: 4760
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 172.8
       cargobay: 75
       base_price: 19390
@@ -832,6 +914,8 @@ ship_classes:
       shield: 168000
       hull: 75000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 45
       cargobay: 1360
       base_price: 6960492
@@ -852,6 +936,8 @@ ship_classes:
       shield: 490000
       hull: 180000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 14.6
       cargobay: 24800
       base_price: 22980804
@@ -872,6 +958,8 @@ ship_classes:
       shield: 1
       hull: 1
       shield_charge: 5195
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 1
       cargobay: 0
       base_price: 0
@@ -892,6 +980,8 @@ ship_classes:
       shield: 42000
       hull: 36000
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 33
       cargobay: 2480
       base_price: 95400
@@ -912,6 +1002,8 @@ ship_classes:
       shield: 600000
       hull: 255000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 17.1
       cargobay: 58500
       base_price: 68224652
@@ -932,6 +1024,8 @@ ship_classes:
       shield: 300000
       hull: 225000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 20
       cargobay: 4500
       base_price: 42804116
@@ -952,6 +1046,8 @@ ship_classes:
       shield: 25800
       hull: 13400
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 115.2
       cargobay: 242
       base_price: 160440
@@ -972,6 +1068,8 @@ ship_classes:
       shield: 12000
       hull: 9000
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 172.2
       cargobay: 120
       base_price: 64176
@@ -992,6 +1090,8 @@ ship_classes:
       shield: 6600
       hull: 4400
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 165.6
       cargobay: 60
       base_price: 20055
@@ -1012,6 +1112,8 @@ ship_classes:
       shield: 100800
       hull: 45000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 52.5
       cargobay: 960
       base_price: 5786423
@@ -1032,6 +1134,8 @@ ship_classes:
       shield: 315000
       hull: 135000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 19
       cargobay: 14324
       base_price: 18434213
@@ -1052,6 +1156,8 @@ ship_classes:
       shield: 1
       hull: 1
       shield_charge: 5195
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 1
       cargobay: 0
       base_price: 0
@@ -1072,6 +1178,8 @@ ship_classes:
       shield: 27000
       hull: 27000
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 43
       cargobay: 2500
       base_price: 53400
@@ -1092,6 +1200,8 @@ ship_classes:
       shield: 960000
       hull: 100000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 23.4
       cargobay: 52000
       base_price: 78140000
@@ -1112,6 +1222,8 @@ ship_classes:
       shield: 400000
       hull: 105000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 25.75
       cargobay: 3460
       base_price: 44370000
@@ -1132,6 +1244,8 @@ ship_classes:
       shield: 40000
       hull: 12000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 126
       cargobay: 230
       base_price: 425570
@@ -1152,6 +1266,8 @@ ship_classes:
       shield: 18200
       hull: 5500
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 182
       cargobay: 125
       base_price: 147540
@@ -1172,6 +1288,8 @@ ship_classes:
       shield: 7800
       hull: 2000
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 192.6
       cargobay: 58
       base_price: 65843
@@ -1192,6 +1310,8 @@ ship_classes:
       shield: 156000
       hull: 36000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 52.5
       cargobay: 1160
       base_price: 4687500
@@ -1212,6 +1332,8 @@ ship_classes:
       shield: 630000
       hull: 1
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 30
       cargobay: 0
       base_price: 0
@@ -1232,6 +1354,8 @@ ship_classes:
       shield: 60000
       hull: 22000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 186
       cargobay: 430
       base_price: 425570
@@ -1252,6 +1376,8 @@ ship_classes:
       shield: 54000
       hull: 1
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 77
       cargobay: 0
       base_price: 0
@@ -1272,6 +1398,8 @@ ship_classes:
       shield: 845000
       hull: 475000
       shield_charge: 8725
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 23.4
       cargobay: 150000
       base_price: 120538000
@@ -1292,6 +1420,8 @@ ship_classes:
       shield: 981000
       hull: 205000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 36.25
       cargobay: 5000
       base_price: 48530000
@@ -1312,6 +1442,8 @@ ship_classes:
       shield: 36000
       hull: 23500
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 123.4
       cargobay: 530
       base_price: 694500
@@ -1332,6 +1464,8 @@ ship_classes:
       shield: 22400
       hull: 40000
       shield_charge: 210
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 197.3
       cargobay: 125
       base_price: 216700
@@ -1352,6 +1486,8 @@ ship_classes:
       shield: 9600
       hull: 5000
       shield_charge: 80
+      max_energy: 40
+      energy_recharge: 5
       maneuverability: 295
       cargobay: 58
       base_price: 94350
@@ -1372,6 +1508,8 @@ ship_classes:
       shield: 196000
       hull: 85000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 55
       cargobay: 1150
       base_price: 6593400
@@ -1392,6 +1530,8 @@ ship_classes:
       shield: 630000
       hull: 85000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 40
       cargobay: 32000
       base_price: 0
@@ -1412,6 +1552,8 @@ ship_classes:
       shield: 1
       hull: 1
       shield_charge: 5195
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 1
       cargobay: 0
       base_price: 0
@@ -1432,6 +1574,8 @@ ship_classes:
       shield: 54000
       hull: 1
       shield_charge: 490
+      max_energy: 50
+      energy_recharge: 6
       maneuverability: 33.75
       cargobay: 0
       base_price: 0
@@ -1452,6 +1596,8 @@ ship_classes:
       shield: 242000
       hull: 118000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 60
       cargobay: 951
       base_price: 15683125
@@ -1472,6 +1618,8 @@ ship_classes:
       shield: 170000
       hull: 55000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 65
       cargobay: 1100
       base_price: 0
@@ -1492,6 +1640,8 @@ ship_classes:
       shield: 315000
       hull: 90000
       shield_charge: 5115
+      max_energy: 100
+      energy_recharge: 10
       maneuverability: 20
       cargobay: 4232
       base_price: 0
@@ -1512,6 +1662,8 @@ ship_classes:
       shield: 150000
       hull: 180000
       shield_charge: 1950
+      max_energy: 95
+      energy_recharge: 9
       maneuverability: 28
       cargobay: 1050
       base_price: 0
@@ -1532,6 +1684,8 @@ ship_classes:
       shield: 370000
       hull: 135000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 23
       cargobay: 32840
       base_price: 0
@@ -1552,6 +1706,8 @@ ship_classes:
       shield: 40700
       hull: 15200
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 145.6
       cargobay: 215
       base_price: 0
@@ -1572,6 +1728,8 @@ ship_classes:
       shield: 140000
       hull: 19000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 126
       cargobay: 280
       base_price: 0
@@ -1592,6 +1750,8 @@ ship_classes:
       shield: 55000
       hull: 12000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 136
       cargobay: 320
       base_price: 0
@@ -1612,6 +1772,8 @@ ship_classes:
       shield: 45000
       hull: 13000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 106
       cargobay: 120
       base_price: 0
@@ -1632,6 +1794,8 @@ ship_classes:
       shield: 37000
       hull: 11000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 124
       cargobay: 300
       base_price: 0
@@ -1652,6 +1816,8 @@ ship_classes:
       shield: 57000
       hull: 14000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 155
       cargobay: 350
       base_price: 0
@@ -1672,6 +1838,8 @@ ship_classes:
       shield: 105000
       hull: 17000
       shield_charge: 635
+      max_energy: 70
+      energy_recharge: 6
       maneuverability: 153
       cargobay: 500
       base_price: 0
@@ -1692,6 +1860,8 @@ ship_classes:
       shield: 370000
       hull: 835000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 23
       cargobay: 92840
       base_price: 0
@@ -1712,6 +1882,8 @@ ship_classes:
       shield: 750000
       hull: 215000
       shield_charge: 5755
+      max_energy: 120
+      energy_recharge: 9
       maneuverability: 40
       cargobay: 50800
       base_price: 0

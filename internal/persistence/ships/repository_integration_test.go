@@ -438,7 +438,7 @@ func TestIntegration_Ships_Equipment_RoundTrips(t *testing.T) {
 	id, err := repo.Create(ctx, domain.Ship{
 		PlayerID: pid, SectorID: domain.SectorID(7), Pos: domain.Vec2{X: 1, Y: 2},
 		ShipClassID: 73, HP: 100, MaxHP: 100, MaxShield: 1000, MaxSpeed: 30, RadarRange: 3500,
-		TurnRate: 2.5, CargoBay: 2000,
+		TurnRate: 2.5, CargoBay: 2000, EnergyDelta: -6,
 		Equipment: []domain.InstalledEquipment{
 			{EquipmentID: 11, Type: "up_generator", Level: 1},
 			{EquipmentID: 10, Type: "up_accumulator", Level: 1},
@@ -465,6 +465,7 @@ func TestIntegration_Ships_Equipment_RoundTrips(t *testing.T) {
 	assert.InDelta(t, 3500.0, byID[id].RadarRange, 0.001, "create round-trips radar_range (10.20)")
 	assert.InDelta(t, 2.5, byID[id].TurnRate, 0.001, "create round-trips turn_rate (10.3.15)")
 	assert.InDelta(t, 2000.0, byID[id].CargoBay, 0.001, "create round-trips cargobay (10.3.17)")
+	assert.Equal(t, -6, byID[id].EnergyDelta, "create round-trips energy_delta (10.3.1/TASK-100.3.25)")
 	assert.Nil(t, byID[bareID].Equipment, "bare ship loads nil equipment")
 
 	// SaveEquipment persists a new fit + folded stat columns and clamps the
@@ -477,7 +478,7 @@ func TestIntegration_Ships_Equipment_RoundTrips(t *testing.T) {
 			{EquipmentID: 12, Type: "up_shield", Level: 2},
 		},
 		MaxSpeed: 33, Acceleration: 5, MaxShield: 1300, ShieldRecharge: 120,
-		MaxEnergy: 250, EnergyRecharge: 5, LaserDamage: 40, RadarRange: 4900,
+		MaxEnergy: 250, EnergyRecharge: 5, EnergyDelta: -4, LaserDamage: 40, RadarRange: 4900,
 		TurnRate: 2.7, CargoBay: 2200,
 	}))
 
@@ -490,6 +491,7 @@ func TestIntegration_Ships_Equipment_RoundTrips(t *testing.T) {
 			assert.Equal(t, 2, s.Equipment[2].Level)
 			assert.Equal(t, 1300, s.MaxShield, "folded stat persisted")
 			assert.Equal(t, 250, s.MaxEnergy)
+			assert.Equal(t, -4, s.EnergyDelta, "energy_delta persisted via SaveEquipment")
 			assert.InDelta(t, 33.0, s.MaxSpeed, 0.001)
 			assert.InDelta(t, 4900.0, s.RadarRange, 0.001, "up_scanner radar persisted via SaveEquipment (10.20 L3)")
 			assert.InDelta(t, 2.7, s.TurnRate, 0.001, "up_rudder turn_rate persisted via SaveEquipment (10.3.15)")

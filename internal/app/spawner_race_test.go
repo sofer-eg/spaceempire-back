@@ -139,14 +139,17 @@ func TestUnit_BaseShipStats_FromClassAndConfig(t *testing.T) {
 	assert.InDelta(t, 54.54, base.Acceleration, 0.01)
 	assert.Equal(t, 6900, base.MaxShield)
 	assert.Equal(t, 80, base.ShieldRecharge)
-	assert.Equal(t, cfg.StartEnergy, base.MaxEnergy, "energy comes from spawn config, not the class")
+	// This fixture class carries no per-class energy (MaxEnergy 0), so baseShipStats
+	// falls back to the flat spawn-config pool/recharge (TASK-100.3.25).
+	assert.Equal(t, cfg.StartEnergy, base.MaxEnergy, "classless energy falls back to spawn config")
 	assert.Equal(t, cfg.StartEnergyChrg, base.EnergyRecharge)
 	assert.Equal(t, 135, base.LaserDamage, "1356 / warshipLaserDivisor(10)")
 
+	// up_accumulator doubles the pool per level (TASK-100.3.25): L1 → ×2.
 	withAccum := balance.ApplyEquipmentEffects(base, []domain.InstalledEquipment{
 		{Type: "up_accumulator", Level: 1},
 	})
-	assert.Equal(t, base.MaxEnergy+base.MaxEnergy/4, withAccum.MaxEnergy)
+	assert.Equal(t, base.MaxEnergy*2, withAccum.MaxEnergy)
 }
 
 // buildHomeShipyards prefers the lowest-sector shipyard per race and skips

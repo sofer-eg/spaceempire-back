@@ -52,6 +52,19 @@ type yamlFile struct {
 	Equipment []yamlEquipment `yaml:"equipment"`
 }
 
+// xbtfGapUpgrades are the four "X-BTF gap" modules spaceempire added on top of
+// the ported StarWind ct_updates catalog: up_rudder (10.3.15), up_cargobay
+// (10.3.16), up_ore_scanner (10.3.19) and up_transporter (10.3.18). They have no
+// row in the dump, so the converter appends them verbatim (ids 140-143) to keep
+// equipment.yaml a full, single-source-of-truth catalog. Their energy fields are
+// already final (hold/action), so calibrate() would leave them unchanged.
+var xbtfGapUpgrades = []yamlEquipment{
+	{ID: 140, Type: "up_rudder", Description: "Оптимизация рулей", MaxLevel: 3, Race: 0, Class: 0, Price: 200000, PricePerLevel: 150000, MinWarRate: 0, MinTradeRate: 0, MinRaceRate: 0, IsBase: 0, Position: 1, Dependance: "none", EnergyUseType: "hold", EnergyUsage: 0},
+	{ID: 141, Type: "up_cargobay", Description: "Расширение трюма", MaxLevel: 3, Race: 0, Class: 0, Price: 200000, PricePerLevel: 150000, MinWarRate: 0, MinTradeRate: 0, MinRaceRate: 0, IsBase: 0, Position: 1, Dependance: "none", EnergyUseType: "hold", EnergyUsage: 0},
+	{ID: 142, Type: "up_ore_scanner", Description: "Сканер руды", MaxLevel: 1, Race: 0, Class: 0, Price: 150000, PricePerLevel: 0, MinWarRate: 0, MinTradeRate: 0, MinRaceRate: 0, IsBase: 0, Position: 1, Dependance: "none", EnergyUseType: "hold", EnergyUsage: 0},
+	{ID: 143, Type: "up_transporter", Description: "Транспортатор грузов", MaxLevel: 1, Race: 0, Class: 0, Price: 300000, PricePerLevel: 0, MinWarRate: 0, MinTradeRate: 0, MinRaceRate: 0, IsBase: 0, Position: 1, Dependance: "none", EnergyUseType: "action", EnergyUsage: 50},
+}
+
 func main() {
 	sqlFile := flag.String("sql", "", "path to starwind/sql/db.sql")
 	out := flag.String("out", "configs/equipment.yaml", "output YAML path")
@@ -85,14 +98,20 @@ func run(sqlFile, outPath string) error {
 		return err
 	}
 
-	items := make([]yamlEquipment, 0, len(tuples))
+	items := make([]yamlEquipment, 0, len(tuples)+len(xbtfGapUpgrades))
 	for i, t := range tuples {
 		e, err := parseTuple(t)
 		if err != nil {
 			return fmt.Errorf("tuple %d: %w", i, err)
 		}
+		applyPostDumpOverrides(&e)
 		items = append(items, e)
 	}
+	// The X-BTF gap upgrades (ids 140-143) have no ct_updates rows in the dump —
+	// they were designed for spaceempire (phases 10.3.15/16/18/19). Emit them here
+	// so the converter reproduces the whole shipped catalog rather than silently
+	// dropping four modules.
+	items = append(items, xbtfGapUpgrades...)
 
 	header := "# Auto-generated from sql/db.sql (ct_updates) by cmd/starwind-tools/convert-equipment.\n" +
 		"# Do not edit by hand; rerun the converter against the source dump.\n"
@@ -108,6 +127,58 @@ func run(sqlFile, outPath string) error {
 	}
 	fmt.Fprintf(os.Stderr, "wrote %d equipment rows to %s\n", len(items), outPath)
 	return nil
+}
+
+// applyPostDumpOverrides rewrites the catalog fields spaceempire re-calibrated
+// after the StarWind dump was frozen, so the converter reproduces the shipped
+// catalog rather than reverting prior tasks on a rerun. Each override is a
+// deliberate design change with its own task + test:
+//
+//   - up_scanner max_level 1→2 where the class can fit it (TASK-123 radar: +50
+//     units/level, up to +100). Classes with a 0 dump level (TL/TS: it is not
+//     available to them) stay 0.
+//   - up_torpedo_launcher gates on war_rate>=2, not race_rate — min_race_rate was
+//     dead config (TASK-100.3.14/5.2, ЧТЗ doc-1 C-06).
+//   - energy calibration (calibrate, TASK-100.3.25).
+func applyPostDumpOverrides(e *yamlEquipment) {
+	calibrate(e)
+	switch e.Type {
+	case "up_scanner":
+		if e.MaxLevel > 0 {
+			e.MaxLevel = 2
+		}
+	case "up_torpedo_launcher":
+		e.MinWarRate = 2
+		e.MinRaceRate = 0
+	}
+}
+
+// calibrate rewrites the steady-state energy fields the original ct_updates
+// left at the uncalibrated DEFAULT of 100 (TASK-100.3.25 energy model). Only the
+// per-tick draws are touched; one-off `action` costs (launcher/torpedo/drill/
+// transporter, …) and passive `hold` modules keep their dump values:
+//
+//   - always drain (up_shield/up_pro/up_turret_control/up_hide/… ) → 2/tick, so a
+//     ship's base kit costs a few points/tick, not −100 each (which pinned energy
+//     at 0 and silenced the laser).
+//   - reverse feed (up_generator) → 6/tick, so one generator more than offsets the
+//     base always-drain and lets a player extend fire.
+//   - up_accumulator max_level → 3, so it can double the energy pool up to three
+//     times (scout 40 → 80 → 160 → 320; fire duration 10 → 20 → 40 → 80).
+//
+// The pool/recharge that make these land on the per-class fire-duration targets
+// live in convert-ship-classes (energyCalibration). See
+// back/docs/specs/energy_model.md.
+func calibrate(e *yamlEquipment) {
+	switch e.EnergyUseType {
+	case "always":
+		e.EnergyUsage = 2
+	case "reverse":
+		e.EnergyUsage = 6
+	}
+	if e.Type == "up_accumulator" {
+		e.MaxLevel = 3
+	}
 }
 
 func parseTuple(t string) (yamlEquipment, error) {

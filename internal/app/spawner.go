@@ -296,12 +296,31 @@ func baseShipStats(cls balance.ShipClass, cfg ShipSpawnerConfig) balance.ShipSta
 		TurnRate:       cfg.StartTurnRate, // phase 10.3.15: base turn rate, widened by up_rudder
 		MaxShield:      cls.Shield,
 		ShieldRecharge: cls.ShieldCharge,
-		MaxEnergy:      cfg.StartEnergy,
-		EnergyRecharge: cfg.StartEnergyChrg,
+		MaxEnergy:      classEnergy(cls, cfg),         // TASK-100.3.25: per-class pool, up_accumulator ×2/level
+		EnergyRecharge: classEnergyRecharge(cls, cfg), // TASK-100.3.25: per-class recharge, up_generator +25%/level
 		LaserDamage:    laser,
 		RadarRange:     float64(cls.Radar),    // phase 10.20: base radar, widened by up_scanner (L3)
 		CargoBay:       float64(cls.CargoBay), // phase 10.3.17: hold capacity from class, widened by up_cargobay (10.3.16)
 	}
+}
+
+// classEnergy is the ship's base energy pool: the per-class value
+// (TASK-100.3.25) when the catalog carries one, else the flat StartEnergy
+// fallback used for classless/neutral ships (spacesuit, cold-start).
+func classEnergy(cls balance.ShipClass, cfg ShipSpawnerConfig) int {
+	if cls.MaxEnergy > 0 {
+		return cls.MaxEnergy
+	}
+	return cfg.StartEnergy
+}
+
+// classEnergyRecharge is the ship's base per-tick recharge: the per-class value
+// (TASK-100.3.25) when present, else the flat StartEnergyChrg fallback.
+func classEnergyRecharge(cls balance.ShipClass, cfg ShipSpawnerConfig) int {
+	if cls.EnergyRecharge > 0 {
+		return cls.EnergyRecharge
+	}
+	return cfg.StartEnergyChrg
 }
 
 // spawnStarter persists a starter ship (full class stats + base loadout +
@@ -373,6 +392,8 @@ func (s *shipSpawner) buildStarterShip(playerID domain.PlayerID, race domain.Rac
 		if laserDmg < s.cfg.StartLaserDamage {
 			laserDmg = s.cfg.StartLaserDamage
 		}
+		energy = classEnergy(cls, s.cfg)            // TASK-100.3.25: per-class energy pool
+		energyRch = classEnergyRecharge(cls, s.cfg) // TASK-100.3.25: per-class recharge
 		classID = cls.ID
 		radarRange = float64(cls.Radar)  // phase 10.20 L1
 		cargoBay = float64(cls.CargoBay) // phase 10.3.17: hold capacity from class

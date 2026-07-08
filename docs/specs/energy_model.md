@@ -53,10 +53,35 @@ T = P / (L − (R − D))          [тиков]
 | `reverse` `energy_usage` (up_generator) | 100 | **6** | один генератор перекрывает базовый дренаж и удлиняет огонь |
 | `up_accumulator` `max_level` | 1 | **3** | пул можно удвоить трижды |
 
-Разовые `action`-цены (launcher/torpedo/drill/transporter/…) и пассивные
-`hold`-модули НЕ трогаются. `up_engine`/`up_weapon_control` — тип `action`, в
-базовый дренаж не входят (в наборе дренаж дают только `up_shield`/`up_pro`, у
-крупных ещё `up_turret_control`).
+### Стоимости действий (`action`-цены)
+
+Четыре `action`-модуля гейтятся живым пер-класс пулом (`command.go:465`
+для запуска, `mining.go`/`transport.go` для бура/транспортера:
+`if ship.Energy < cost → reject`, `Energy ≤ MaxEnergy`). При DEFAULT-100 класс
+с пулом меньше 100 **не мог выполнить действие вообще** — свежий Разведчик
+(пул 40) с 5 стартовыми ракетами и `up_launcher` L2 никогда не выпускал ракету
+(`40 < 100`). Калибровка опускает эти цены ниже наименьшего пула (40):
+
+| Модуль | Было | Стало | Тип списания |
+|--------|------|-------|--------------|
+| `up_launcher` (ракета) | 100 | **15** | разовое (за пуск) |
+| `up_torpedo_launcher` (торпеда) | 100 | **20** | разовое (за пуск) |
+| `up_drill` (бур) | 100 | **5** | **sustained** — списывается **каждый тик** бурения |
+| `up_transporter` (транспортер) | 50 | **8** | разовое (за телепорт груза) |
+
+Все четыре < 40 (наименьший пул) → **любое действие доступно любому классу**.
+`up_drill` — единственный sustained: TS (cls9, пул 50, R6, набор D=4) при
+бурении тратит `R − D − 5 = 6 − 4 − 5 = −3`/тик → бурит ~17 тиков непрерывно,
+потом ждёт восстановления. Ракета/торпеда/транспортер — разовые.
+
+Лазер (`StartLaserECost = 5`, не строка каталога) и прочие `action`-типы
+(`up_engine`/`up_weapon_control`/`up_scanner`/`up_capture`/`up_hack`/
+`up_antijump`/`up_drone_control`/`up_exdocking`/`up_jump_drive`) НЕ трогаются —
+их реальные потребители пулом не гейтятся либо вне scope. Пассивные `hold`-модули
+тоже не трогаются. `action`-цены **не входят** в `EnergyDelta` (его формируют
+только `always`/`reverse`), поэтому калибровка длительности огня (ниже) не
+меняется. В наборе дренаж дают только `up_shield`/`up_pro`, у крупных ещё
+`up_turret_control`.
 
 ## Per-class пул/recharge (`convert-ship-classes`)
 
@@ -104,9 +129,15 @@ Faithful-набор (`ship_base_loadout.yaml`) генераторов/аккум
 удвоение от аккумулятора (scout 10→20→40→80), и idle-восстановление без 0-lock
 для всех 9 классов.
 
+`SimulateFireTicks` при устойчивом огне (`net = recharge + energyDelta ≥
+laserCost` — напр. фит с генератором, который перекрывает лазер) возвращает
+сентинел `combat.SustainedFire` (−1, «неограниченно»), а не зацикливается.
+Базовый набор (без генератора) даёт `net < 0` и до сентинела не доходит.
+
 ## Затронутые артефакты
 
-- `configs/equipment.yaml` — `always`→2, `reverse`→6, `up_accumulator` max_level→3.
+- `configs/equipment.yaml` — `always`→2, `reverse`→6, `up_accumulator` max_level→3;
+  `action`-цены гейтимых модулей: launcher 15, torpedo 20, drill 5, transporter 8.
 - `configs/ship_classes.yaml` — `max_energy`/`energy_recharge` per-class.
 - `migrations/0057_ship_base_loadout_backfill.sql` — backfill стат-колонок
   (`max_energy`/`energy`/`energy_recharge`/`energy_delta`) per-class для

@@ -55,9 +55,11 @@ type yamlFile struct {
 // xbtfGapUpgrades are the four "X-BTF gap" modules spaceempire added on top of
 // the ported StarWind ct_updates catalog: up_rudder (10.3.15), up_cargobay
 // (10.3.16), up_ore_scanner (10.3.19) and up_transporter (10.3.18). They have no
-// row in the dump, so the converter appends them verbatim (ids 140-143) to keep
-// equipment.yaml a full, single-source-of-truth catalog. Their energy fields are
-// already final (hold/action), so calibrate() would leave them unchanged.
+// row in the dump, so the converter appends them (ids 140-143) to keep
+// equipment.yaml a full, single-source-of-truth catalog. Their raw energy fields
+// are carried here (up_transporter's uncalibrated action cost 50, the rest passive
+// hold=0) and run through calibrate() with the dump rows, which lowers the
+// transporter to the gated action cost (8) and leaves the hold modules unchanged.
 var xbtfGapUpgrades = []yamlEquipment{
 	{ID: 140, Type: "up_rudder", Description: "Оптимизация рулей", MaxLevel: 3, Race: 0, Class: 0, Price: 200000, PricePerLevel: 150000, MinWarRate: 0, MinTradeRate: 0, MinRaceRate: 0, IsBase: 0, Position: 1, Dependance: "none", EnergyUseType: "hold", EnergyUsage: 0},
 	{ID: 141, Type: "up_cargobay", Description: "Расширение трюма", MaxLevel: 3, Race: 0, Class: 0, Price: 200000, PricePerLevel: 150000, MinWarRate: 0, MinTradeRate: 0, MinRaceRate: 0, IsBase: 0, Position: 1, Dependance: "none", EnergyUseType: "hold", EnergyUsage: 0},
@@ -110,8 +112,12 @@ func run(sqlFile, outPath string) error {
 	// The X-BTF gap upgrades (ids 140-143) have no ct_updates rows in the dump —
 	// they were designed for spaceempire (phases 10.3.15/16/18/19). Emit them here
 	// so the converter reproduces the whole shipped catalog rather than silently
-	// dropping four modules.
-	items = append(items, xbtfGapUpgrades...)
+	// dropping four modules. Run each through calibrate so the transporter's action
+	// cost is set in the same calibration table as the dump-sourced action modules.
+	for _, g := range xbtfGapUpgrades {
+		calibrate(&g)
+		items = append(items, g)
+	}
 
 	header := "# Auto-generated from sql/db.sql (ct_updates) by cmd/starwind-tools/convert-equipment.\n" +
 		"# Do not edit by hand; rerun the converter against the source dump.\n"
@@ -153,21 +159,28 @@ func applyPostDumpOverrides(e *yamlEquipment) {
 	}
 }
 
-// calibrate rewrites the steady-state energy fields the original ct_updates
-// left at the uncalibrated DEFAULT of 100 (TASK-100.3.25 energy model). Only the
-// per-tick draws are touched; one-off `action` costs (launcher/torpedo/drill/
-// transporter, …) and passive `hold` modules keep their dump values:
+// calibrate rewrites the steady-state and gated energy fields the original
+// ct_updates left at the uncalibrated DEFAULT of 100 (TASK-100.3.25 energy
+// model). Passive `hold` modules keep their dump values:
 //
 //   - always drain (up_shield/up_pro/up_turret_control/up_hide/… ) → 2/tick, so a
 //     ship's base kit costs a few points/tick, not −100 each (which pinned energy
 //     at 0 and silenced the laser).
 //   - reverse feed (up_generator) → 6/tick, so one generator more than offsets the
 //     base always-drain and lets a player extend fire.
+//   - action costs of the four modules actually gated against a live per-class
+//     energy pool → below the smallest pool (scout 40) so every class can afford
+//     the action (launcher 15, torpedo 20, drill 5 sustained/tick, transporter 8).
+//     Before this a scout (pool 40) could never fire its 100-cost launcher. The
+//     laser (StartLaserECost=5, not a catalog row) and the ungated action types
+//     (up_engine/up_weapon_control/up_scanner/up_capture/up_hack/up_antijump/
+//     up_drone_control/up_exdocking/up_jump_drive) keep their dump value.
 //   - up_accumulator max_level → 3, so it can double the energy pool up to three
 //     times (scout 40 → 80 → 160 → 320; fire duration 10 → 20 → 40 → 80).
 //
-// The pool/recharge that make these land on the per-class fire-duration targets
-// live in convert-ship-classes (energyCalibration). See
+// action costs do NOT feed EnergyDelta (only always/reverse do), so this leaves
+// the per-class fire-duration calibration untouched. The pool/recharge that make
+// those land on target live in convert-ship-classes (energyCalibration). See
 // back/docs/specs/energy_model.md.
 func calibrate(e *yamlEquipment) {
 	switch e.EnergyUseType {
@@ -175,6 +188,17 @@ func calibrate(e *yamlEquipment) {
 		e.EnergyUsage = 2
 	case "reverse":
 		e.EnergyUsage = 6
+	case "action":
+		switch e.Type {
+		case "up_launcher":
+			e.EnergyUsage = 15
+		case "up_torpedo_launcher":
+			e.EnergyUsage = 20
+		case "up_drill":
+			e.EnergyUsage = 5
+		case "up_transporter":
+			e.EnergyUsage = 8
+		}
 	}
 	if e.Type == "up_accumulator" {
 		e.MaxLevel = 3

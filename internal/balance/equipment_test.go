@@ -71,12 +71,13 @@ func TestUnit_LoadEquipment_RealConfig(t *testing.T) {
 	assert.Equal(t, 1, ore.MaxLevel)
 
 	// id 143 = up_transporter (any class): an action module — spends energy on
-	// each cargo teleport (phase 10.3.18).
+	// each cargo teleport (phase 10.3.18). The TASK-100.3.25 fix-loop calibrated
+	// its action cost down from the raw 50 to 8 (below the smallest pool, 40).
 	tr, ok := cat.GetEquipment(143)
 	require.True(t, ok)
 	assert.Equal(t, "up_transporter", tr.Type)
 	assert.Equal(t, "action", tr.EnergyUseType)
-	assert.Equal(t, 50, tr.EnergyUsage)
+	assert.Equal(t, 8, tr.EnergyUsage)
 
 	// id 95 = up_drill M1 (class 1): price 1440000, depends on up_accumulator.
 	e, ok := cat.GetEquipment(95)
@@ -105,6 +106,30 @@ func TestUnit_LoadEquipment_RealConfig(t *testing.T) {
 	for _, e := range cat.AllEquipment() {
 		if e.EnergyUseType == "always" {
 			assert.Equalf(t, 2, e.EnergyUsage, "always module %d (%s) calibrated to 2/tick", e.ID, e.Type)
+		}
+	}
+
+	// TASK-100.3.25 fix-loop: the four action modules gated against a live
+	// per-class energy pool are calibrated below the smallest pool (scout 40) so
+	// every class can afford the action (before this the 100-cost launcher was
+	// unfirable by a 40-pool scout). Every catalog row of each type carries the
+	// calibrated cost.
+	const smallestPool = 40
+	actionCosts := map[string]int{"up_launcher": 15, "up_torpedo_launcher": 20, "up_drill": 5, "up_transporter": 8}
+	for typ, want := range actionCosts {
+		rows := cat.EquipmentByType(typ)
+		require.NotEmptyf(t, rows, "type %s must be present", typ)
+		for _, r := range rows {
+			assert.Equalf(t, "action", r.EnergyUseType, "%s (%d) must be an action module", typ, r.ID)
+			assert.Equalf(t, want, r.EnergyUsage, "%s (%d) action cost calibrated to %d", typ, r.ID, want)
+			assert.Lessf(t, r.EnergyUsage, smallestPool, "%s cost must fit the smallest pool", typ)
+		}
+	}
+	// The ungated action modules keep their raw dump cost (100) — calibration
+	// only touches the four consumers actually gated by a per-class pool.
+	for _, typ := range []string{"up_engine", "up_weapon_control", "up_scanner", "up_jump_drive"} {
+		for _, r := range cat.EquipmentByType(typ) {
+			assert.Equalf(t, 100, r.EnergyUsage, "ungated action %s (%d) keeps dump cost", typ, r.ID)
 		}
 	}
 }

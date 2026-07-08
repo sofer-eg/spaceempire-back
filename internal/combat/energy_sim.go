@@ -10,10 +10,21 @@ package combat
 // per-class energy calibration can be asserted without spinning a worker. See
 // back/docs/specs/energy_model.md.
 
+// SustainedFire is the sentinel SimulateFireTicks returns when the ship's net
+// per-tick feed (recharge + energyDelta) already covers a laser shot on its own:
+// the pool tops back up to ≥ laserCost every tick, so the ship fires indefinitely
+// and no finite tick count exists. A base kit (no generator) nets < 0 and never
+// reaches this; a generator-boosted fit that out-produces the laser does. Callers
+// that expect a finite duration should treat this as "unbounded", not compare it
+// as a number.
+const SustainedFire = -1
+
 // SimulateFireTicks returns how many consecutive ticks a ship can fire its laser
 // before the pool can no longer pay a shot, starting from a full pool. Each tick
 // mirrors the worker order: recharge (clamped to pool), then fire if the pool
 // covers laserCost. pool/laserCost ≤ 0 → 0 (no pool, or a free/absent laser).
+// When the net per-tick feed covers laserCost the pool never depletes — returns
+// SustainedFire instead of looping forever.
 func SimulateFireTicks(pool, recharge, energyDelta, laserCost int) int {
 	if pool <= 0 || laserCost <= 0 {
 		return 0
@@ -27,6 +38,11 @@ func SimulateFireTicks(pool, recharge, energyDelta, laserCost int) int {
 		}
 		if energy < laserCost {
 			return ticks
+		}
+		// The pool covers this shot; if the net feed also covers it, recharge
+		// refills the pool to ≥ laserCost every tick and fire never stops.
+		if net >= laserCost {
+			return SustainedFire
 		}
 		energy -= laserCost
 	}

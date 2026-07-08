@@ -16,7 +16,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 2
       type: up_launcher
       description: Ракетно-пусковая система
@@ -32,7 +32,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 3
       type: up_launcher
       description: Ракетно-пусковая система
@@ -48,7 +48,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 4
       type: up_launcher
       description: Ракетно-пусковая система
@@ -64,7 +64,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 5
       type: up_launcher
       description: Ракетно-пусковая система
@@ -80,7 +80,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 6
       type: up_launcher
       description: Ракетно-пусковая система
@@ -96,7 +96,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 7
       type: up_launcher
       description: Ракетно-пусковая система
@@ -112,7 +112,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 8
       type: up_launcher
       description: Ракетно-пусковая система
@@ -128,7 +128,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 9
       type: up_launcher
       description: Ракетно-пусковая система
@@ -144,7 +144,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 15
     - id: 10
       type: up_pro
       description: Помехопостановочная противоракетная система
@@ -1520,7 +1520,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 96
       type: up_drill
       description: Установка для добычи руды
@@ -1536,7 +1536,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 97
       type: up_drill
       description: Установка для добычи руды
@@ -1552,7 +1552,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 98
       type: up_drill
       description: Установка для добычи руды
@@ -1568,7 +1568,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 99
       type: up_drill
       description: Установка для добычи руды
@@ -1584,7 +1584,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 100
       type: up_drill
       description: Установка для добычи руды
@@ -1600,7 +1600,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 101
       type: up_drill
       description: Установка для добычи руды
@@ -1616,7 +1616,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 102
       type: up_drill
       description: Установка для добычи руды
@@ -1632,7 +1632,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 103
       type: up_drill
       description: Установка для добычи руды
@@ -1648,7 +1648,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 5
     - id: 104
       type: up_scanner
       description: Сканирующее устройство
@@ -1968,7 +1968,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 20
     - id: 124
       type: up_torpedo_launcher
       description: Торпедная установка
@@ -1984,7 +1984,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 20
     - id: 125
       type: up_torpedo_launcher
       description: Торпедная установка
@@ -2000,7 +2000,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 20
     - id: 126
       type: up_torpedo_launcher
       description: Торпедная установка
@@ -2016,7 +2016,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 20
     - id: 127
       type: up_torpedo_launcher
       description: Торпедная установка
@@ -2032,7 +2032,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 20
     - id: 128
       type: up_torpedo_launcher
       description: Торпедная установка
@@ -2048,7 +2048,7 @@ equipment:
       position: 2
       dependance: up_accumulator
       energy_use_type: action
-      energy_usage: 100
+      energy_usage: 20
     - id: 129
       type: up_jump_drive
       description: Прыжковый двигатель
@@ -2288,4 +2288,4 @@ equipment:
       position: 1
       dependance: none
       energy_use_type: action
-      energy_usage: 50
+      energy_usage: 8

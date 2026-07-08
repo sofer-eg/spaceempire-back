@@ -104,6 +104,27 @@ func TestUnit_EnergyModel_AccumulatorDoublesFireDuration(t *testing.T) {
 	}
 }
 
+// TestUnit_SimulateFireTicks_SustainedReturnsSentinel is the TASK-100.3.25
+// fix-loop guard: a fit whose net per-tick feed already covers the laser cost
+// (e.g. a generator boost) tops the pool back up every tick, so no finite fire
+// duration exists. SimulateFireTicks must return the SustainedFire sentinel and
+// terminate rather than loop forever.
+func TestUnit_SimulateFireTicks_SustainedReturnsSentinel(t *testing.T) {
+	t.Parallel()
+	// net = recharge + energyDelta = 6 + 0 = 6 ≥ laserCost 5 → unbounded.
+	require.Equal(t, combat.SustainedFire,
+		combat.SimulateFireTicks(40, 6, 0, laserEnergyCost))
+	// net exactly equal to laserCost is still unbounded.
+	require.Equal(t, combat.SustainedFire,
+		combat.SimulateFireTicks(40, laserEnergyCost, 0, laserEnergyCost))
+	// A pool smaller than one shot still can never fire → 0, not the sentinel.
+	require.Equal(t, 0, combat.SimulateFireTicks(3, 10, 0, laserEnergyCost))
+	// A draining base kit (net < 0) stays finite.
+	got := combat.SimulateFireTicks(40, 5, -4, laserEnergyCost)
+	require.Positive(t, got)
+	require.NotEqual(t, combat.SustainedFire, got)
+}
+
 // TestUnit_EnergyModel_IdleRecoversNo0Lock checks AC #11: with the laser silent,
 // every base kit recharges from empty (recharge out-paces always-drain) in a
 // sane window — the pool never sticks at 0.

@@ -88,6 +88,10 @@ type Config struct {
 	// is the Type→slot lookup the app fills from the equipment catalog. Zero
 	// scalars fall back to combat.DefaultKnockConfig in withDefaults.
 	Knock combat.KnockConfig
+	// HackRange is how close (world units) the hacker ship must be to a trade
+	// station to raid it with up_hack (TASK-100.3.9.3, SP UseHack), from
+	// capture.yaml. Default 50.
+	HackRange float64
 }
 
 func (c Config) withDefaults() Config {
@@ -145,6 +149,9 @@ func (c Config) withDefaults() Config {
 		c.Knock.CriticalHullIntegrity = d.CriticalHullIntegrity
 		c.Knock.ExternalBase = d.ExternalBase
 		c.Knock.InternalBase = d.InternalBase
+	}
+	if c.HackRange <= 0 {
+		c.HackRange = 50
 	}
 	return c
 }

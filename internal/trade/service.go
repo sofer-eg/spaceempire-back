@@ -296,6 +296,117 @@ func (s *Service) Sell(ctx context.Context, playerID domain.PlayerID, shipID dom
 	return result, nil
 }
 
+// RobOutcome is what Rob took from a station hack (TASK-100.3.9.3, SP UseHack).
+// Robbed is the loot amount, Damaged the destroyed amount (both removed from the
+// station's stock). Delivered reports whether Robbed was already added to the
+// hacker's hold (level >= 2 with room) — when false the caller drops a loot
+// container. MaxStock is the target good's cap, the denominator for the
+// reputation penalty.
+type RobOutcome struct {
+	GoodsType domain.GoodsTypeID
+	Robbed    int64
+	Damaged   int64
+	Delivered bool
+	MaxStock  int64
+}
+
+// Rob executes the market side of a station hack (SP UseHack, ЧТЗ FR-D3/D4). It
+// targets the station's richest good (highest stock; tie-break lowest goods
+// type), gates on that good holding >= minFrac of its max_stock (else
+// ErrTooLittleGoods), then in one transaction removes robFrac+damageFrac of its
+// stock and — when depositToHold and the hold has room — adds the robbed units
+// to the hacker ship's hold. The clamp mirrors the SP: if robbed+damaged would
+// exceed the stock, robbed is dropped to 0 (only the damage lands). Reputation
+// is applied by the caller (racestanding), outside this transaction.
+func (s *Service) Rob(ctx context.Context, station, hackerShip domain.EntityRef, robFrac, damageFrac, minFrac float64, depositToHold bool) (RobOutcome, error) {
+	if !isStationKind(station.Kind) {
+		return RobOutcome{}, ErrInvalidStationKind
+	}
+	var out RobOutcome
+	err := s.tx.Do(ctx, func(ctx context.Context, txRepo Repo) error {
+		entries, err := txRepo.ListMarket(ctx, station)
+		if err != nil {
+			if errors.Is(err, traderepo.ErrUnsupportedStationKind) {
+				return ErrInvalidStationKind
+			}
+			return err
+		}
+		target, ok := richestGood(entries)
+		if !ok || target.MaxStock <= 0 ||
+			float64(target.Stock) < minFrac*float64(target.MaxStock) {
+			return ErrTooLittleGoods
+		}
+
+		robbed := int64(robFrac * float64(target.Stock))
+		damaged := int64(damageFrac * float64(target.Stock))
+		if robbed+damaged > target.Stock {
+			robbed = 0
+		}
+		if damaged > target.Stock {
+			damaged = 0
+		}
+
+		if total := robbed + damaged; total > 0 {
+			if _, err := txRepo.AdjustStock(ctx, station, target.GoodsType, -total); err != nil {
+				return fmt.Errorf("rob adjust stock: %w", err)
+			}
+		}
+
+		delivered := false
+		if depositToHold && robbed > 0 {
+			gt, err := txRepo.GoodsType(ctx, target.GoodsType)
+			if err != nil {
+				if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
+					return ErrGoodsTypeNotFound
+				}
+				return err
+			}
+			capacity, err := txRepo.Capacity(ctx, hackerShip)
+			if err != nil {
+				return fmt.Errorf("hacker capacity: %w", err)
+			}
+			used, err := txRepo.UsedSpace(ctx, hackerShip)
+			if err != nil {
+				return fmt.Errorf("hacker used space: %w", err)
+			}
+			if used+float64(robbed)*gt.Space <= capacity {
+				if err := txRepo.AddCargo(ctx, hackerShip, target.GoodsType, robbed); err != nil {
+					return fmt.Errorf("deposit loot: %w", err)
+				}
+				delivered = true
+			}
+		}
+
+		out = RobOutcome{
+			GoodsType: target.GoodsType,
+			Robbed:    robbed,
+			Damaged:   damaged,
+			Delivered: delivered,
+			MaxStock:  target.MaxStock,
+		}
+		return nil
+	})
+	if err != nil {
+		return RobOutcome{}, err
+	}
+	return out, nil
+}
+
+// richestGood picks the market entry with the highest stock (tie-break: lowest
+// goods type for determinism). ok is false for an empty market.
+func richestGood(entries []traderepo.MarketEntry) (traderepo.MarketEntry, bool) {
+	var best traderepo.MarketEntry
+	found := false
+	for _, e := range entries {
+		if !found || e.Stock > best.Stock ||
+			(e.Stock == best.Stock && e.GoodsType < best.GoodsType) {
+			best = e
+			found = true
+		}
+	}
+	return best, found
+}
+
 // tradeRateShift mirrors StarWind update_user_cash_and_rating (db.sql): the
 // trade reputation gained on a deal is cash_sum >> 8 — one point per 256 credits
 // of turnover, in either direction (phase 10.3.13).

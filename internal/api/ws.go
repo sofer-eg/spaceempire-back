@@ -78,6 +78,25 @@ type moduleKnockedFrame struct {
 	EquipmentType string `json:"equipmentType"`
 }
 
+// stationHackedBuffer caps the per-WS queue of station-hack events
+// (TASK-100.3.9.3). A hack is a deliberate, energy-gated action, so it is rare;
+// a small buffer is ample and overflow drops the oldest.
+const stationHackedBuffer = 4
+
+// stationHackedFrame is the WS frame pushed to the hacker when they raid a trade
+// station (SP UseHack). robbed > 0 → "Похищено N ед."; robbed == 0 → "Неудачная
+// попытка взлома". The SPA renders the journal line (TASK-100.3.9.6); this
+// back-only emission completes the "событие в Журнал" requirement.
+type stationHackedFrame struct {
+	Type      string `json:"type"`
+	ShipID    int64  `json:"shipId"`
+	SectorID  int64  `json:"sectorId"`
+	StationID int64  `json:"stationId"`
+	Race      int    `json:"race"`
+	GoodsType int    `json:"goodsType"`
+	Robbed    int64  `json:"robbed"`
+}
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// RequireAuth (when wired) has already populated the player ID.
 	playerID, ok := auth.PlayerIDFromContext(r.Context())
@@ -237,7 +256,38 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, knockCh, playerID)
+	// Subscribe to per-player station-hack events (TASK-100.3.9.3) on the same
+	// bus. Same pattern as module knocked: decode and forward to a buffered
+	// channel the push loop drains. Unauthenticated clients skip it.
+	hackCh := make(chan stationHackedFrame, stationHackedBuffer)
+	if s.handoffBus != nil && playerID != 0 {
+		err := s.handoffBus.Subscribe(ctx, sector.StationHackedTopic(playerID), func(payload []byte) {
+			var ev sector.StationHackedEvent
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				s.logger.Warn("ws decode station hacked", "err", err, "player", int64(playerID))
+				return
+			}
+			frame := stationHackedFrame{
+				Type:      "station_hacked",
+				ShipID:    int64(ev.ShipID),
+				SectorID:  int64(ev.SectorID),
+				StationID: ev.StationID,
+				Race:      int(ev.Race),
+				GoodsType: int(ev.GoodsType),
+				Robbed:    ev.Robbed,
+			}
+			select {
+			case hackCh <- frame:
+			default:
+				s.logger.Warn("ws station hacked event dropped — buffer full", "player", int64(playerID))
+			}
+		})
+		if err != nil {
+			s.logger.Warn("ws station hacked subscribe", "err", err, "player", int64(playerID))
+		}
+	}
+
+	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, knockCh, hackCh, playerID)
 }
 
 // initialSubscribeSector chooses which sector a freshly opened WS should
@@ -341,6 +391,7 @@ func (s *Server) wsPushLoop(
 	rentOverdue <-chan rentOverdueFrame,
 	policeScan <-chan policeScanFrame,
 	moduleKnocked <-chan moduleKnockedFrame,
+	stationHacked <-chan stationHackedFrame,
 	playerID domain.PlayerID,
 ) {
 	currentSector := sub.SectorID
@@ -391,6 +442,21 @@ func (s *Server) wsPushLoop(
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					s.logger.Debug("ws write module knocked", "err", err)
+				}
+				return
+			}
+		case frame := <-stationHacked:
+			payload, err := json.Marshal(frame)
+			if err != nil {
+				s.logger.Warn("ws marshal station hacked", "err", err)
+				continue
+			}
+			writeCtx, wc := context.WithTimeout(ctx, wsWriteTimeout)
+			err = conn.Write(writeCtx, websocket.MessageText, payload)
+			wc()
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					s.logger.Debug("ws write station hacked", "err", err)
 				}
 				return
 			}

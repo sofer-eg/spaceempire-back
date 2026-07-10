@@ -256,6 +256,12 @@ type Worker struct {
 	// independent of this). Wired via WithRefit over the balance catalog.
 	refit Refitter
 
+	// robber runs the DB side of a station hack (TASK-100.3.9.3, SP UseHack):
+	// deduct the station's stock, deposit loot into the hold, drop the hacker's
+	// race standing. Nil disables HackStationCommand's effect (pure unit tests).
+	// Wired via WithStationRobber over trade.Service + racestanding.
+	robber StationRobber
+
 	// Handoff dependencies — both nil disables JumpCommand handling and
 	// intake subscriptions. Wired in via WithHandoff option.
 	topology *world.Topology

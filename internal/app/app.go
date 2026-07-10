@@ -377,6 +377,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					InternalBase:          captureCfg.KnockInternalBase,
 					Positions:             equipmentPositions(equipment),
 				},
+				// 10.3.9.3: max distance a hacker ship may raid a trade station
+				// (SP UseHack) from capture.yaml.
+				HackRange: captureCfg.HackRange,
 			},
 		},
 		sectorIDs,
@@ -447,6 +450,21 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		// 10.3.9.1: recompute a ship's fit after a module is knocked off in
 		// combat (SP DestroyModule), so it loses that module's stat boost.
 		sector.WithRefit(equipmentRefitter{classes: shipClasses, equipment: equipment, cfg: spawnCfg}),
+		// 10.3.9.3: station hack (SP UseHack) — up_hack raids a trade station's
+		// richest good (stock deduction + loot into the hold, via trade.Service),
+		// and drops the hacker's standing with the station's race. Fractions/penalty
+		// come from capture.yaml, not hardcoded (NFR-004).
+		sector.WithStationRobber(stationRobber{
+			market:   tradeSvc,
+			standing: standingSvc,
+			cfg: HackConfig{
+				RobFraction:       captureCfg.HackRobFraction,
+				DamageFraction:    captureCfg.HackDamageFraction,
+				GoodsMinFraction:  captureCfg.HackGoodsMinFraction,
+				ReputationPenalty: captureCfg.HackReputationPenalty,
+			},
+			npc: npcPlayerID,
+		}),
 	)
 
 	// spawnCfg was materialised above (with defaults applied) so the player

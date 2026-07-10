@@ -1941,7 +1941,7 @@ equipment:
       type: up_hack
       description: Модуль взлома
       max_level: 2
-      race: 6
+      race: 0
       class: 0
       price: 500000
       price_per_level: 1000000

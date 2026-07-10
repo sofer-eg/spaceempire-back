@@ -62,3 +62,8 @@ var ErrNoCargoSpace = errors.New("trade: ship cargobay cannot fit this purchase"
 // ErrGoodsTypeNotFound is returned when the goods_type referenced does
 // not exist in the reference table.
 var ErrGoodsTypeNotFound = errors.New("trade: goods type not found")
+
+// ErrTooLittleGoods is returned by Rob (station hack, TASK-100.3.9.3) when the
+// station's richest good holds less than the min fraction of its max_stock —
+// "too little goods to fool the system" (SP UseHack).
+var ErrTooLittleGoods = errors.New("trade: station has too little goods to hack")

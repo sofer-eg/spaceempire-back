@@ -2,15 +2,32 @@ package balance
 
 // CaptureConfig is the capture/hack/knockoff tuning loaded from
 // configs/capture.yaml (ЧТЗ doc-4 §5.1). TASK-100.3.9.1 owns the four Knock*
-// fields (SP DestroyModule); the capture (.4) and hack (.3) sub-tasks extend
-// this struct with their own thresholds. Kept in the balance package alongside
-// the other catalogs; the app maps the knock subset into combat.KnockConfig for
-// the sector worker.
+// fields (SP DestroyModule); the hack sub-task (.3) owns the five Hack* fields
+// (SP UseHack); the capture (.4) sub-task extends this struct with its own
+// thresholds. Kept in the balance package alongside the other catalogs; the app
+// maps the knock subset into combat.KnockConfig, the hack subset into the sector
+// worker's HackRange + the app-side station robber.
 type CaptureConfig struct {
 	KnockCriticalShieldCharge  float64
 	KnockCriticalHullIntegrity float64
 	KnockExternalBase          float64
 	KnockInternalBase          float64
+
+	// HackRange is the max distance (world units) between the hacker ship and the
+	// trade station (SP UseHack, TASK-100.3.9.3).
+	HackRange float64
+	// HackGoodsMinFraction is the minimum stock (fraction of the good's max_stock)
+	// the richest good must hold for the station to be hackable ("too little goods
+	// to fool the system").
+	HackGoodsMinFraction float64
+	// HackRobFraction is the fraction of the target good's stock stolen into loot.
+	HackRobFraction float64
+	// HackDamageFraction is the fraction of the target good's stock destroyed.
+	HackDamageFraction float64
+	// HackReputationPenalty is the k scalar of the standing penalty:
+	// round((robbed+damaged)/max_stock * k) is subtracted from the hacker's
+	// standing with the station's race (FR-D5, NFR-004).
+	HackReputationPenalty float64
 }
 
 // DefaultCaptureConfig returns the faithful DestroyModule scalars (ЧТЗ §5.1).
@@ -21,6 +38,11 @@ func DefaultCaptureConfig() CaptureConfig {
 		KnockCriticalHullIntegrity: 0.7,
 		KnockExternalBase:          0.2,
 		KnockInternalBase:          0.1,
+		HackRange:                  50,
+		HackGoodsMinFraction:       0.3,
+		HackRobFraction:            0.15,
+		HackDamageFraction:         0.05,
+		HackReputationPenalty:      50,
 	}
 }
 
@@ -39,6 +61,21 @@ func (c CaptureConfig) withDefaults() CaptureConfig {
 	}
 	if c.KnockInternalBase <= 0 {
 		c.KnockInternalBase = d.KnockInternalBase
+	}
+	if c.HackRange <= 0 {
+		c.HackRange = d.HackRange
+	}
+	if c.HackGoodsMinFraction <= 0 {
+		c.HackGoodsMinFraction = d.HackGoodsMinFraction
+	}
+	if c.HackRobFraction <= 0 {
+		c.HackRobFraction = d.HackRobFraction
+	}
+	if c.HackDamageFraction <= 0 {
+		c.HackDamageFraction = d.HackDamageFraction
+	}
+	if c.HackReputationPenalty <= 0 {
+		c.HackReputationPenalty = d.HackReputationPenalty
 	}
 	return c
 }

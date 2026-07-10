@@ -20,3 +20,18 @@ capture:
   # Base chance an internal (Position 1) module is knocked at zero hull; scales
   # from 0 (hull at the critical integrity) to this value.
   knock_internal_base: 0.1
+
+  # Hack (SP UseHack, TASK-100.3.9.3) — grabbing goods off a trade station.
+  # Max distance (world units) between the hacker ship and the trade station.
+  hack_range: 50
+  # Minimum stock (fraction of the good's max_stock) the richest good must hold
+  # for the station to be hackable ("too little goods to fool the system").
+  hack_goods_min_fraction: 0.3
+  # Fraction of the target good's stock stolen into loot (ship hold at up_hack
+  # level >= 2, otherwise a container).
+  hack_rob_fraction: 0.15
+  # Fraction of the target good's stock destroyed (removed, not looted).
+  hack_damage_fraction: 0.05
+  # k scalar of the standing penalty: round((robbed+damaged)/max_stock * k) is
+  # subtracted from the hacker's standing with the station's race.
+  hack_reputation_penalty: 50

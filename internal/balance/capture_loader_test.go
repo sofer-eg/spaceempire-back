@@ -26,6 +26,11 @@ func TestUnit_LoadCaptureConfig_ReadsFields(t *testing.T) {
   knock_critical_hull_integrity: 0.6
   knock_external_base: 0.3
   knock_internal_base: 0.15
+  hack_range: 60
+  hack_goods_min_fraction: 0.4
+  hack_rob_fraction: 0.2
+  hack_damage_fraction: 0.1
+  hack_reputation_penalty: 30
 `)
 	cfg, err := balance.LoadCaptureConfigFromFile(path)
 	require.NoError(t, err)
@@ -33,6 +38,11 @@ func TestUnit_LoadCaptureConfig_ReadsFields(t *testing.T) {
 	assert.InDelta(t, 0.6, cfg.KnockCriticalHullIntegrity, 1e-9)
 	assert.InDelta(t, 0.3, cfg.KnockExternalBase, 1e-9)
 	assert.InDelta(t, 0.15, cfg.KnockInternalBase, 1e-9)
+	assert.InDelta(t, 60, cfg.HackRange, 1e-9)
+	assert.InDelta(t, 0.4, cfg.HackGoodsMinFraction, 1e-9)
+	assert.InDelta(t, 0.2, cfg.HackRobFraction, 1e-9)
+	assert.InDelta(t, 0.1, cfg.HackDamageFraction, 1e-9)
+	assert.InDelta(t, 30, cfg.HackReputationPenalty, 1e-9)
 }
 
 // Missing fields fall back to the faithful DestroyModule defaults (ЧТЗ §5.1).
@@ -45,6 +55,12 @@ func TestUnit_LoadCaptureConfig_FillsDefaults(t *testing.T) {
 	assert.InDelta(t, 0.2, cfg.KnockCriticalShieldCharge, 1e-9, "missing → default")
 	assert.InDelta(t, 0.7, cfg.KnockCriticalHullIntegrity, 1e-9, "missing → default")
 	assert.InDelta(t, 0.1, cfg.KnockInternalBase, 1e-9, "missing → default")
+	// Hack fields absent → faithful defaults (ЧТЗ §5.1).
+	assert.InDelta(t, 50, cfg.HackRange, 1e-9, "missing → default")
+	assert.InDelta(t, 0.3, cfg.HackGoodsMinFraction, 1e-9, "missing → default")
+	assert.InDelta(t, 0.15, cfg.HackRobFraction, 1e-9, "missing → default")
+	assert.InDelta(t, 0.05, cfg.HackDamageFraction, 1e-9, "missing → default")
+	assert.InDelta(t, 50, cfg.HackReputationPenalty, 1e-9, "missing → default")
 }
 
 // The in-tree configs/capture.yaml loads and matches the faithful profile.

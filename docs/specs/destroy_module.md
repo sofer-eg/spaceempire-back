@@ -116,6 +116,9 @@ pos, …`) и НЕ пишут `equipment/max_shield/shield_recharge`. Поэто
   `max_shield=0`, `shield_generator_destroyed=true`.
 - `app/refit_test.go` — refit снимает буст выбитого модуля, clamp Shield.
 - `balance/capture_loader_test.go` — capture.yaml → CaptureConfig + дефолты.
+- `sector/capture_chain_test.go` (`TestUnit_CaptureChain_KnockShieldThenCapture`,
+  TASK-100.3.9.7) — сквозной сценарий §5.2: боевой knockoff `up_shield` открывает
+  корабль к захвату (.1↔.4 компонуются).
 
 ## Отложено / вне scope
 

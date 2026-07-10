@@ -126,3 +126,20 @@ player-команды недостижима через `relations`. Damage-pari
 **faithful оригиналу** (`DoCapture` гейта враждебности не имел вовсе — только «не
 свой корабль»), и согласуется с решением по hack (.3): фича должна реально работать.
 Решение заказчика (AskUserQuestion, 2026-07-10).
+
+## Acceptance-паритет и сквозной сценарий (TASK-100.3.9.7)
+
+Профиль §5.1 и AC §6 покрыты per-подзадачными тестами: knockoff (AC-1/2/3) —
+`internal/combat/knockmodule_test.go` + `internal/sector/knock_test.go`; capture
+(AC-4/5/6/7 + Кха'ак-порог + friendly-gate + NPC-захват) — `internal/sector/capture_test.go`
++ `internal/app/reputation_test.go`; hack (AC-8/9/10) — `internal/sector/hack_test.go`,
+`internal/trade/rob_test.go`/`rob_integration_test.go`, `internal/balance/hack_install_test.go`.
+
+**Сквозная связь .1↔.4 (§5.2)** — единственная, которую per-подзадачные тесты по
+отдельности не ловят — проверена
+`TestUnit_CaptureChain_KnockShieldThenCapture`
+(`internal/sector/capture_chain_test.go`): через боевой путь воркера серия лазерных
+попаданий сбивает щит ≤20 % и пробивает корпус <70 %, `DestroyModule` выбивает
+`up_shield` → `MaxShield=0`; до выбивания `CaptureShipCommand` отклоняется
+(`ErrCaptureShielded`), после — гейт щита проходит и seed-успех меняет владельца
+(+war, выброс экипажа). Доказывает: без knockoff захват невозможен, после — возможен.

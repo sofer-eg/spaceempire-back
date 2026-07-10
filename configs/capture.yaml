@@ -35,3 +35,12 @@ capture:
   # k scalar of the standing penalty: round((robbed+damaged)/max_stock * k) is
   # subtracted from the hacker's standing with the station's race.
   hack_reputation_penalty: 50
+
+  # Capture (SP DoCapture, TASK-100.3.9.4) — seizing a shield-stripped ship.
+  # Roll thresholds on a 0..1000 scale: a capture succeeds when
+  # rng.Float64()*1000 > threshold. 819 → ~18% generic success.
+  capture_chance: 819
+  # Kha'ak (race 8) targets are harder to seize: 876 → ~12% success.
+  khaak_capture_chance: 876
+  # Max distance (world units) between the attacker and the target ship (√2500).
+  capture_range: 50

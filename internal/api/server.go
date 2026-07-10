@@ -150,17 +150,20 @@ type Server struct {
 	torpedoEnergyCost int
 	// hackEnergyCost is the "action" energy a station hack spends (phase
 	// 10.3.9.3), resolved once from the up_hack catalog row.
-	hackEnergyCost   int
-	handoffBus       bus.Subscriber
-	eventBus         bus.Publisher
-	missileCargo     MissileCargo
-	droneCargo       DroneCargo
-	torpedoCargo     TorpedoCargo
-	satelliteCargo   SatelliteCargo
-	activeShips      ActiveShipReader
-	activeShipWriter ActiveShipWriter
-	handoffPublisher bus.Publisher
-	fleet            FleetReader
+	hackEnergyCost int
+	// captureEnergyCost is the "action" energy a ship capture spends (phase
+	// 10.3.9.4), resolved once from the up_capture catalog row.
+	captureEnergyCost int
+	handoffBus        bus.Subscriber
+	eventBus          bus.Publisher
+	missileCargo      MissileCargo
+	droneCargo        DroneCargo
+	torpedoCargo      TorpedoCargo
+	satelliteCargo    SatelliteCargo
+	activeShips       ActiveShipReader
+	activeShipWriter  ActiveShipWriter
+	handoffPublisher  bus.Publisher
+	fleet             FleetReader
 }
 
 func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
@@ -205,6 +208,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	s.launchEnergyCost = launchActionEnergyCost(cfg.Equipment)
 	s.torpedoEnergyCost = torpedoLaunchEnergyCost(cfg.Equipment)
 	s.hackEnergyCost = hackActionEnergyCost(cfg.Equipment)
+	s.captureEnergyCost = captureActionEnergyCost(cfg.Equipment)
 
 	s.mux.HandleFunc("GET /healthz", handleHealthz)
 	s.mux.Handle("POST /api/cmd/move", s.protect(http.HandlerFunc(s.handleMove)))
@@ -216,6 +220,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	s.mux.Handle("POST /api/cmd/attack", s.protect(http.HandlerFunc(s.handleAttack)))
 	s.mux.Handle("POST /api/cmd/cease-fire", s.protect(http.HandlerFunc(s.handleCeaseFire)))
 	s.mux.Handle("POST /api/cmd/hack", s.protect(http.HandlerFunc(s.handleHack)))
+	s.mux.Handle("POST /api/cmd/capture", s.protect(http.HandlerFunc(s.handleCapture)))
 	s.mux.Handle("POST /api/cmd/launch-missile", s.protect(http.HandlerFunc(s.handleLaunchMissile)))
 	s.mux.Handle("POST /api/cmd/launch-drone", s.protect(http.HandlerFunc(s.handleLaunchDrone)))
 	s.mux.Handle("POST /api/cmd/launch-torpedo", s.protect(http.HandlerFunc(s.handleLaunchTorpedo)))

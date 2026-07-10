@@ -3,10 +3,11 @@ package balance
 // CaptureConfig is the capture/hack/knockoff tuning loaded from
 // configs/capture.yaml (ЧТЗ doc-4 §5.1). TASK-100.3.9.1 owns the four Knock*
 // fields (SP DestroyModule); the hack sub-task (.3) owns the five Hack* fields
-// (SP UseHack); the capture (.4) sub-task extends this struct with its own
-// thresholds. Kept in the balance package alongside the other catalogs; the app
+// (SP UseHack); the capture sub-task (.4) owns the three Capture* fields (SP
+// DoCapture). Kept in the balance package alongside the other catalogs; the app
 // maps the knock subset into combat.KnockConfig, the hack subset into the sector
-// worker's HackRange + the app-side station robber.
+// worker's HackRange + the app-side station robber, and the capture subset into
+// the sector worker's Capture* config.
 type CaptureConfig struct {
 	KnockCriticalShieldCharge  float64
 	KnockCriticalHullIntegrity float64
@@ -28,6 +29,16 @@ type CaptureConfig struct {
 	// round((robbed+damaged)/max_stock * k) is subtracted from the hacker's
 	// standing with the station's race (FR-D5, NFR-004).
 	HackReputationPenalty float64
+
+	// CaptureChance / KhaakCaptureChance are the ship-capture roll thresholds on a
+	// 0..1000 scale (SP DoCapture, TASK-100.3.9.4): a capture succeeds when
+	// rng.Float64()*1000 > threshold. CaptureChance (819, ~18%) is generic;
+	// KhaakCaptureChance (876, ~12%) applies to a Kha'ak target.
+	CaptureChance      float64
+	KhaakCaptureChance float64
+	// CaptureRange is the max distance (world units) between the attacker and the
+	// target ship for a capture (SP DoCapture, √2500 = 50).
+	CaptureRange float64
 }
 
 // DefaultCaptureConfig returns the faithful DestroyModule scalars (ЧТЗ §5.1).
@@ -43,6 +54,9 @@ func DefaultCaptureConfig() CaptureConfig {
 		HackRobFraction:            0.15,
 		HackDamageFraction:         0.05,
 		HackReputationPenalty:      50,
+		CaptureChance:              819,
+		KhaakCaptureChance:         876,
+		CaptureRange:               50,
 	}
 }
 
@@ -76,6 +90,15 @@ func (c CaptureConfig) withDefaults() CaptureConfig {
 	}
 	if c.HackReputationPenalty <= 0 {
 		c.HackReputationPenalty = d.HackReputationPenalty
+	}
+	if c.CaptureChance <= 0 {
+		c.CaptureChance = d.CaptureChance
+	}
+	if c.KhaakCaptureChance <= 0 {
+		c.KhaakCaptureChance = d.KhaakCaptureChance
+	}
+	if c.CaptureRange <= 0 {
+		c.CaptureRange = d.CaptureRange
 	}
 	return c
 }

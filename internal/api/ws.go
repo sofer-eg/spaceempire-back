@@ -97,6 +97,24 @@ type stationHackedFrame struct {
 	Robbed    int64  `json:"robbed"`
 }
 
+// shipCaptureBuffer caps the per-WS queue of ship-capture events (TASK-100.3.9.4).
+// A capture is a deliberate, energy-gated, low-chance action, so it is rare; a
+// small buffer is ample and overflow drops the oldest.
+const shipCaptureBuffer = 4
+
+// shipCaptureFrame is the WS frame pushed to a capture's participants (SP DoCapture).
+// captor+success → "Корабль захвачен"; captor+!success → "Захват не удался";
+// !captor+success → "Ваш корабль захвачен". The SPA renders the journal line
+// (TASK-100.3.9.5); this back-only emission completes the "события в Журнал ОБОИМ"
+// requirement.
+type shipCaptureFrame struct {
+	Type     string `json:"type"`
+	ShipID   int64  `json:"shipId"`
+	SectorID int64  `json:"sectorId"`
+	Captor   bool   `json:"captor"`
+	Success  bool   `json:"success"`
+}
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// RequireAuth (when wired) has already populated the player ID.
 	playerID, ok := auth.PlayerIDFromContext(r.Context())
@@ -287,7 +305,36 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, knockCh, hackCh, playerID)
+	// Subscribe to per-player ship-capture events (TASK-100.3.9.4) on the same bus.
+	// Same pattern as station hacked: decode and forward to a buffered channel the
+	// push loop drains. Both the captor and the (real-player) old owner receive one.
+	captureCh := make(chan shipCaptureFrame, shipCaptureBuffer)
+	if s.handoffBus != nil && playerID != 0 {
+		err := s.handoffBus.Subscribe(ctx, sector.ShipCaptureTopic(playerID), func(payload []byte) {
+			var ev sector.ShipCaptureEvent
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				s.logger.Warn("ws decode ship capture", "err", err, "player", int64(playerID))
+				return
+			}
+			frame := shipCaptureFrame{
+				Type:     "ship_capture",
+				ShipID:   int64(ev.ShipID),
+				SectorID: int64(ev.SectorID),
+				Captor:   ev.Captor,
+				Success:  ev.Success,
+			}
+			select {
+			case captureCh <- frame:
+			default:
+				s.logger.Warn("ws ship capture event dropped — buffer full", "player", int64(playerID))
+			}
+		})
+		if err != nil {
+			s.logger.Warn("ws ship capture subscribe", "err", err, "player", int64(playerID))
+		}
+	}
+
+	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, knockCh, hackCh, captureCh, playerID)
 }
 
 // initialSubscribeSector chooses which sector a freshly opened WS should
@@ -392,6 +439,7 @@ func (s *Server) wsPushLoop(
 	policeScan <-chan policeScanFrame,
 	moduleKnocked <-chan moduleKnockedFrame,
 	stationHacked <-chan stationHackedFrame,
+	shipCapture <-chan shipCaptureFrame,
 	playerID domain.PlayerID,
 ) {
 	currentSector := sub.SectorID
@@ -457,6 +505,21 @@ func (s *Server) wsPushLoop(
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					s.logger.Debug("ws write station hacked", "err", err)
+				}
+				return
+			}
+		case frame := <-shipCapture:
+			payload, err := json.Marshal(frame)
+			if err != nil {
+				s.logger.Warn("ws marshal ship capture", "err", err)
+				continue
+			}
+			writeCtx, wc := context.WithTimeout(ctx, wsWriteTimeout)
+			err = conn.Write(writeCtx, websocket.MessageText, payload)
+			wc()
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					s.logger.Debug("ws write ship capture", "err", err)
 				}
 				return
 			}

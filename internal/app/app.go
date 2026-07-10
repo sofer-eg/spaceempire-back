@@ -380,6 +380,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				// 10.3.9.3: max distance a hacker ship may raid a trade station
 				// (SP UseHack) from capture.yaml.
 				HackRange: captureCfg.HackRange,
+				// 10.3.9.4: ship-capture roll thresholds + range (SP DoCapture)
+				// from capture.yaml (NFR-004, not hardcoded).
+				CaptureChance:      captureCfg.CaptureChance,
+				KhaakCaptureChance: captureCfg.KhaakCaptureChance,
+				CaptureRange:       captureCfg.CaptureRange,
 			},
 		},
 		sectorIDs,
@@ -446,7 +451,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		// 10.3.13: combat reputation — destroying a ship grows the attributed
 		// killer's war_rate (the rank gate in 10.3.4 reads it). NPC kills are
 		// skipped inside the awarder.
-		sector.WithReputation(reputationAwarder{players: playersRepoPersistence, npc: npcPlayerID}),
+		sector.WithReputation(reputationAwarder{players: playersRepoPersistence, standing: standingSvc, npc: npcPlayerID}),
 		// 10.3.9.1: recompute a ship's fit after a module is knocked off in
 		// combat (SP DestroyModule), so it loses that module's stat boost.
 		sector.WithRefit(equipmentRefitter{classes: shipClasses, equipment: equipment, cfg: spawnCfg}),

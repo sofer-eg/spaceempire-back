@@ -92,6 +92,16 @@ type Config struct {
 	// station to raid it with up_hack (TASK-100.3.9.3, SP UseHack), from
 	// capture.yaml. Default 50.
 	HackRange float64
+	// CaptureChance / KhaakCaptureChance are the ship-capture roll thresholds on a
+	// 0..1000 scale (TASK-100.3.9.4, SP DoCapture): a capture succeeds when
+	// rng.Float64()*1000 > threshold. CaptureChance (819, ~18%) is the generic
+	// case; KhaakCaptureChance (876, ~12%) applies when the target is Kha'ak (race
+	// 8). From capture.yaml; NFR-004 keeps them out of code.
+	CaptureChance      float64
+	KhaakCaptureChance float64
+	// CaptureRange is how close (world units) the attacker must be to the target
+	// ship to attempt a capture (SP DoCapture, √2500 = 50). Default 50.
+	CaptureRange float64
 }
 
 func (c Config) withDefaults() Config {
@@ -152,6 +162,15 @@ func (c Config) withDefaults() Config {
 	}
 	if c.HackRange <= 0 {
 		c.HackRange = 50
+	}
+	if c.CaptureChance <= 0 {
+		c.CaptureChance = 819
+	}
+	if c.KhaakCaptureChance <= 0 {
+		c.KhaakCaptureChance = 876
+	}
+	if c.CaptureRange <= 0 {
+		c.CaptureRange = 50
 	}
 	return c
 }

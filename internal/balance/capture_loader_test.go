@@ -31,6 +31,9 @@ func TestUnit_LoadCaptureConfig_ReadsFields(t *testing.T) {
   hack_rob_fraction: 0.2
   hack_damage_fraction: 0.1
   hack_reputation_penalty: 30
+  capture_chance: 700
+  khaak_capture_chance: 800
+  capture_range: 45
 `)
 	cfg, err := balance.LoadCaptureConfigFromFile(path)
 	require.NoError(t, err)
@@ -43,6 +46,9 @@ func TestUnit_LoadCaptureConfig_ReadsFields(t *testing.T) {
 	assert.InDelta(t, 0.2, cfg.HackRobFraction, 1e-9)
 	assert.InDelta(t, 0.1, cfg.HackDamageFraction, 1e-9)
 	assert.InDelta(t, 30, cfg.HackReputationPenalty, 1e-9)
+	assert.InDelta(t, 700, cfg.CaptureChance, 1e-9)
+	assert.InDelta(t, 800, cfg.KhaakCaptureChance, 1e-9)
+	assert.InDelta(t, 45, cfg.CaptureRange, 1e-9)
 }
 
 // Missing fields fall back to the faithful DestroyModule defaults (ЧТЗ §5.1).
@@ -61,6 +67,10 @@ func TestUnit_LoadCaptureConfig_FillsDefaults(t *testing.T) {
 	assert.InDelta(t, 0.15, cfg.HackRobFraction, 1e-9, "missing → default")
 	assert.InDelta(t, 0.05, cfg.HackDamageFraction, 1e-9, "missing → default")
 	assert.InDelta(t, 50, cfg.HackReputationPenalty, 1e-9, "missing → default")
+	// Capture fields absent → faithful DoCapture defaults (ЧТЗ §5.1).
+	assert.InDelta(t, 819, cfg.CaptureChance, 1e-9, "missing → default")
+	assert.InDelta(t, 876, cfg.KhaakCaptureChance, 1e-9, "missing → default")
+	assert.InDelta(t, 50, cfg.CaptureRange, 1e-9, "missing → default")
 }
 
 // The in-tree configs/capture.yaml loads and matches the faithful profile.

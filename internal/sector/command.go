@@ -909,3 +909,132 @@ func replyOnce(reply chan<- CmdResult, res CmdResult) {
 	default:
 	}
 }
+
+// CaptureResult reports the capture outcome to the HTTP handler: Captured is true
+// only when the roll succeeded and the ship changed owner. On a gate rejection Err
+// is non-nil and Captured is false.
+type CaptureResult struct {
+	Err      error
+	Captured bool
+}
+
+// CaptureShipCommand attempts to seize a hostile ship with the up_capture module
+// (SP DoCapture, ЧТЗ doc-4 §3 Механика C). It is the payoff of the shield-strip
+// chain: only a target whose shield generator is gone (MaxShield 0 — class-less or
+// knocked off by TASK-100.3.9.1) can be captured. Ownership + undocked + up_capture
+// + a hostile ship target in range + no working shield + energy are all gated; then
+// a low-chance roll either re-owns the ship (changeShipOwner, .2) or damages/destroys
+// its hull. EnergyCost (up_capture.energy_usage, resolved by the HTTP handler) is
+// spent on either outcome.
+type CaptureShipCommand struct {
+	PlayerID   domain.PlayerID
+	ShipID     domain.ShipID
+	Target     domain.EntityRef
+	EnergyCost int
+	Reply      chan<- CaptureResult
+}
+
+func (c CaptureShipCommand) apply(w *Worker, s *sectorState) {
+	var res CaptureResult
+
+	ship, ok := s.ships[c.ShipID]
+	switch {
+	case !ok:
+		res.Err = ErrShipNotFound
+	case ship.PlayerID != c.PlayerID:
+		res.Err = ErrForbidden
+	case ship.Docked != nil:
+		res.Err = ErrShipDocked
+	case shipEquipmentLevel(ship, captureModuleType) < 1:
+		res.Err = ErrEquipmentRequired
+	case c.Target.Kind != domain.EntityKindShip:
+		res.Err = ErrInvalidAttackTarget
+	case domain.ShipID(c.Target.ID) == c.ShipID:
+		res.Err = ErrInvalidAttackTarget
+	}
+	if res.Err != nil {
+		replyCapture(c.Reply, res)
+		return
+	}
+
+	target, ok := s.ships[domain.ShipID(c.Target.ID)]
+	switch {
+	case !ok || target.HP <= 0:
+		res.Err = ErrInvalidAttackTarget
+	case w.shipsAreFriendly(ship, target):
+		// Damage-parity gate: capture any non-allied ship (SP DoCapture had no
+		// hostility gate at all). The weapon damage that strips the shield gates on
+		// !shipsAreFriendly (combat.go), so capture uses the same "not an ally"
+		// test — this keeps the ЧТЗ C-06 main case (capturing NPC ships, which share
+		// the __npc__ owner and are not friendly) working. A friendly (own clan /
+		// declared friend, incl. self via relations a==b → Friend) target is rejected.
+		res.Err = ErrInvalidAttackTarget
+	case ship.Pos.Sub(target.Pos).Length() > w.cfg.CaptureRange:
+		res.Err = ErrCaptureOutOfRange
+	case target.MaxShield > 0:
+		// A working shield generator blocks capture (SP DoCapture). MaxShield 0
+		// means either a class with no shield or an up_shield knocked off in combat
+		// (TASK-100.3.9.1 forces MaxShield 0 via ShieldGeneratorDestroyed).
+		res.Err = ErrCaptureShielded
+	case ship.Energy < c.EnergyCost:
+		res.Err = ErrNotEnoughEnergy
+	}
+	if res.Err != nil {
+		replyCapture(c.Reply, res)
+		return
+	}
+
+	// All gates passed — the attempt commits. Energy is spent on either outcome
+	// (FR-C3/C5), so debit it before the roll.
+	if c.EnergyCost > 0 {
+		ship.Energy -= c.EnergyCost
+		s.markDirty(c.ShipID)
+	}
+
+	// Capture roll (FR-C3): rng.Float64()*1000 > threshold. Kha'ak targets are
+	// harder (higher threshold). Read the race BEFORE changeShipOwner neutralises it.
+	capturedRace := target.Race
+	threshold := w.cfg.CaptureChance
+	if capturedRace == khaakRace {
+		threshold = w.cfg.KhaakCaptureChance
+	}
+	if w.rng.Float64()*1000 > threshold {
+		oldOwner := target.PlayerID
+		w.changeShipOwner(context.Background(), s, target, c.PlayerID)
+		if w.reputation != nil {
+			if err := w.reputation.OnShipCaptured(context.Background(), c.PlayerID, capturedRace); err != nil {
+				w.logger.Error("reputation: on capture",
+					"err", err, "capturer", int64(c.PlayerID), "ship", int64(target.ID))
+			}
+		}
+		w.publishShipCapture(context.Background(), s, c.PlayerID, target.ID, true, true)
+		w.publishShipCapture(context.Background(), s, oldOwner, target.ID, false, true)
+		res.Captured = true
+		replyCapture(c.Reply, res)
+		return
+	}
+
+	// Failed capture (FR-C5): hull damage maxHP/16 (SP maxHull>>4). A lethal blow
+	// destroys the target via the standard kill path (attributed to the captor).
+	hullDown := target.MaxHP / 16
+	if hullDown >= target.HP {
+		target.LastAttacker = c.PlayerID
+		w.killShip(context.Background(), s, target)
+	} else {
+		target.HP -= hullDown
+		s.markDirty(target.ID)
+		w.immediateSave(target)
+	}
+	w.publishShipCapture(context.Background(), s, c.PlayerID, target.ID, true, false)
+	replyCapture(c.Reply, res)
+}
+
+func replyCapture(reply chan<- CaptureResult, res CaptureResult) {
+	if reply == nil {
+		return
+	}
+	select {
+	case reply <- res:
+	default:
+	}
+}

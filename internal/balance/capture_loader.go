@@ -22,6 +22,9 @@ type yamlCaptureFile struct {
 		HackRobFraction            float64 `yaml:"hack_rob_fraction"`
 		HackDamageFraction         float64 `yaml:"hack_damage_fraction"`
 		HackReputationPenalty      float64 `yaml:"hack_reputation_penalty"`
+		CaptureChance              float64 `yaml:"capture_chance"`
+		KhaakCaptureChance         float64 `yaml:"khaak_capture_chance"`
+		CaptureRange               float64 `yaml:"capture_range"`
 	} `yaml:"capture"`
 }
 
@@ -46,5 +49,8 @@ func LoadCaptureConfigFromFile(path string) (CaptureConfig, error) {
 		HackRobFraction:            f.Capture.HackRobFraction,
 		HackDamageFraction:         f.Capture.HackDamageFraction,
 		HackReputationPenalty:      f.Capture.HackReputationPenalty,
+		CaptureChance:              f.Capture.CaptureChance,
+		KhaakCaptureChance:         f.Capture.KhaakCaptureChance,
+		CaptureRange:               f.Capture.CaptureRange,
 	}.withDefaults(), nil
 }

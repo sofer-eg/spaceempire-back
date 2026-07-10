@@ -13,13 +13,25 @@ import (
 	"spaceempire/back/internal/sector"
 )
 
-// fakeReputationAwarder records the worker's OnShipKilled calls.
+// fakeReputationAwarder records the worker's OnShipKilled / OnShipCaptured calls.
 type fakeReputationAwarder struct {
-	killers []domain.PlayerID
+	killers  []domain.PlayerID
+	captures []capturedRep
+}
+
+// capturedRep is one recorded OnShipCaptured call (TASK-100.3.9.4).
+type capturedRep struct {
+	capturer domain.PlayerID
+	race     domain.RaceID
 }
 
 func (f *fakeReputationAwarder) OnShipKilled(_ context.Context, killer domain.PlayerID) error {
 	f.killers = append(f.killers, killer)
+	return nil
+}
+
+func (f *fakeReputationAwarder) OnShipCaptured(_ context.Context, capturer domain.PlayerID, race domain.RaceID) error {
+	f.captures = append(f.captures, capturedRep{capturer, race})
 	return nil
 }
 

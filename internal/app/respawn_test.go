@@ -134,6 +134,11 @@ func (f *fakeEjector) SetPassengerHost(_ context.Context, p domain.PlayerID, h d
 	return nil
 }
 
+func (f *fakeEjector) ActiveShip(_ context.Context, p domain.PlayerID) (domain.ShipID, bool, error) {
+	id, ok := f.active[p]
+	return id, ok, nil
+}
+
 func TestUnit_Respawn_HostDeath_EjectsPassengersIntoSuits(t *testing.T) {
 	t.Parallel()
 	sp := &fakeSuitSpawner{}
@@ -155,4 +160,65 @@ func TestUnit_Respawn_HostDeath_EjectsPassengersIntoSuits(t *testing.T) {
 	assert.Empty(t, sp.respawns)
 	assert.Equal(t, domain.ShipID(0), ej.passenger[8], "passenger link cleared")
 	assert.Contains(t, b.topics, sector.PlayerHandoffTopic(8), "rider WS moved to the death sector")
+}
+
+func shipCaptured(oldOwner domain.PlayerID, passengers ...domain.PlayerID) sector.ShipCapturedEvent {
+	return sector.ShipCapturedEvent{
+		ShipID: 42, SectorID: domain.SectorID(5), Pos: domain.Vec2{X: 10, Y: 20},
+		OldOwner: oldOwner, Passengers: passengers,
+	}
+}
+
+// TASK-100.3.9.2 / AC-6: a capture ejects the piloting old owner AND every
+// passenger into spacesuits at the ship's spot, repointing their active ship.
+func TestUnit_Capture_EjectsPilotAndPassengers(t *testing.T) {
+	t.Parallel()
+	sp := &fakeSuitSpawner{}
+	b := &fakeBus{}
+	ej := newFakeEjector()
+	ej.active[7] = 42 // old owner is actively flying the captured ship (id 42)
+	r := spacesuitRespawner{spawner: sp, bus: b, players: ej, npc: 99, home: domain.SectorID(1), logger: slog.New(slog.DiscardHandler)}
+
+	r.OnShipCaptured(context.Background(), shipCaptured(7, 100, 101))
+
+	players := map[domain.PlayerID]bool{}
+	for _, c := range sp.suits {
+		players[c.player] = true
+	}
+	assert.True(t, players[7], "old pilot ejected")
+	assert.True(t, players[100] && players[101], "passengers ejected")
+	assert.Len(t, sp.suits, 3)
+	assert.Empty(t, sp.respawns, "capture never respawns a ship at home")
+	assert.Equal(t, domain.ShipID(0), ej.active[7], "ejected pilot repointed to the new suit (id 0 from fake spawner)")
+}
+
+// The NPC/unowned old pilot is not a player — no eject for them, but riders
+// still get ejected.
+func TestUnit_Capture_SkipsNPCAndZeroPilot_StillEjectsPassengers(t *testing.T) {
+	t.Parallel()
+	for _, owner := range []domain.PlayerID{99, 0} {
+		sp := &fakeSuitSpawner{}
+		ej := newFakeEjector()
+		r := spacesuitRespawner{spawner: sp, bus: &fakeBus{}, players: ej, npc: 99, home: domain.SectorID(1), logger: slog.New(slog.DiscardHandler)}
+
+		r.OnShipCaptured(context.Background(), shipCaptured(owner, 100))
+
+		require.Len(t, sp.suits, 1, "only the passenger is ejected, not the NPC/zero pilot")
+		assert.Equal(t, domain.PlayerID(100), sp.suits[0].player)
+	}
+}
+
+// An old owner who already left this ship (active ship points elsewhere) is not
+// yanked out of whatever they are flying now.
+func TestUnit_Capture_SkipsAbandonedPilot(t *testing.T) {
+	t.Parallel()
+	sp := &fakeSuitSpawner{}
+	ej := newFakeEjector()
+	ej.active[7] = 77 // flying a different ship, not the captured 42
+	r := spacesuitRespawner{spawner: sp, bus: &fakeBus{}, players: ej, npc: 99, home: domain.SectorID(1), logger: slog.New(slog.DiscardHandler)}
+
+	r.OnShipCaptured(context.Background(), shipCaptured(7))
+
+	assert.Empty(t, sp.suits, "abandoned pilot not ejected from their current ship")
+	assert.Equal(t, domain.ShipID(77), ej.active[7], "active ship untouched")
 }

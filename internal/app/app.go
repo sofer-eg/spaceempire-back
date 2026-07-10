@@ -628,6 +628,20 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("subscribe spacesuit respawn: %w", err)
 	}
 
+	// 10.3.9.2: capturing a live ship ejects its old crew into spacesuits (the
+	// ship survives re-owned, so this is a separate topic from entity_killed to
+	// avoid the kill side-effects). Reuses the same respawner eject path.
+	if err := jumpBus.Subscribe(ctx, sector.ShipCapturedTopic, func(payload []byte) {
+		var ev sector.ShipCapturedEvent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			logger.Error("capture: decode ship_captured", "err", err)
+			return
+		}
+		respawner.OnShipCaptured(ctx, ev)
+	}); err != nil {
+		return fmt.Errorf("subscribe capture eject: %w", err)
+	}
+
 	// Quests (8.12): tutorial/mission engine. Lazy-starts the tutorial on the
 	// first GET /api/quests/active; a background poller advances steps from
 	// player state and grants rewards (reward+advance atomic in one tx).

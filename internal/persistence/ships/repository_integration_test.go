@@ -190,6 +190,35 @@ func TestIntegration_Ships_Save_UpdatesRow(t *testing.T) {
 	assert.Equal(t, 99.0, loaded[0].Target.X)
 }
 
+// TASK-100.3.9.2: capturing a live ship neutralises its race (Race = 0). Save
+// must persist race, or cold-start would revert the captured ship to its old
+// faction and break relations/hostility (the .1 persistence lesson).
+func TestIntegration_Ships_Save_PersistsRace(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	pid := seedPlayer(t, pool)
+	repo := ships.New(pool)
+	ctx := context.Background()
+
+	id, err := repo.Create(ctx, domain.Ship{
+		PlayerID: pid, Race: 5, SectorID: domain.SectorID(41), Pos: domain.Vec2{X: 1, Y: 1},
+		HP: 100, MaxHP: 100,
+	})
+	require.NoError(t, err)
+
+	// Capture: neutralise the race via the dynamic Save path.
+	require.NoError(t, repo.Save(ctx, domain.Ship{
+		ID: id, PlayerID: pid, SectorID: domain.SectorID(41), Race: 0,
+		Pos: domain.Vec2{X: 1, Y: 1}, HP: 100,
+	}))
+
+	loaded, err := repo.LoadAll(ctx, domain.SectorID(41))
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, domain.RaceID(0), loaded[0].Race, "Save persists race → cold-start keeps the captured ship neutral")
+}
+
 func TestIntegration_Ships_Save_MissingReturnsErrShipNotFound(t *testing.T) {
 	t.Parallel()
 

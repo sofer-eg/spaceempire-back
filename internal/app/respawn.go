@@ -23,10 +23,13 @@ type handoffPublisher interface {
 }
 
 // passengerEjector clears/repoints a player's active+passenger pointers when the
-// ship they ride is destroyed (phase 10.23). *players.Repository satisfies it.
+// ship they ride is destroyed (phase 10.23) or captured (TASK-100.3.9.2).
+// ActiveShip is read on capture to eject only the pilot still flying the taken
+// ship. *players.Repository satisfies it.
 type passengerEjector interface {
 	SetActiveShip(ctx context.Context, player domain.PlayerID, shipID domain.ShipID) error
 	SetPassengerHost(ctx context.Context, player domain.PlayerID, hostID domain.ShipID) error
+	ActiveShip(ctx context.Context, player domain.PlayerID) (domain.ShipID, bool, error)
 }
 
 // spacesuitRespawner reacts to a player ship death (phase 10.1): a normal ship
@@ -78,6 +81,33 @@ func (r spacesuitRespawner) OnKill(ctx context.Context, ev sector.EntityKilledEv
 	}
 	if err := r.bus.Publish(ctx, sector.PlayerHandoffTopic(ev.VictimPlayer), payload); err != nil {
 		r.logger.ErrorContext(ctx, "spacesuit: publish handoff", "err", err)
+	}
+}
+
+// OnShipCaptured ejects the crew of a captured (not destroyed) ship into
+// spacesuits at the ship's spot (TASK-100.3.9.2, FR-B2 / AC-6), reusing the
+// death-eject path but without any kill side-effect. Every passenger is ejected;
+// the old owner is ejected only when they are a real player (not the NPC / 0)
+// AND still actually flying this exact ship (active_ship_id == captured ship) —
+// an owner who already abandoned it is left flying whatever they are on now.
+func (r spacesuitRespawner) OnShipCaptured(ctx context.Context, ev sector.ShipCapturedEvent) {
+	for _, pid := range ev.Passengers {
+		if pid == 0 {
+			continue
+		}
+		r.ejectPassenger(ctx, pid, ev.SectorID, ev.Pos)
+	}
+
+	if ev.OldOwner == 0 || ev.OldOwner == r.npc {
+		return
+	}
+	active, has, err := r.players.ActiveShip(ctx, ev.OldOwner)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "capture: active ship", "err", err, "player", int64(ev.OldOwner))
+		return
+	}
+	if has && active == ev.ShipID {
+		r.ejectPassenger(ctx, ev.OldOwner, ev.SectorID, ev.Pos)
 	}
 }
 

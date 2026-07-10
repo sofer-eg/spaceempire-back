@@ -127,6 +127,34 @@ func TestIntegration_CargoRepository_AddListUsedSpace(t *testing.T) {
 	assert.InDelta(t, 8*1+4*2, used, 1e-9)
 }
 
+// TASK-100.3.9.2 (FR-B3): a captured ship's hold follows it to the new owner.
+// Ship holds always sit under goods_owner_id 0 keyed by the ship's EntityRef,
+// and capture does not change the ship id — so the new owner (a different viewer)
+// sees the exact same cargo, with no transfer step. This documents why
+// changeShipOwner does no cargo work.
+func TestIntegration_CargoRepository_ShipHoldVisibleToNewOwner(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	repo := cargo.New(pool)
+	ctx := context.Background()
+	shipID := seedShip(t, pool, 1)
+	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: shipID}
+
+	require.NoError(t, repo.Add(ctx, owner, 1, 7, 0)) // ship hold: goods_owner_id 0
+
+	const oldOwner, newOwner = domain.PlayerID(3), domain.PlayerID(9)
+	before, err := repo.ListByOwner(ctx, owner, oldOwner)
+	require.NoError(t, err)
+	after, err := repo.ListByOwner(ctx, owner, newOwner)
+	require.NoError(t, err)
+
+	require.Len(t, after, 1, "the new owner sees the captured ship's hold unchanged")
+	assert.Equal(t, domain.GoodsTypeID(1), after[0].GoodsType)
+	assert.EqualValues(t, 7, after[0].Quantity)
+	assert.Equal(t, before, after, "hold is identical for old and new owner — it follows the ship")
+}
+
 func TestIntegration_CargoRepository_Subtract_PartialAndDelete(t *testing.T) {
 	t.Parallel()
 

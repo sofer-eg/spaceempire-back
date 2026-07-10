@@ -387,6 +387,7 @@ const saveSQL = `
 UPDATE ships
 SET
     player_id              = $2,
+    race                   = $25,
     sector_id              = $3,
     pos_x                  = $4,
     pos_y                  = $5,
@@ -422,6 +423,10 @@ WHERE id = $1
 // ShieldRecharge / MaxEnergy / EnergyRecharge / Laser* are class
 // characteristics fixed at Create time and NOT updated here.
 //
+// race IS written (TASK-100.3.9.2): a live ship's race is immutable for normal
+// ships (set at Create), so writing s.Race is a no-op for them, but capturing a
+// ship neutralises it (Race = 0) and that must survive cold-start.
+//
 // AttackTarget is written: a player issuing /api/cmd/attack or
 // /api/cmd/cease-fire is a critical event — losing the new value on a
 // crash would surprise the player ("why did my ship stop shooting?").
@@ -443,6 +448,7 @@ func (r *Repository) Save(ctx context.Context, s domain.Ship) error {
 		dockedKind, dockedID,
 		s.Passengers,
 		s.IsOpen,
+		int64(s.Race),
 	)
 	if err != nil {
 		return fmt.Errorf("update ship: %w", err)

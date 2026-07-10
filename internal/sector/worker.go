@@ -25,6 +25,11 @@ var ErrInboxFull = errors.New("sector: inbox full")
 // Passing a nil ShipRepo disables persistence (handy for pure unit tests).
 type ShipRepo interface {
 	Save(ctx context.Context, ship domain.Ship) error
+	// SaveEquipment persists a ship's Equipment list, the stat columns it folds
+	// into (max_shield/shield_recharge/…) and the shield_generator_destroyed
+	// marker (TASK-100.3.9.1). Save/BatchUpdate write only dynamic fields, so a
+	// combat knockoff must go through this path or it is lost at cold-start.
+	SaveEquipment(ctx context.Context, ship domain.Ship) error
 	BatchUpdate(ctx context.Context, ships []domain.Ship) error
 	Delete(ctx context.Context, id domain.ShipID) error
 }
@@ -244,6 +249,12 @@ type Worker struct {
 	// applies the delta via players.AddReputation and skips NPC/zero killers,
 	// mirroring the PoliceScanner split.
 	reputation ReputationAwarder
+
+	// refit recomputes a ship's folded stat fields from its Equipment after a
+	// module is knocked off in combat (TASK-100.3.9.1). Nil leaves the knocked
+	// ship's stats untouched (the shield-generator collapse is handled inline,
+	// independent of this). Wired via WithRefit over the balance catalog.
+	refit Refitter
 
 	// Handoff dependencies — both nil disables JumpCommand handling and
 	// intake subscriptions. Wired in via WithHandoff option.
@@ -641,6 +652,21 @@ func (w *Worker) immediateSave(ship *domain.Ship) {
 	}
 }
 
+// immediateSaveEquipment persists a ship's Equipment + folded stat columns +
+// the shield_generator_destroyed marker through the equipment path (unlike
+// immediateSave, which writes only dynamic fields). Used after a combat
+// knockoff (TASK-100.3.9.1) so the module loss and shield collapse survive
+// cold-start. Same best-effort logging convention as immediateSave.
+func (w *Worker) immediateSaveEquipment(ship *domain.Ship) {
+	if w.repo == nil {
+		return
+	}
+	if err := w.repo.SaveEquipment(context.Background(), *ship); err != nil {
+		w.logger.Error("immediate save-equipment failed",
+			"err", err, "ship", int64(ship.ID), "sector", int64(ship.SectorID))
+	}
+}
+
 // flushAll persists the full live state of every owned ship on graceful
 // shutdown. Phase 3.19 (approach B) stopped writing position/velocity/
 // direction/target in the periodic BatchUpdate, so this is the only path
@@ -814,7 +840,7 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	chargeEnergies(s)
 	w.fireLasers(ctx, s)
 	w.tickPoliceScan(ctx, s)
-	w.tickTowers(s)
+	w.tickTowers(ctx, s)
 	w.tickMissiles(ctx, s, dt, started)
 	w.tickDrones(ctx, s, dt, started)
 	w.tickTorpedos(ctx, s, dt, started)

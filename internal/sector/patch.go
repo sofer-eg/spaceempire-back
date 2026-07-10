@@ -162,6 +162,14 @@ func shipEqual(a, b domain.Ship) bool {
 	if !asteroidIDPtrEqual(a.MiningTarget, b.MiningTarget) {
 		return false
 	}
+	// Equipment travels in the Ship DTO (TASK-100.3.2); a knockoff
+	// (TASK-100.3.9.1) shrinks it, so compare it here or the WS delta would drop
+	// the module loss (NFR-003). A knockoff also changes HP/Shield, so this is
+	// belt-and-suspenders — but an equipment-only change (install/uninstall) now
+	// emits a patch too.
+	if !equipmentEqual(a.Equipment, b.Equipment) {
+		return false
+	}
 	switch {
 	case a.Target == nil && b.Target == nil:
 		return true
@@ -170,6 +178,20 @@ func shipEqual(a, b domain.Ship) bool {
 	default:
 		return *a.Target == *b.Target
 	}
+}
+
+// equipmentEqual reports whether two installed-equipment lists are identical in
+// order and content. Used so a knockoff / install / uninstall emits a WS patch.
+func equipmentEqual(a, b []domain.InstalledEquipment) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // entityRefPtrEqual reports value equality of two *EntityRef pointers,
@@ -217,6 +239,9 @@ func shipsMapSubset(src map[domain.ShipID]*domain.Ship, ids map[domain.ShipID]st
 		cp.AttackTarget = cloneEntityRef(s.AttackTarget)
 		cp.CurrentTargetRef = cloneEntityRef(s.CurrentTargetRef)
 		cp.MiningTarget = cloneAsteroidID(s.MiningTarget)
+		// Deep-copy Equipment so this snapshot (retained as the next-tick AOI
+		// baseline) never aliases the live slice a knockoff rebuilds (NFR-003).
+		cp.Equipment = cloneEquipment(s.Equipment)
 		out[id] = cp
 	}
 	return out

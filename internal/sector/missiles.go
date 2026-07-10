@@ -97,6 +97,10 @@ func (w *Worker) applyMissileHit(ctx context.Context, s *sectorState, id domain.
 		imp.Killed = res.Killed
 		s.addMissileImpact(imp)
 		s.markDirty(ship.ID)
+		if !res.Killed {
+			// TASK-100.3.9.1: knockoff on a surviving shield-down target.
+			w.knockModules(ctx, s, ship)
+		}
 		return
 	}
 	// Destructible static: route point damage through Damageable (mirror of

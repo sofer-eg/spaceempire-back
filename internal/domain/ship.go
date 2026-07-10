@@ -198,6 +198,15 @@ type Ship struct {
 	// gate jump and to eject passengers on death. Carried across handoff in the
 	// JumpEvent; rebuilt at cold-start from the players table. Not a DB column.
 	PassengerPlayers []PlayerID
+	// ShieldGeneratorDestroyed marks a ship whose up_shield module was knocked
+	// off in combat (TASK-100.3.9.1, SP DestroyModule). It is a durable invariant,
+	// not a one-shot: once set, every fit recompute (combat refit after a later,
+	// unrelated knockoff) still forces MaxShield/ShieldRecharge/Shield to 0, so a
+	// lost shield generator stays lost and the ship stays open to capture (.4). A
+	// deliberate shipyard re-outfit clears it (the fit is rebuilt from scratch).
+	// Server-internal — NOT exposed in the Ship DTO (the SPA gates on shield==0);
+	// persisted as ships.shield_generator_destroyed and read at cold-start.
+	ShieldGeneratorDestroyed bool
 }
 
 // ExternalDock is the state of an in-progress up_exdocking external-docking

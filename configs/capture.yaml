@@ -1,0 +1,22 @@
+# Capture / hack / module-knockoff tuning (ЧТЗ doc-4 §5.1).
+#
+# Ported from SP DestroyModule (starwind/sql/db.sql:10012) with the faithful
+# defaults. Magnitudes are a balance decision for spaceempire (not hardcoded in
+# code, NFR-004); the profile — knockoff only once the shield is down, growing
+# to zero shield; internals only once the hull is pierced — is preserved.
+#
+# TASK-100.3.9.1 owns the four knock_* fields below. The capture (.4) and hack
+# (.3) sub-tasks extend this file with capture_chance / khaak_capture_chance /
+# capture_range / hack_* fields.
+capture:
+  # Shield fraction (shield/max_shield) at/above which no module is knocked.
+  knock_critical_shield_charge: 0.2
+  # Hull fraction (hp/max_hp) at/below which internal modules (incl. up_shield)
+  # become eligible; above it the internal knock chance is 0.
+  knock_critical_hull_integrity: 0.7
+  # Base chance an external (Position 2) module is knocked at zero shield;
+  # scales linearly from 0 (shield at the critical charge) to this value.
+  knock_external_base: 0.2
+  # Base chance an internal (Position 1) module is knocked at zero hull; scales
+  # from 0 (hull at the critical integrity) to this value.
+  knock_internal_base: 0.1

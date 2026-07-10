@@ -52,7 +52,7 @@ SELECT id, player_id, race, sector_id, pos_x, pos_y, vel_x, vel_y,
        attack_kind, attack_id,
        docked_kind, docked_id,
        passengers, is_spacesuit, name, ship_class_id, equipment, radar_range,
-       is_open, cargobay
+       is_open, cargobay, shield_generator_destroyed
 FROM ships
 WHERE sector_id = $1
 ORDER BY id
@@ -97,6 +97,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			radarRange                        float64
 			isOpen                            bool
 			cargoBay                          float64
+			shieldGenDestroyed                bool
 		)
 		if err := rows.Scan(
 			&id, &playerID, &raceVal, &sectorIDRow,
@@ -111,7 +112,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			&attackKind, &attackID,
 			&dockedKind, &dockedID,
 			&passengers, &isSpacesuit, &name, &shipClassID, &equipmentRaw, &radarRange,
-			&isOpen, &cargoBay,
+			&isOpen, &cargoBay, &shieldGenDestroyed,
 		); err != nil {
 			return nil, fmt.Errorf("scan ship: %w", err)
 		}
@@ -120,36 +121,37 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			return nil, fmt.Errorf("decode ship equipment (id=%d): %w", id, err)
 		}
 		s := domain.Ship{
-			ID:              domain.ShipID(id),
-			PlayerID:        domain.PlayerID(playerID),
-			Race:            domain.RaceID(raceVal),
-			Name:            name,
-			ShipClassID:     domain.ShipClassID(shipClassID),
-			SectorID:        domain.SectorID(sectorIDRow),
-			Pos:             domain.Vec2{X: posX, Y: posY},
-			Vel:             domain.Vec2{X: velX, Y: velY},
-			MaxSpeed:        maxSpeed,
-			Acceleration:    accel,
-			TurnRate:        turnRate,
-			Direction:       domain.Vec2{X: dirX, Y: dirY},
-			HP:              hp,
-			MaxHP:           maxHP,
-			Shield:          shield,
-			MaxShield:       maxShield,
-			ShieldRecharge:  sch,
-			Energy:          energy,
-			MaxEnergy:       maxEnergy,
-			EnergyRecharge:  energyRch,
-			EnergyDelta:     energyDelta,
-			LaserDamage:     laserDmg,
-			LaserRange:      laserRange,
-			LaserEnergyCost: laserCost,
-			Passengers:      passengers,
-			IsSpacesuit:     isSpacesuit,
-			Equipment:       equipment,
-			RadarRange:      radarRange,
-			CargoBay:        cargoBay,
-			IsOpen:          isOpen,
+			ID:                       domain.ShipID(id),
+			PlayerID:                 domain.PlayerID(playerID),
+			Race:                     domain.RaceID(raceVal),
+			Name:                     name,
+			ShipClassID:              domain.ShipClassID(shipClassID),
+			SectorID:                 domain.SectorID(sectorIDRow),
+			Pos:                      domain.Vec2{X: posX, Y: posY},
+			Vel:                      domain.Vec2{X: velX, Y: velY},
+			MaxSpeed:                 maxSpeed,
+			Acceleration:             accel,
+			TurnRate:                 turnRate,
+			Direction:                domain.Vec2{X: dirX, Y: dirY},
+			HP:                       hp,
+			MaxHP:                    maxHP,
+			Shield:                   shield,
+			MaxShield:                maxShield,
+			ShieldRecharge:           sch,
+			Energy:                   energy,
+			MaxEnergy:                maxEnergy,
+			EnergyRecharge:           energyRch,
+			EnergyDelta:              energyDelta,
+			LaserDamage:              laserDmg,
+			LaserRange:               laserRange,
+			LaserEnergyCost:          laserCost,
+			Passengers:               passengers,
+			IsSpacesuit:              isSpacesuit,
+			Equipment:                equipment,
+			RadarRange:               radarRange,
+			CargoBay:                 cargoBay,
+			IsOpen:                   isOpen,
+			ShieldGeneratorDestroyed: shieldGenDestroyed,
 		}
 		if attackKind != nil && attackID != nil {
 			s.AttackTarget = &domain.EntityRef{
@@ -302,6 +304,7 @@ SET
     energy_delta    = $11,
     turn_rate       = $12,
     cargobay        = $13,
+    shield_generator_destroyed = $14,
     shield          = LEAST(shield, $5),
     energy          = LEAST(energy, $7),
     updated_at      = NOW()
@@ -313,7 +316,8 @@ WHERE id = $1
 // max_shield/shield_recharge, max_energy/energy_recharge, laser_damage,
 // radar_range (up_scanner), energy_delta (per-tick equipment energy, 10.3.1),
 // turn_rate (up_rudder manoeuvrability, 10.3.15), cargobay (class hold capacity
-// 10.3.17, widened by up_cargobay 10.3.16).
+// 10.3.17, widened by up_cargobay 10.3.16), and shield_generator_destroyed (the
+// combat knockoff marker, TASK-100.3.9.1).
 // Current shield/energy are clamped down to the (possibly lowered) maxima so an
 // uninstall cannot leave a pool above its cap. Caller passes a domain.Ship with
 // those fields already recomputed (base class stats + equipment effects).
@@ -330,6 +334,7 @@ func (r *Repository) SaveEquipment(ctx context.Context, s domain.Ship) error {
 		s.MaxEnergy, s.EnergyRecharge,
 		s.LaserDamage, s.RadarRange,
 		s.EnergyDelta, s.TurnRate, s.CargoBay,
+		s.ShieldGeneratorDestroyed,
 	)
 	if err != nil {
 		return fmt.Errorf("update ship equipment: %w", err)

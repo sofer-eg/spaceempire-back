@@ -300,6 +300,11 @@ func (c UpdateShipEquipmentCommand) apply(_ *Worker, s *sectorState) {
 	default:
 		ship.Equipment = cloneEquipment(c.Equipment)
 		ship.IsHidden = cloakEngagedFromEquipment(ship.Equipment) // phase 10.20 L4
+		// A deliberate shipyard re-outfit rebuilds the fit from scratch, so it
+		// clears the combat "shield generator destroyed" marker (TASK-100.3.9.1):
+		// the shield is governed by the new equipment again, keeping RAM in step
+		// with the DB (SaveEquipment writes the same false via outfitShip).
+		ship.ShieldGeneratorDestroyed = false
 		ship.MaxSpeed = c.MaxSpeed
 		ship.Acceleration = c.Acceleration
 		ship.MaxShield = c.MaxShield

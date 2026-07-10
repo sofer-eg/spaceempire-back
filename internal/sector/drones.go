@@ -132,6 +132,10 @@ func (w *Worker) tickDrones(ctx context.Context, s *sectorState, dt float64, now
 				Killed:      res.Killed,
 			})
 			s.markDirty(targetShip.ID)
+			if !res.Killed {
+				// TASK-100.3.9.1: knockoff on a surviving shield-down target.
+				w.knockModules(ctx, s, targetShip)
+			}
 		}
 	}
 }

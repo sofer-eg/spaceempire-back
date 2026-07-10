@@ -1,6 +1,10 @@
 package sector
 
-import "time"
+import (
+	"time"
+
+	"spaceempire/back/internal/combat"
+)
 
 // Config tunes a single Worker. PoolConfig embeds this so every worker in a
 // Pool gets the same per-tick parameters.
@@ -78,6 +82,12 @@ type Config struct {
 	// process runs before it attaches (phase 10.3.23, port of the SP
 	// dock_suspension_time = 1). Default 1.
 	ExternalDockTurns int
+	// Knock tunes the module-knockoff mechanic (TASK-100.3.9.1, port of SP
+	// DestroyModule): a hit on a ship whose shield is down can strip an installed
+	// module off for good. The scalars come from configs/capture.yaml; Positions
+	// is the Type→slot lookup the app fills from the equipment catalog. Zero
+	// scalars fall back to combat.DefaultKnockConfig in withDefaults.
+	Knock combat.KnockConfig
 }
 
 func (c Config) withDefaults() Config {
@@ -128,6 +138,13 @@ func (c Config) withDefaults() Config {
 	}
 	if c.ExternalDockTurns <= 0 {
 		c.ExternalDockTurns = 1
+	}
+	if c.Knock.CriticalShieldCharge <= 0 {
+		d := combat.DefaultKnockConfig()
+		c.Knock.CriticalShieldCharge = d.CriticalShieldCharge
+		c.Knock.CriticalHullIntegrity = d.CriticalHullIntegrity
+		c.Knock.ExternalBase = d.ExternalBase
+		c.Knock.InternalBase = d.InternalBase
 	}
 	return c
 }

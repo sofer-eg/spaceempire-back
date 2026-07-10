@@ -108,6 +108,10 @@ func (w *Worker) fireLasers(ctx context.Context, s *sectorState) {
 			attacker.AttackTarget = nil
 			// Already dirty above; nothing else to do here. The 4.6
 			// kill handler will remove the corpse from the sector.
+		} else {
+			// TASK-100.3.9.1: a hit that left the target alive can strip a
+			// module off if its shield is down (SP DestroyModule).
+			w.knockModules(ctx, s, target)
 		}
 	}
 }

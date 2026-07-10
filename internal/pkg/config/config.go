@@ -101,6 +101,10 @@ type BalanceConfig struct {
 	// it supplies the module set a freshly spawned / purchased ship is fitted
 	// with (TASK-100.3.25).
 	ShipLoadoutPath string `default:"configs/ship_base_loadout.yaml"`
+	// CapturePath is the capture / hack / module-knockoff tuning YAML (ЧТЗ
+	// doc-4 §5.1, TASK-100.3.9.1). Loaded at startup; the knock thresholds feed
+	// the sector worker's DestroyModule roll.
+	CapturePath string `default:"configs/capture.yaml"`
 }
 
 type AuthConfig struct {

@@ -21,6 +21,7 @@ import (
 	"spaceempire/back/internal/balance"
 	"spaceempire/back/internal/bus"
 	"spaceempire/back/internal/cargo"
+	"spaceempire/back/internal/combat"
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/economy/auction"
 	"spaceempire/back/internal/economy/insurance"
@@ -118,6 +119,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("load ship loadouts: %w", err)
 	}
 	logger.Info("ship loadouts loaded", "path", cfg.Balance.ShipLoadoutPath, "loadouts", shipLoadouts.LoadoutCount())
+
+	captureCfg, err := balance.LoadCaptureConfigFromFile(cfg.Balance.CapturePath)
+	if err != nil {
+		return fmt.Errorf("load capture config: %w", err)
+	}
+	logger.Info("capture config loaded", "path", cfg.Balance.CapturePath)
 
 	pool, err := database.NewPool(ctx, database.Config{
 		DSN:         cfg.Postgres.DSN,
@@ -360,6 +367,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				// 10.3.18: "action" energy a cargo teleport spends, from the
 				// up_transporter catalog row.
 				TransporterEnergyCost: equipmentEnergyUsage(equipment, "up_transporter"),
+				// 10.3.9.1: module-knockoff (SP DestroyModule) thresholds from
+				// capture.yaml, plus the Type→slot lookup the roll classifies with
+				// (built once from the equipment catalog, no per-tick lookup).
+				Knock: combat.KnockConfig{
+					CriticalShieldCharge:  captureCfg.KnockCriticalShieldCharge,
+					CriticalHullIntegrity: captureCfg.KnockCriticalHullIntegrity,
+					ExternalBase:          captureCfg.KnockExternalBase,
+					InternalBase:          captureCfg.KnockInternalBase,
+					Positions:             equipmentPositions(equipment),
+				},
 			},
 		},
 		sectorIDs,
@@ -427,6 +444,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		// killer's war_rate (the rank gate in 10.3.4 reads it). NPC kills are
 		// skipped inside the awarder.
 		sector.WithReputation(reputationAwarder{players: playersRepoPersistence, npc: npcPlayerID}),
+		// 10.3.9.1: recompute a ship's fit after a module is knocked off in
+		// combat (SP DestroyModule), so it loses that module's stat boost.
+		sector.WithRefit(equipmentRefitter{classes: shipClasses, equipment: equipment, cfg: spawnCfg}),
 	)
 
 	// spawnCfg was materialised above (with defaults applied) so the player

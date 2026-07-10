@@ -696,3 +696,21 @@ func equipmentEnergyUsage(cat *balance.Equipments, typ string) int {
 	}
 	return 0
 }
+
+// equipmentPositions maps every module Type to its slot (1 inner / 2 outer),
+// built once from the catalog so the combat module-knockoff roll
+// (TASK-100.3.9.1) can classify a ship's Equipment without a per-tick lookup.
+// Position is uniform across a module's per-class price tiers, so the first
+// match wins.
+func equipmentPositions(cat *balance.Equipments) map[string]int {
+	if cat == nil {
+		return nil
+	}
+	out := make(map[string]int)
+	for _, e := range cat.AllEquipment() {
+		if _, seen := out[e.Type]; !seen {
+			out[e.Type] = e.Position
+		}
+	}
+	return out
+}

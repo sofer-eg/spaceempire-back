@@ -512,6 +512,50 @@ func TestIntegration_Ships_Equipment_RoundTrips(t *testing.T) {
 	}
 }
 
+// TASK-100.3.9.1: a combat knockoff of up_shield persists through the equipment
+// path — LoadAll must bring the ship back WITHOUT up_shield, with max_shield 0
+// and the shield_generator_destroyed marker set, so the collapse survives a
+// cold-start (CRITICAL-1 regression).
+func TestIntegration_Ships_SaveEquipment_ShieldKnockoffRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	pid := seedPlayer(t, pool)
+	repo := ships.New(pool)
+	ctx := context.Background()
+
+	id, err := repo.Create(ctx, domain.Ship{
+		PlayerID: pid, SectorID: domain.SectorID(31), Pos: domain.Vec2{X: 1, Y: 2},
+		HP: 50, MaxHP: 100, Shield: 900, MaxShield: 1150, ShieldRecharge: 120,
+		Equipment: []domain.InstalledEquipment{
+			{EquipmentID: 42, Type: "up_launcher", Level: 1},
+			{EquipmentID: 60, Type: "up_shield", Level: 1},
+		},
+	})
+	require.NoError(t, err)
+
+	// Fresh ships default to a live generator.
+	loaded, err := repo.LoadAll(ctx, domain.SectorID(31))
+	require.NoError(t, err)
+	require.False(t, loaded[0].ShieldGeneratorDestroyed, "fresh ship: generator intact")
+
+	// Knockoff: up_shield gone, shield collapsed, marker set.
+	require.NoError(t, repo.SaveEquipment(ctx, domain.Ship{
+		ID:        id,
+		Equipment: []domain.InstalledEquipment{{EquipmentID: 42, Type: "up_launcher", Level: 1}},
+		MaxShield: 0, ShieldRecharge: 0, ShieldGeneratorDestroyed: true,
+	}))
+
+	loaded, err = repo.LoadAll(ctx, domain.SectorID(31))
+	require.NoError(t, err)
+	got := loaded[0]
+	require.Len(t, got.Equipment, 1, "up_shield removed on cold-start")
+	assert.Equal(t, "up_launcher", got.Equipment[0].Type)
+	assert.Equal(t, 0, got.MaxShield, "max_shield 0 on cold-start")
+	assert.Equal(t, 0, got.Shield, "shield clamped to 0 by LEAST(shield, max_shield)")
+	assert.True(t, got.ShieldGeneratorDestroyed, "marker persisted")
+}
+
 func TestIntegration_Ships_SaveEquipment_MissingReturnsErrShipNotFound(t *testing.T) {
 	t.Parallel()
 

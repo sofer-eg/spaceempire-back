@@ -95,6 +95,11 @@ func (w *Worker) tickTorpedos(ctx context.Context, s *sectorState, dt float64, n
 			for _, ref := range combat.ApplyDamageInRadius(s.ships, s.destructibles, t.Pos, t.SplashRadius, t.Damage, t.PlayerID) {
 				if ref.Kind == domain.EntityKindShip {
 					s.markDirty(domain.ShipID(ref.ID))
+					// TASK-100.3.9.1: knockoff on each surviving shield-down ship
+					// caught in the blast (sweepKilledShips reaps HP<=0 next).
+					if hit := s.ships[domain.ShipID(ref.ID)]; hit != nil && hit.HP > 0 {
+						w.knockModules(ctx, s, hit)
+					}
 					continue
 				}
 				// Splash is the second damage source to statics (lasers are the

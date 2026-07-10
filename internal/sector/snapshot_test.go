@@ -17,14 +17,15 @@ import (
 )
 
 type fakeShipRepo struct {
-	mu         sync.Mutex
-	batches    [][]domain.Ship
-	batchCalls int
-	saves      []domain.Ship
-	deletes    []domain.ShipID
-	batchErr   error
-	saveErr    error
-	deleteErr  error
+	mu             sync.Mutex
+	batches        [][]domain.Ship
+	batchCalls     int
+	saves          []domain.Ship
+	saveEquipments []domain.Ship
+	deletes        []domain.ShipID
+	batchErr       error
+	saveErr        error
+	deleteErr      error
 }
 
 func (r *fakeShipRepo) Save(_ context.Context, s domain.Ship) error {
@@ -34,6 +35,30 @@ func (r *fakeShipRepo) Save(_ context.Context, s domain.Ship) error {
 		return r.saveErr
 	}
 	r.saves = append(r.saves, s)
+	return nil
+}
+
+func (r *fakeShipRepo) SaveEquipment(_ context.Context, s domain.Ship) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.saveErr != nil {
+		return r.saveErr
+	}
+	r.saveEquipments = append(r.saveEquipments, s)
+	return nil
+}
+
+// savedEquipmentFor returns the last SaveEquipment call for the given ship, or
+// nil if none.
+func (r *fakeShipRepo) savedEquipmentFor(id domain.ShipID) *domain.Ship {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := len(r.saveEquipments) - 1; i >= 0; i-- {
+		if r.saveEquipments[i].ID == id {
+			s := r.saveEquipments[i]
+			return &s
+		}
+	}
 	return nil
 }
 

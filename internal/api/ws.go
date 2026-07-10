@@ -60,6 +60,24 @@ type policeScanFrame struct {
 	Wanted    bool   `json:"wanted"`
 }
 
+// moduleKnockedBuffer caps the per-WS queue of module-knockoff events
+// (TASK-100.3.9.1). Knockoffs need a down shield and a lucky roll, so they are
+// rare; a small buffer is ample and overflow drops the oldest.
+const moduleKnockedBuffer = 4
+
+// moduleKnockedFrame is the WS frame pushed to a ship's owner when one of its
+// modules is stripped off by weapon fire (SP DestroyModule). The SPA maps
+// equipmentType to a human name from its catalog for the journal line. The
+// consumer is a front follow-up (TASK-100.3.9.5); this back-only emission
+// completes the "владельцу событие в Журнал" requirement.
+type moduleKnockedFrame struct {
+	Type          string `json:"type"`
+	ShipID        int64  `json:"shipId"`
+	SectorID      int64  `json:"sectorId"`
+	EquipmentID   int64  `json:"equipmentId"`
+	EquipmentType string `json:"equipmentType"`
+}
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// RequireAuth (when wired) has already populated the player ID.
 	playerID, ok := auth.PlayerIDFromContext(r.Context())
@@ -190,7 +208,36 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, playerID)
+	// Subscribe to per-player module-knockoff events (TASK-100.3.9.1) on the same
+	// bus. Same pattern as police: decode and forward to a buffered channel the
+	// push loop drains. Unauthenticated clients skip it.
+	knockCh := make(chan moduleKnockedFrame, moduleKnockedBuffer)
+	if s.handoffBus != nil && playerID != 0 {
+		err := s.handoffBus.Subscribe(ctx, sector.ModuleKnockedTopic(playerID), func(payload []byte) {
+			var ev sector.ModuleKnockedEvent
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				s.logger.Warn("ws decode module knocked", "err", err, "player", int64(playerID))
+				return
+			}
+			frame := moduleKnockedFrame{
+				Type:          "module_knocked",
+				ShipID:        int64(ev.ShipID),
+				SectorID:      int64(ev.SectorID),
+				EquipmentID:   int64(ev.EquipmentID),
+				EquipmentType: ev.Type,
+			}
+			select {
+			case knockCh <- frame:
+			default:
+				s.logger.Warn("ws module knocked event dropped — buffer full", "player", int64(playerID))
+			}
+		})
+		if err != nil {
+			s.logger.Warn("ws module knocked subscribe", "err", err, "player", int64(playerID))
+		}
+	}
+
+	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, knockCh, playerID)
 }
 
 // initialSubscribeSector chooses which sector a freshly opened WS should
@@ -293,6 +340,7 @@ func (s *Server) wsPushLoop(
 	handoff <-chan sector.PlayerHandoffEvent,
 	rentOverdue <-chan rentOverdueFrame,
 	policeScan <-chan policeScanFrame,
+	moduleKnocked <-chan moduleKnockedFrame,
 	playerID domain.PlayerID,
 ) {
 	currentSector := sub.SectorID
@@ -328,6 +376,21 @@ func (s *Server) wsPushLoop(
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					s.logger.Debug("ws write police scan", "err", err)
+				}
+				return
+			}
+		case frame := <-moduleKnocked:
+			payload, err := json.Marshal(frame)
+			if err != nil {
+				s.logger.Warn("ws marshal module knocked", "err", err)
+				continue
+			}
+			writeCtx, wc := context.WithTimeout(ctx, wsWriteTimeout)
+			err = conn.Write(writeCtx, websocket.MessageText, payload)
+			wc()
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					s.logger.Debug("ws write module knocked", "err", err)
 				}
 				return
 			}

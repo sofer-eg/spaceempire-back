@@ -1,6 +1,8 @@
 package sector
 
 import (
+	"context"
+
 	"spaceempire/back/internal/combat"
 	"spaceempire/back/internal/domain"
 )
@@ -21,7 +23,7 @@ var towerSpec = combat.DefaultTowerSpec()
 // On each shot the tower emits a LaserBeam into s.laserEffects — the same
 // one-frame channel ship lasers use — so the SPA renders the tower beam with
 // no client change.
-func (w *Worker) tickTowers(s *sectorState) {
+func (w *Worker) tickTowers(ctx context.Context, s *sectorState) {
 	for _, t := range s.statics.LaserTowers {
 		// Player-owned towers use the relations predicate (6.2a); race-owned
 		// towers (owner==nil) use the race predicate (8.3) — a per-tower
@@ -57,5 +59,9 @@ func (w *Worker) tickTowers(s *sectorState) {
 			DamageDealt: res.ShieldAbsorbed + res.HPAbsorbed,
 			Killed:      res.Killed,
 		})
+		if !res.Killed {
+			// TASK-100.3.9.1: knockoff on a surviving shield-down target.
+			w.knockModules(ctx, s, target)
+		}
 	}
 }

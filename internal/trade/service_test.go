@@ -44,6 +44,7 @@ type stubRepo struct {
 	capacities map[domain.EntityRef]float64
 	stacks     map[domain.EntityRef]map[domain.GoodsTypeID]int64
 	market     map[domain.EntityRef]map[domain.GoodsTypeID]traderepo.MarketEntry
+	prodRef    map[domain.GoodsTypeID]int64
 }
 
 func newStubRepo() *stubRepo {
@@ -55,6 +56,7 @@ func newStubRepo() *stubRepo {
 		capacities: make(map[domain.EntityRef]float64),
 		stacks:     make(map[domain.EntityRef]map[domain.GoodsTypeID]int64),
 		market:     make(map[domain.EntityRef]map[domain.GoodsTypeID]traderepo.MarketEntry),
+		prodRef:    make(map[domain.GoodsTypeID]int64),
 	}
 }
 
@@ -90,6 +92,16 @@ func (s *stubRepo) ListMarket(_ context.Context, owner domain.EntityRef) ([]trad
 	out := make([]traderepo.MarketEntry, 0, len(rows))
 	for _, e := range rows {
 		out = append(out, e)
+	}
+	return out, nil
+}
+
+func (s *stubRepo) ProductionRefMaxes(_ context.Context) (map[domain.GoodsTypeID]int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[domain.GoodsTypeID]int64, len(s.prodRef))
+	for gid, m := range s.prodRef {
+		out[gid] = m
 	}
 	return out, nil
 }

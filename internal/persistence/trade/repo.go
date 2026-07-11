@@ -148,6 +148,44 @@ func (r *Repository) ListMarket(ctx context.Context, owner domain.EntityRef) ([]
 	return out, nil
 }
 
+const productionRefMaxesSQL = `
+SELECT goods_type_id, max(max_stock)
+FROM station_goods
+WHERE owner_kind = $1
+GROUP BY goods_type_id
+`
+
+// ProductionRefMaxes returns, per goods type, the largest max_stock seen across
+// all production stations (owner_kind 2). It is the "production reference cap":
+// the hack gate/penalty denominator for trade stations, whose own max_stock is a
+// resale cap (1e6, migration 0044) rather than a realistic on-hand ceiling. A
+// good that no factory produces has no entry here and is therefore not robbable
+// on a trade station (TASK-128). Rob reads this inside its transaction — the hack
+// is a rare operation, not a hot path, so a live query beats a stale cache.
+func (r *Repository) ProductionRefMaxes(ctx context.Context) (map[domain.GoodsTypeID]int64, error) {
+	rows, err := r.exec.Query(ctx, productionRefMaxesSQL, int16(domain.EntityKindStation))
+	if err != nil {
+		return nil, fmt.Errorf("query production ref maxes: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[domain.GoodsTypeID]int64)
+	for rows.Next() {
+		var (
+			gid      int32
+			maxStock int64
+		)
+		if err := rows.Scan(&gid, &maxStock); err != nil {
+			return nil, fmt.Errorf("scan production ref max: %w", err)
+		}
+		out[domain.GoodsTypeID(gid)] = maxStock
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate production ref maxes: %w", err)
+	}
+	return out, nil
+}
+
 const getMarketEntrySQL = `
 SELECT buy_price, sell_price, stock, max_stock
 FROM station_goods

@@ -91,8 +91,10 @@ func TestUnit_StationRobber_TooLittleGoods_MapsSentinel(t *testing.T) {
 	assert.Empty(t, standing.adjusts)
 }
 
-// A penalty that rounds to zero (tiny fraction, e.g. the live universal-market
-// seed's 1e6 max_stock) applies no standing change.
+// The app-side penalty is round((robbed+damaged)/MaxStock * k) in isolation: a
+// small haul against a very large denominator rounds to zero and applies no
+// standing change. (MaxStock is whatever basis Rob reports — production cap for a
+// factory, production reference for a trade station, TASK-128; here fed directly.)
 func TestUnit_StationRobber_ZeroPenalty_NoStandingChange(t *testing.T) {
 	t.Parallel()
 	market := &fakeHackMarket{out: trade.RobOutcome{

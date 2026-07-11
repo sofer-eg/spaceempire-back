@@ -51,6 +51,11 @@ func (r *PoolRepo) ListMarket(ctx context.Context, owner domain.EntityRef) ([]tr
 	return r.trade.ListMarket(ctx, owner)
 }
 
+// ProductionRefMaxes proxies to persistence/trade (TASK-128).
+func (r *PoolRepo) ProductionRefMaxes(ctx context.Context) (map[domain.GoodsTypeID]int64, error) {
+	return r.trade.ProductionRefMaxes(ctx)
+}
+
 // AdjustStock proxies to persistence/trade.
 func (r *PoolRepo) AdjustStock(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, delta int64) (int64, error) {
 	return r.trade.AdjustStock(ctx, owner, gtype, delta)

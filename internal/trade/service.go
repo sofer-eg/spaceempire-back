@@ -21,6 +21,7 @@ type Repo interface {
 
 	GetMarketEntry(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID) (traderepo.MarketEntry, error)
 	ListMarket(ctx context.Context, owner domain.EntityRef) ([]traderepo.MarketEntry, error)
+	ProductionRefMaxes(ctx context.Context) (map[domain.GoodsTypeID]int64, error)
 	AdjustStock(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, delta int64) (int64, error)
 
 	GetCash(ctx context.Context, playerID domain.PlayerID) (int64, error)
@@ -300,8 +301,9 @@ func (s *Service) Sell(ctx context.Context, playerID domain.PlayerID, shipID dom
 // Robbed is the loot amount, Damaged the destroyed amount (both removed from the
 // station's stock). Delivered reports whether Robbed was already added to the
 // hacker's hold (level >= 2 with room) — when false the caller drops a loot
-// container. MaxStock is the target good's cap, the denominator for the
-// reputation penalty.
+// container. MaxStock is the target good's hack basis (production station: its
+// own max_stock; trade station: the production reference cap of that good), the
+// denominator the caller uses for the reputation penalty.
 type RobOutcome struct {
 	GoodsType domain.GoodsTypeID
 	Robbed    int64
@@ -331,9 +333,23 @@ func (s *Service) Rob(ctx context.Context, station, hackerShip domain.EntityRef,
 			}
 			return err
 		}
-		target, ok := richestGood(entries)
-		if !ok || target.MaxStock <= 0 ||
-			float64(target.Stock) < minFrac*float64(target.MaxStock) {
+
+		// prodRef is the production reference cap (max max_stock over owner_kind
+		// 2) per good, the hack basis for a trade station whose own max_stock is a
+		// 1e6 resale cap (migration 0044). Only trade stations consult it —
+		// production stations and pirbases keep their own max_stock as basis, so
+		// their behaviour is unchanged (TASK-128).
+		var prodRef map[domain.GoodsTypeID]int64
+		if station.Kind == domain.EntityKindTradeStation {
+			prodRef, err = txRepo.ProductionRefMaxes(ctx)
+			if err != nil {
+				return fmt.Errorf("production ref maxes: %w", err)
+			}
+		}
+
+		target, basis, ok := richestRobbable(entries, station.Kind, prodRef)
+		if !ok || basis <= 0 ||
+			float64(target.Stock) < minFrac*float64(basis) {
 			return ErrTooLittleGoods
 		}
 
@@ -382,7 +398,7 @@ func (s *Service) Rob(ctx context.Context, station, hackerShip domain.EntityRef,
 			Robbed:    robbed,
 			Damaged:   damaged,
 			Delivered: delivered,
-			MaxStock:  target.MaxStock,
+			MaxStock:  basis,
 		}
 		return nil
 	})
@@ -392,19 +408,46 @@ func (s *Service) Rob(ctx context.Context, station, hackerShip domain.EntityRef,
 	return out, nil
 }
 
-// richestGood picks the market entry with the highest stock (tie-break: lowest
-// goods type for determinism). ok is false for an empty market.
-func richestGood(entries []traderepo.MarketEntry) (traderepo.MarketEntry, bool) {
-	var best traderepo.MarketEntry
-	found := false
+// hackBasis returns the gate/penalty denominator for one market entry and
+// whether the entry is robbable at all. Production stations and pirbases use the
+// good's own max_stock — a realistic on-hand ceiling — and every entry stays a
+// candidate (the caller's basis <= 0 gate rejects a non-positive one), keeping
+// their behaviour byte-identical to the pre-TASK-128 path. Trade stations use the
+// production reference cap of the same good; a good with no reference — nobody
+// produces it (guns, torpedoes, treasures, hyperfuel) — is not robbable there and
+// is excluded from selection (TASK-128 AC-2).
+func hackBasis(e traderepo.MarketEntry, kind domain.EntityKind, prodRef map[domain.GoodsTypeID]int64) (int64, bool) {
+	if kind == domain.EntityKindTradeStation {
+		ref, ok := prodRef[e.GoodsType]
+		return ref, ok && ref > 0
+	}
+	return e.MaxStock, true
+}
+
+// richestRobbable picks the robbable market entry with the highest stock
+// (tie-break: lowest goods type for determinism), returning it with its hack
+// basis. Entries with no valid basis are skipped, so on a trade station a fat
+// pile of an unproduced good cannot hijack the pick and shadow a producible one
+// (TASK-128 AC-2). ok is false when no entry is robbable.
+func richestRobbable(entries []traderepo.MarketEntry, kind domain.EntityKind, prodRef map[domain.GoodsTypeID]int64) (traderepo.MarketEntry, int64, bool) {
+	var (
+		best      traderepo.MarketEntry
+		bestBasis int64
+		found     bool
+	)
 	for _, e := range entries {
+		basis, ok := hackBasis(e, kind, prodRef)
+		if !ok {
+			continue
+		}
 		if !found || e.Stock > best.Stock ||
 			(e.Stock == best.Stock && e.GoodsType < best.GoodsType) {
 			best = e
+			bestBasis = basis
 			found = true
 		}
 	}
-	return best, found
+	return best, bestBasis, found
 }
 
 // tradeRateShift mirrors StarWind update_user_cash_and_rating (db.sql): the

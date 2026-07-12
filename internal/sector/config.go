@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"spaceempire/back/internal/combat"
+	"spaceempire/back/internal/domain"
 )
 
 // Config tunes a single Worker. PoolConfig embeds this so every worker in a
@@ -102,6 +103,19 @@ type Config struct {
 	// CaptureRange is how close (world units) the attacker must be to the target
 	// ship to attempt a capture (SP DoCapture, √2500 = 50). Default 50.
 	CaptureRange float64
+	// JumpDriveCooldownL1 / JumpDriveCooldownL2 are the real-time cooldowns a
+	// seamless jump drive (up_jump_drive) enforces between hops (TASK-100.3.7,
+	// faithful SP DoJump: level 1 = 3600 s, level 2 = 1800 s). The command reads
+	// them by the ship's module level so an upgraded drive recharges twice as
+	// fast. Held in config (not code) so tests can inject tiny values. Defaults
+	// 60 min / 30 min.
+	JumpDriveCooldownL1 time.Duration
+	JumpDriveCooldownL2 time.Duration
+	// JumpDriveForbiddenSectors lists the sectors a ship may NOT jump OUT of with
+	// a jump drive (TASK-100.3.7, port of SP DoJump's `object_sector = 215 or
+	// 203` gate). Empty by default — the StarWind-specific ids are NOT hardcoded;
+	// a deployment wires its own list if it wants no-jump zones.
+	JumpDriveForbiddenSectors []domain.SectorID
 }
 
 func (c Config) withDefaults() Config {
@@ -172,7 +186,33 @@ func (c Config) withDefaults() Config {
 	if c.CaptureRange <= 0 {
 		c.CaptureRange = 50
 	}
+	if c.JumpDriveCooldownL1 <= 0 {
+		c.JumpDriveCooldownL1 = 60 * time.Minute
+	}
+	if c.JumpDriveCooldownL2 <= 0 {
+		c.JumpDriveCooldownL2 = 30 * time.Minute
+	}
 	return c
+}
+
+// jumpDriveCooldown returns the real-time cooldown for a jump drive of the given
+// install level (TASK-100.3.7): level 2 recharges in half the time of level 1.
+func (c Config) jumpDriveCooldown(level int) time.Duration {
+	if level >= 2 {
+		return c.JumpDriveCooldownL2
+	}
+	return c.JumpDriveCooldownL1
+}
+
+// sectorForbidden reports whether ships may not jump OUT of the given sector
+// with a jump drive (TASK-100.3.7). Empty list ⇒ every sector is jumpable.
+func (c Config) sectorForbidden(id domain.SectorID) bool {
+	for _, f := range c.JumpDriveForbiddenSectors {
+		if f == id {
+			return true
+		}
+	}
+	return false
 }
 
 // PoolConfig configures how many workers a Pool spawns and the per-worker

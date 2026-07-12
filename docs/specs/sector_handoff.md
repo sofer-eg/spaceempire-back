@@ -12,6 +12,52 @@ authority переходит к B. Передача через bus, чтобы �
 фаза 4 добавит «модуль автостыковки», который от лица игрока эмитит ту
 же JumpCommand из тика, без вмешательства человека.)
 
+Позже добавились ещё два клиента того же handoff-механизма поверх
+`executeJump`:
+- **NPC-автопрыжок через ворота** (`tryAutoJump`) — тот же путь, что
+  `JumpCommand`, но триггерится автопилотом из тика.
+- **Бесшовный прыжок `up_jump_drive`** (TASK-100.3.7, `JumpDriveCommand`) —
+  см. ниже.
+
+## Бесшовный прыжок (up_jump_drive, seamless jump)
+
+Порт SP `DoJump` **режим 0**: прыжок в любой выбранный сектор **без ворот**.
+`JumpDriveCommand{PlayerID, ShipID, TargetSectorID, Reply}` → воркер сектора-
+источника. Отличие от `JumpCommand` — нет gate/`GateRange`: цель — произвольный
+существующий сектор, точка выхода вычисляется, а не берётся со стороны ворот.
+
+Поток совпадает с воротным начиная с шага 3 (immediate write → publish
+`JumpEvent` → eviction), потому что **переиспользует ту же `executeJump`**. До
+`executeJump` — специфичная валидация и «оплата»:
+
+1. корабль есть, принадлежит игроку (`ErrForbidden`); topology+bus есть
+   (`ErrHandoffUnavailable`);
+2. не пристыкован (`ErrShipDocked`, MVP-сужение — undock-через-прыжок в scope
+   не входит);
+3. установлен `up_jump_drive` (`ErrEquipmentRequired`);
+4. исправный генератор щита `MaxShield>0` (`ErrShieldRequired`);
+5. кулдаун истёк — `w.clock.Now().Sub(ship.LastJumpAt) >= cd`, `cd` по уровню
+   модуля (L1 60 мин / L2 30 мин, `Config.JumpDriveCooldownL1/L2`), иначе
+   `ErrJumpOnCooldown`;
+6. текущий сектор не в `Config.JumpDriveForbiddenSectors` (`ErrJumpForbiddenSector`);
+7. целевой сектор существует в топологии и != текущего (`ErrInvalidSector`).
+
+**Оплата и релокация:** `ship.Shield=0`, `ship.LastJumpAt=w.clock.Now()`,
+`arrivalPos = центр целевого сектора ± 1600` (faithful, `w.rng`), затем
+`executeJump(w, s, ship, TargetSectorID, arrivalPos)`. Поскольку `executeJump`
+делает `relocated := *ship` перед перезаписью sector/pos/vel, обнулённый щит и
+свежий `LastJumpAt` попадают и в персист (`repo.Save` в целевой сектор), и в
+`JumpEvent` для intake-воркера. `LastJumpAt` — новая персистентная колонка
+`ships.last_jump_at` (миграция 0059, NULL=не прыгал), читается в `LoadAll`,
+пишется в `Save`; так кулдаун цел и после рестарта, и после любого handoff.
+
+Стоимость **не** включает энергию (faithful: только щит + кулдаун). Подробности
+гейтов/стоимости — `equipment_effects.md`, раздел `up_jump_drive`.
+
+HTTP: `POST /api/cmd/jump-drive`; маппинг ошибок — ShipNotFound→404,
+Forbidden→403, ShipDocked→409, Equipment/Shield→422, Cooldown→429,
+Forbidden/Invalid sector→400, HandoffUnavailable→503, timeout→504.
+
 ## Поток
 
 1. **Игрок шлёт `JumpCommand`**

@@ -134,6 +134,61 @@ Go-версии: **5/тик**, в паритет с NPC `miner.DrillRate=5`; в�
   (`cargo.ErrNoSpace`) — fallback в контейнер. Прочие ошибки депозита оставляют
   астероид нетронутым и ретраят на следующем тике.
 
+### `up_jump_drive` → бесшовный прыжок без ворот (phase 10.3.7)
+
+Порт SP `DoJump` **режим 0** (прыжок в любой выбранный игроком сектор). Команда
+`POST /api/cmd/jump-drive {shipID, targetSectorID}` → `JumpDriveCommand`. Воркер,
+владеющий текущим сектором корабля, валидирует и переиспользует `executeJump`
+(та же машинерия, что и прыжок через ворота — persist в целевой сектор + publish
+`JumpEvent` в `sector.<target>.intake` + eviction из RAM источника). Прибытие —
+случайная точка в `±1600` у центра целевого сектора (faithful `pos = 1600 -
+rand()*3200`; центр берётся из `Sector.Bounds`, для origin-центрированных
+секторов = `(0,0)`). Гейты (в порядке проверки):
+
+1. корабль есть в секторе и принадлежит игроку (`ErrForbidden`);
+2. воркер сконфигурирован для handoff (topology+bus, иначе `ErrHandoffUnavailable`);
+3. **не пристыкован** — `Docked==nil`, иначе `ErrShipDocked` (HTTP 409). Осознанное
+   сужение MVP: undock-через-прыжок трогал бы docking-internals (занятость
+   станции/ангара) — вне scope; ценность прыжка в бегстве из открытого космоса.
+   Оригинал (mode 0) отстыковывал inline (`location=0`) — вынесено в follow-up;
+4. установлен `up_jump_drive` (`shipEquipmentLevel>=1`), иначе `ErrEquipmentRequired`
+   (HTTP 422);
+5. **исправный генератор щита** — `MaxShield>0`, иначе `ErrShieldRequired` (422).
+   `MaxShield==0` = нет `up_shield` либо генератор сбит в бою
+   (`ShieldGeneratorDestroyed`);
+6. **кулдаун** не истёк, иначе `ErrJumpOnCooldown` (HTTP 429);
+7. текущий сектор не в `Config.JumpDriveForbiddenSectors`, иначе
+   `ErrJumpForbiddenSector` (400);
+8. целевой сектор существует в топологии и не равен текущему, иначе
+   `ErrInvalidSector` (400). Режим 0 = любой существующий сектор, без hop-лимита.
+
+**Стоимость — faithful (Развилка 1=B):** плата = обнуление щита (`Shield=0`) +
+требование исправного генератора (см. гейт 5). **Энергия НЕ списывается.** Хотя
+каталог помечает модуль `action/100`, для прыжка энергия не проводится — это
+осознанное решение: faithful-стоимость оригинала это только щит + кулдаун, а
+`energy_usage` в `ct_updates` для jump-drive не участвовал в `DoJump`. Каталог не
+трогаем.
+
+**Кулдаун — faithful real-time (Развилка 2=A):** реальное время по уровню модуля
+через wall-clock `domain.Ship.LastJumpAt` (`time.Time`): **level 1 = 60 мин,
+level 2 = 30 мин** (`up_jump_drive` `max_level=2`). Длительности — в
+`sector.Config` (`JumpDriveCooldownL1/L2`, дефолты 60/30 мин; тесты подставляют
+крошечные значения). Проверка `w.clock.Now().Sub(LastJumpAt) < cd` (нулевой
+`LastJumpAt` = ни разу не прыгал → кулдауна нет). При успехе стамп обновляется на
+`w.clock.Now()`. Поле **персистится** (`ships.last_jump_at TIMESTAMPTZ NULL`,
+миграция 0059; NULL при нуле) и **переживает handoff** — `executeJump` копирует
+`*ship` (Shield=0 и LastJumpAt в клоне `relocated`), так что кулдаун цел и после
+рестарта (`LoadAll`), и после смены сектора.
+
+**Запретные сектора** (`Config.JumpDriveForbiddenSectors`, дефолт пусто): порт
+`object_sector = 215 or 203` из оригинала — блок прыжка ИЗ сектора. StarWind-
+специфичные 215/203 **не хардкодятся**; deployment задаёт свой список.
+
+**Follow-up (вне scope, отдельные задачи):** маяки (`DoJump` mode 2 + ACL
+`jump_beacon_acl`); авто-возврат домой (mode 1 + `home_werf`/автопилот
+task-100.3.11); блок вражеским `up_antijump` в радиусе (task-100.3.8); фронт-UI
+выбора сектора-цели; undock-через-прыжок.
+
 ## Валидация установки
 
 Проверяется (данные есть в каталоге):

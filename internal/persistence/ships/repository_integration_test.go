@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -217,6 +218,40 @@ func TestIntegration_Ships_Save_PersistsRace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, domain.RaceID(0), loaded[0].Race, "Save persists race → cold-start keeps the captured ship neutral")
+}
+
+func TestIntegration_Ships_Save_RoundTripsLastJumpAt(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	pid := seedPlayer(t, pool)
+	repo := ships.New(pool)
+	ctx := context.Background()
+
+	id, err := repo.Create(ctx, domain.Ship{
+		PlayerID: pid, SectorID: domain.SectorID(42), Pos: domain.Vec2{X: 1, Y: 1},
+		HP: 100, MaxHP: 100,
+	})
+	require.NoError(t, err)
+
+	// A fresh ship has never jumped: last_jump_at is NULL → zero LastJumpAt.
+	loaded, err := repo.LoadAll(ctx, domain.SectorID(42))
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.True(t, loaded[0].LastJumpAt.IsZero(), "new ship has no jump cooldown stamp")
+
+	// A jump stamps last_jump_at via the immediate Save (executeJump path).
+	jumpedAt := time.Date(2026, 7, 12, 12, 0, 0, 123456000, time.UTC)
+	require.NoError(t, repo.Save(ctx, domain.Ship{
+		ID: id, PlayerID: pid, SectorID: domain.SectorID(42),
+		Pos: domain.Vec2{X: 1, Y: 1}, HP: 100, LastJumpAt: jumpedAt,
+	}))
+
+	loaded, err = repo.LoadAll(ctx, domain.SectorID(42))
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.True(t, jumpedAt.Equal(loaded[0].LastJumpAt),
+		"Save→LoadAll round-trips last_jump_at: want %v, got %v", jumpedAt, loaded[0].LastJumpAt)
 }
 
 func TestIntegration_Ships_Save_MissingReturnsErrShipNotFound(t *testing.T) {

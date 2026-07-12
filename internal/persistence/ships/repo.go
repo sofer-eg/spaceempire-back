@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/pkg/database"
@@ -52,7 +53,7 @@ SELECT id, player_id, race, sector_id, pos_x, pos_y, vel_x, vel_y,
        attack_kind, attack_id,
        docked_kind, docked_id,
        passengers, is_spacesuit, name, ship_class_id, equipment, radar_range,
-       is_open, cargobay, shield_generator_destroyed
+       is_open, cargobay, shield_generator_destroyed, last_jump_at
 FROM ships
 WHERE sector_id = $1
 ORDER BY id
@@ -98,6 +99,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			isOpen                            bool
 			cargoBay                          float64
 			shieldGenDestroyed                bool
+			lastJumpAt                        *time.Time
 		)
 		if err := rows.Scan(
 			&id, &playerID, &raceVal, &sectorIDRow,
@@ -112,7 +114,7 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			&attackKind, &attackID,
 			&dockedKind, &dockedID,
 			&passengers, &isSpacesuit, &name, &shipClassID, &equipmentRaw, &radarRange,
-			&isOpen, &cargoBay, &shieldGenDestroyed,
+			&isOpen, &cargoBay, &shieldGenDestroyed, &lastJumpAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan ship: %w", err)
 		}
@@ -152,6 +154,9 @@ func (r *Repository) LoadAll(ctx context.Context, sectorID domain.SectorID) ([]d
 			CargoBay:                 cargoBay,
 			IsOpen:                   isOpen,
 			ShieldGeneratorDestroyed: shieldGenDestroyed,
+		}
+		if lastJumpAt != nil {
+			s.LastJumpAt = *lastJumpAt
 		}
 		if attackKind != nil && attackID != nil {
 			s.AttackTarget = &domain.EntityRef{
@@ -345,6 +350,16 @@ func (r *Repository) SaveEquipment(ctx context.Context, s domain.Ship) error {
 	return nil
 }
 
+// timeToNullable maps a ship's LastJumpAt to the nullable last_jump_at column:
+// the zero time (never jumped) becomes SQL NULL, any real timestamp is written
+// as-is. Returning nil translates to a SQL NULL (TASK-100.3.7).
+func timeToNullable(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
 // vec2ToNullable splits an optional Vec2 into the two nullable doubles the
 // schema wants. Returning (nil, nil) translates to SQL NULLs.
 func vec2ToNullable(v *domain.Vec2) (*float64, *float64) {
@@ -410,6 +425,7 @@ SET
     docked_id              = $22,
     passengers             = $23,
     is_open                = $24,
+    last_jump_at           = $26,
     updated_at             = NOW()
 WHERE id = $1
 `
@@ -432,6 +448,10 @@ WHERE id = $1
 // crash would surprise the player ("why did my ship stop shooting?").
 // Energy is NOT written: it drifts every tick and the ±5s snapshot
 // path is sufficient; an immediate write here would be wasted bandwidth.
+//
+// last_jump_at IS written (TASK-100.3.7): a seamless jump is an immediate
+// handoff event (executeJump → Save), so the jump-drive cooldown stamp must
+// persist here or it would be lost at cold-start (zero LastJumpAt → NULL).
 func (r *Repository) Save(ctx context.Context, s domain.Ship) error {
 	targetX, targetY := vec2ToNullable(s.Target)
 	finalSector, finalX, finalY, finalApproachKind, finalApproachID := courseToNullable(s.FinalTarget)
@@ -449,6 +469,7 @@ func (r *Repository) Save(ctx context.Context, s domain.Ship) error {
 		s.Passengers,
 		s.IsOpen,
 		int64(s.Race),
+		timeToNullable(s.LastJumpAt),
 	)
 	if err != nil {
 		return fmt.Errorf("update ship: %w", err)

@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 type Ship struct {
 	ID       ShipID
 	PlayerID PlayerID
@@ -207,6 +209,15 @@ type Ship struct {
 	// Server-internal — NOT exposed in the Ship DTO (the SPA gates on shield==0);
 	// persisted as ships.shield_generator_destroyed and read at cold-start.
 	ShieldGeneratorDestroyed bool
+	// LastJumpAt is the wall-clock time of the ship's last seamless jump-drive
+	// hop (TASK-100.3.7, port of SP DoJump's updates.up_status cooldown stamp).
+	// The jump-drive command rejects a fresh jump while now-LastJumpAt is below
+	// the real-time cooldown (level 1 = 60 min, level 2 = 30 min). Zero = never
+	// jumped (no cooldown). Persisted as ships.last_jump_at (NULL when zero) and
+	// read at cold-start, and carried across a gate/jump handoff in the JumpEvent
+	// so the cooldown survives both restart and sector changes. Server-internal —
+	// NOT exposed in the Ship DTO.
+	LastJumpAt time.Time
 }
 
 // ExternalDock is the state of an in-progress up_exdocking external-docking

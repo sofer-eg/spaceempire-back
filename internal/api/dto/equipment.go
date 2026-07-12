@@ -15,6 +15,12 @@ type Equipment struct {
 	IsBase        bool   `json:"isBase"`
 	Position      int    `json:"position"`
 	Dependance    string `json:"dependance"`
+	// Reputation thresholds to install this module (0 = no gate). The server
+	// enforces them at install (balance.ResolveInstall → 422); the catalog
+	// exposes them so the outfitting screen can pre-block by reputation.
+	MinWarRate    int    `json:"minWarRate"`
+	MinTradeRate  int    `json:"minTradeRate"`
+	MinRaceRate   int    `json:"minRaceRate"`
 	EnergyUseType string `json:"energyUseType"`
 	EnergyUsage   int    `json:"energyUsage"`
 }

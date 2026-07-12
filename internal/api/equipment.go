@@ -36,6 +36,9 @@ func (s *Server) handleEquipment(w http.ResponseWriter, _ *http.Request) {
 			IsBase:        e.IsBase,
 			Position:      e.Position,
 			Dependance:    e.Dependance,
+			MinWarRate:    e.MinWarRate,
+			MinTradeRate:  e.MinTradeRate,
+			MinRaceRate:   e.MinRaceRate,
 			EnergyUseType: e.EnergyUseType,
 			EnergyUsage:   e.EnergyUsage,
 		})

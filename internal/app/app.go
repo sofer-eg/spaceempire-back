@@ -552,7 +552,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	// Race standing (9.4): GET /api/my/race-standings for the reputation panel,
 	// plus a background closer that slowly decays every standing toward neutral.
-	racestanding.NewServer(standingSvc, logger).RegisterRoutes(srv.Mux(), authSrv.RequireAuth)
+	racestanding.NewServer(standingSvc, playersRepoPersistence, logger).RegisterRoutes(srv.Mux(), authSrv.RequireAuth)
 	standingCloser := racestanding.NewCloser(standingSvc, realClock, logger, time.Hour)
 
 	// Bounties (6.3): player/clan-funded contracts. The Service shares

@@ -2223,8 +2223,8 @@ equipment:
       is_base: 0
       position: 1
       dependance: up_accumulator
-      energy_use_type: action
-      energy_usage: 100
+      energy_use_type: always
+      energy_usage: 15
     - id: 140
       type: up_rudder
       description: Оптимизация рулей

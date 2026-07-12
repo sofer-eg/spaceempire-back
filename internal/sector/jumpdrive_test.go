@@ -284,6 +284,131 @@ func TestUnit_JumpDriveCommand_ExecuteJumpFailureRollsBackPayment(t *testing.T) 
 	assert.Empty(t, b.snapshot(), "no handoff published when Save failed")
 }
 
+// antijumpBlocker builds a ship carrying a powered up_antijump field at pos in
+// sector 1. PlayerID 42 (≠ the jumper's 7) proves the block is faithful to SP
+// DoJump: any owned ship jams the jump, with no hostility filter.
+func antijumpBlocker(id domain.ShipID, pos domain.Vec2, energy int) domain.Ship {
+	return domain.Ship{
+		ID: id, PlayerID: 42, SectorID: 1, Pos: pos, Energy: energy,
+		Equipment: []domain.InstalledEquipment{{Type: "up_antijump", Level: 1}},
+	}
+}
+
+func TestUnit_JumpDriveCommand_BlockedByAntijump(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// Jumper at origin; a powered antijump ship 100 units away (< default 640).
+	ships := []domain.Ship{jumpDriveShip(pid, 1), antijumpBlocker(2, domain.Vec2{X: 100}, 50)}
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, ships)
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	assert.ErrorIs(t, res.Err, sector.ErrJumpBlockedByAntijump)
+	assert.Empty(t, repo.saves, "no relocation when the jump is jammed")
+	assert.Empty(t, b.snapshot(), "no handoff published when the jump is jammed")
+
+	jumper, ok := snapshotShipByID(w.Snapshot(1), 1)
+	require.True(t, ok, "jumper stays in the source sector")
+	assert.Equal(t, 100, jumper.Shield, "shield not paid on a blocked jump")
+	assert.True(t, jumper.LastJumpAt.IsZero(), "cooldown not stamped on a blocked jump")
+}
+
+func TestUnit_JumpDriveCommand_AntijumpOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// Powered antijump ship 700 units away (> default 640) — does not reach.
+	ships := []domain.Ship{jumpDriveShip(pid, 1), antijumpBlocker(2, domain.Vec2{X: 700}, 50)}
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, ships)
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	require.NoError(t, res.Err, "an out-of-range antijump field must not block the jump")
+	_, ok := snapshotShipByID(w.Snapshot(1), 1)
+	assert.False(t, ok, "jumper relocated out of the source sector")
+	require.Len(t, repo.saves, 1)
+	assert.Equal(t, domain.SectorID(2), repo.saves[0].SectorID)
+}
+
+func TestUnit_JumpDriveCommand_AntijumpUnownedBlocker(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// In range and powered, but the carrier is unowned (PlayerID==0 — spacesuit/
+	// legacy): faithful SP DoJump `object_owner != 0` means it projects no field.
+	unowned := antijumpBlocker(2, domain.Vec2{X: 100}, 50)
+	unowned.PlayerID = 0
+	ships := []domain.Ship{jumpDriveShip(pid, 1), unowned}
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, ships)
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	require.NoError(t, res.Err, "an unowned antijump carrier must not block the jump")
+	_, ok := snapshotShipByID(w.Snapshot(1), 1)
+	assert.False(t, ok, "jumper relocated out of the source sector")
+}
+
+func TestUnit_JumpDriveCommand_AntijumpUnpowered(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// In range but Energy==0 — an unpowered field does not block (stealth pattern).
+	ships := []domain.Ship{jumpDriveShip(pid, 1), antijumpBlocker(2, domain.Vec2{X: 100}, 0)}
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, ships)
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	require.NoError(t, res.Err, "an unpowered antijump field must not block the jump")
+	_, ok := snapshotShipByID(w.Snapshot(1), 1)
+	assert.False(t, ok, "jumper relocated out of the source sector")
+}
+
+func TestUnit_JumpDriveCommand_AntijumpNoModule(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// A powered ship in range but WITHOUT up_antijump — no field, no block.
+	bystander := antijumpBlocker(2, domain.Vec2{X: 100}, 50)
+	bystander.Equipment = nil
+	ships := []domain.Ship{jumpDriveShip(pid, 1), bystander}
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, ships)
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	require.NoError(t, res.Err, "a ship without up_antijump must not block the jump")
+	_, ok := snapshotShipByID(w.Snapshot(1), 1)
+	assert.False(t, ok, "jumper relocated out of the source sector")
+}
+
+func TestUnit_JumpDriveCommand_AntijumpSelfNotBlocking(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// The jumper is the ONLY up_antijump carrier — its own field must not jam it.
+	jumper := jumpDriveShip(pid, 1)
+	jumper.Energy = 50
+	jumper.Equipment = append(jumper.Equipment, domain.InstalledEquipment{Type: "up_antijump", Level: 1})
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, []domain.Ship{jumper})
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	require.NoError(t, res.Err, "a ship's own antijump field must not block its own jump")
+	assert.Empty(t, w.Snapshot(1).Ships, "jumper relocated out of the source sector")
+}
+
 func TestUnit_JumpDriveCommand_HandoffUnavailable(t *testing.T) {
 	t.Parallel()
 

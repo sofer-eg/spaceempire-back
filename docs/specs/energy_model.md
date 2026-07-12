@@ -76,12 +76,21 @@ T = P / (L − (R − D))          [тиков]
 
 Лазер (`StartLaserECost = 5`, не строка каталога) и прочие `action`-типы
 (`up_engine`/`up_weapon_control`/`up_scanner`/`up_capture`/`up_hack`/
-`up_antijump`/`up_drone_control`/`up_exdocking`/`up_jump_drive`) НЕ трогаются —
+`up_drone_control`/`up_exdocking`/`up_jump_drive`) НЕ трогаются —
 их реальные потребители пулом не гейтятся либо вне scope. Пассивные `hold`-модули
 тоже не трогаются. `action`-цены **не входят** в `EnergyDelta` (его формируют
 только `always`/`reverse`), поэтому калибровка длительности огня (ниже) не
 меняется. В наборе дренаж дают только `up_shield`/`up_pro`, у крупных ещё
 `up_turret_control`.
+
+**`up_antijump` — исключение (TASK-100.3.8).** Единственный `always`-модуль с
+дренажом ≠ 2: он переведён из faithful `action`/100 в энергоапкип `always`/**15**
+(`equipment.yaml`). Установленный модуль тянет 15/тик через `EnergyDelta`; зона
+глушения прыжка активна, только пока `Energy > 0` (паттерн «Energy==0 = модуль без
+питания», как у стелса). 15 > базовый реген классов (5–10) → без генератора поле
+не удержать (на пуле 200 гаснет за ~40 тиков); сустейн требует генератора (реген
+10→15 при L≈2) или большого аккумулятора для burst. Механика блока — в
+`internal/sector/jumpdrive.go` (`antijumpActive`, радиус `Config.AntijumpRange`=640).
 
 ## Per-class пул/recharge (`convert-ship-classes`)
 

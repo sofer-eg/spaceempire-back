@@ -68,6 +68,8 @@ func (s *Server) handleJumpDrive(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusTooManyRequests, "jump drive not ready")
 		case errors.Is(res.Err, sector.ErrJumpForbiddenSector):
 			writeError(w, http.StatusBadRequest, "jump blocked in this sector")
+		case errors.Is(res.Err, sector.ErrJumpBlockedByAntijump):
+			writeError(w, http.StatusConflict, "jump blocked by antijump field")
 		case errors.Is(res.Err, sector.ErrInvalidSector):
 			writeError(w, http.StatusBadRequest, "invalid target sector")
 		case errors.Is(res.Err, sector.ErrHandoffUnavailable):

@@ -9,6 +9,10 @@ import (
 // jumpDriveModuleType is the ct_updates type gating the seamless jump.
 const jumpDriveModuleType = "up_jump_drive"
 
+// antijumpModuleType is the ct_updates type whose powered field jams a nearby
+// seamless jump (TASK-100.3.8, SP DoJump hyper-interference gate).
+const antijumpModuleType = "up_antijump"
+
 // jumpArrivalSpread is the half-width of the random arrival box around the
 // target sector's centre (TASK-100.3.7, faithful SP DoJump: pos = 1600 -
 // rand()*3200, i.e. uniform in [-1600, 1600] around the centre).
@@ -30,6 +34,11 @@ var (
 	// unknown to the topology or equals the ship's current sector. HTTP maps it
 	// to 400.
 	ErrInvalidSector = errors.New("sector: invalid target sector")
+	// ErrJumpBlockedByAntijump is reported by JumpDriveCommand when another powered
+	// up_antijump ship is within Config.AntijumpRange in the same sector
+	// (TASK-100.3.8, port of SP DoJump's hyper-interference gate). HTTP maps it to
+	// 409.
+	ErrJumpBlockedByAntijump = errors.New("sector: jump blocked by antijump field")
 )
 
 // JumpDriveCommand is the player-issued seamless (gateless) sector jump
@@ -106,6 +115,15 @@ func (c JumpDriveCommand) apply(w *Worker, s *sectorState) {
 		return
 	}
 
+	// Hyper-interference (TASK-100.3.8, SP DoJump): another powered up_antijump
+	// ship in range jams the jump. Checked BEFORE paying the shield/cooldown so a
+	// blocked jump costs nothing.
+	if w.antijumpActive(s, ship) {
+		res.Err = ErrJumpBlockedByAntijump
+		replyOnce(c.Reply, res)
+		return
+	}
+
 	// All gates passed — pay the shield, stamp the cooldown, relocate. Setting
 	// these on the RAM ship before executeJump makes executeJump's `*ship` copy
 	// carry them into the target sector and the persisted row (Shield=0,
@@ -122,6 +140,38 @@ func (c JumpDriveCommand) apply(w *Worker, s *sectorState) {
 		res.Err = err
 	}
 	replyOnce(c.Reply, res)
+}
+
+// antijumpActive reports whether another powered up_antijump ship is within
+// Config.AntijumpRange of the jumper in the same sector (TASK-100.3.8). Faithful
+// to SP DoJump: ANY owned ship carrying an active field jams the jump — no
+// hostility filter. Energy<=0 means the field has no power (the "Energy==0 =
+// module unpowered" pattern, as with stealth), so it does not block. The jumper's
+// own field never blocks its own jump.
+//
+// "Owned" ports SP DoJump's `object_owner != 0`: an unowned carrier
+// (PlayerID==0 — spacesuit/legacy/unknown) projects no field. NPCs are owned by
+// a system player (PlayerID != 0), so they still jam per the agreed "any owned
+// ship" rule.
+func (w *Worker) antijumpActive(s *sectorState, jumper *domain.Ship) bool {
+	for id, other := range s.ships {
+		if id == jumper.ID {
+			continue
+		}
+		if other.PlayerID == 0 {
+			continue
+		}
+		if shipEquipmentLevel(other, antijumpModuleType) < 1 {
+			continue
+		}
+		if other.Energy <= 0 {
+			continue
+		}
+		if other.Pos.Sub(jumper.Pos).Length() <= w.cfg.AntijumpRange {
+			return true
+		}
+	}
+	return false
 }
 
 // sectorCenter returns the centre point of the given sector's bounds and whether

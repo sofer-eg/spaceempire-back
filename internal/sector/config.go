@@ -116,6 +116,12 @@ type Config struct {
 	// 203` gate). Empty by default — the StarWind-specific ids are NOT hardcoded;
 	// a deployment wires its own list if it wants no-jump zones.
 	JumpDriveForbiddenSectors []domain.SectorID
+	// AntijumpRange is how close (world units) a powered up_antijump ship must be
+	// to a would-be jumper to jam its seamless jump (TASK-100.3.8, SP DoJump's
+	// hyper-interference gate). The original SP tested a box |dx|<640 && |dy|<640;
+	// we port that as a circular Euclidean radius for uniformity with
+	// MineRange/TransporterRange/CaptureRange (all `Pos.Sub().Length()`). Default 640.
+	AntijumpRange float64
 }
 
 func (c Config) withDefaults() Config {
@@ -191,6 +197,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.JumpDriveCooldownL2 <= 0 {
 		c.JumpDriveCooldownL2 = 30 * time.Minute
+	}
+	if c.AntijumpRange <= 0 {
+		c.AntijumpRange = 640
 	}
 	return c
 }

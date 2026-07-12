@@ -102,12 +102,21 @@ func TestUnit_LoadEquipment_RealConfig(t *testing.T) {
 		assert.Equal(t, 3, acc.MaxLevel, "accumulator max_level calibrated to 3")
 	}
 	// Every `always` module drains a calibrated 2/tick (was DEFAULT 100), so a
-	// ship's base kit costs a few points/tick, not −100 each.
+	// ship's base kit costs a few points/tick, not −100 each. up_antijump is the
+	// deliberate exception: its `always` upkeep powers a jump-blocking field and
+	// is calibrated to 15/tick (TASK-100.3.8), above class regen so the zone
+	// cannot self-sustain without a generator.
 	for _, e := range cat.AllEquipment() {
-		if e.EnergyUseType == "always" {
+		if e.EnergyUseType == "always" && e.Type != "up_antijump" {
 			assert.Equalf(t, 2, e.EnergyUsage, "always module %d (%s) calibrated to 2/tick", e.ID, e.Type)
 		}
 	}
+	// id 139 = up_antijump: energy-upkeep field, `always` 15/tick (TASK-100.3.8).
+	aj, ok := cat.GetEquipment(139)
+	require.True(t, ok)
+	assert.Equal(t, "up_antijump", aj.Type)
+	assert.Equal(t, "always", aj.EnergyUseType, "antijump field is an always-upkeep module")
+	assert.Equal(t, 15, aj.EnergyUsage, "antijump upkeep calibrated to 15/tick")
 
 	// TASK-100.3.25 fix-loop: the four action modules gated against a live
 	// per-class energy pool are calibrated below the smallest pool (scout 40) so

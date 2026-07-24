@@ -18,13 +18,17 @@ const (
 // extended in 8.17). Quest definitions (steps, rewards) live in code
 // (internal/quest); this is only the moving state. State holds the raw JSONB
 // progress (e.g. the counter toward the current event-driven step). DeadlineAt
-// is the wall-clock deadline (zero = no deadline). See docs/specs/quest.md.
+// is the wall-clock deadline (zero = no deadline). Definition holds the frozen
+// instance JSONB of a procedural quest (proc:*, TASK-89) so the engine resolves
+// its steps/reward/deadline from the row instead of the static registry; it is
+// nil for static quests, which resolve through Lookup. See docs/specs/quest.md.
 type QuestProgress struct {
 	Player      PlayerID
 	QuestID     string
 	StepIndex   int
 	Status      QuestStatus
 	State       []byte
+	Definition  []byte
 	DeadlineAt  time.Time
 	StartedAt   time.Time
 	CompletedAt time.Time

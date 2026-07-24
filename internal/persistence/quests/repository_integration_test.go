@@ -62,6 +62,52 @@ func TestIntegration_Quests_ProgressAndState(t *testing.T) {
 	assert.Empty(t, active, "completed quest no longer active")
 }
 
+// TestIntegration_Quests_Definition verifies the definition JSONB column
+// (migration 0060) round-trips through every read path: Get/Lock/ListActive
+// carry a procedural instance's definition, and a static row (NULL) reads as nil
+// (TASK-89 MR2).
+func TestIntegration_Quests_Definition(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testdb.Setup(t)
+	repo := questsrepo.New(pool)
+
+	player := seedPlayer(t, pool, "proc-def")
+	def := []byte(`{"ID":"proc:1","Title":"t","Steps":[{"Kind":"kill","Count":2}]}`)
+
+	// Procedural instance carries a definition; a static row alongside it is NULL.
+	_, err := pool.Exec(ctx,
+		`INSERT INTO player_quests (player_id, quest_id, definition) VALUES ($1, 'proc:1', $2)`,
+		int64(player), def)
+	require.NoError(t, err)
+	require.NoError(t, repo.Ensure(ctx, player, "tutorial", nil))
+
+	got, ok, err := repo.Get(ctx, player, "proc:1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.JSONEq(t, string(def), string(got.Definition))
+
+	stat, ok, err := repo.Get(ctx, player, "tutorial")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Nil(t, stat.Definition, "static quest has NULL definition → nil")
+
+	locked, ok, err := repo.Lock(ctx, player, "proc:1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.JSONEq(t, string(def), string(locked.Definition))
+
+	active, err := repo.ListActive(ctx, 100)
+	require.NoError(t, err)
+	var procDef []byte
+	for _, p := range active {
+		if p.QuestID == "proc:1" {
+			procDef = p.Definition
+		}
+	}
+	assert.JSONEq(t, string(def), string(procDef), "ListActive carries the definition")
+}
+
 func TestIntegration_Quests_PlayerStateSnapshot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

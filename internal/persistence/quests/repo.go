@@ -60,7 +60,7 @@ func (r *Repository) Abandon(ctx context.Context, player domain.PlayerID, questI
 	return nil
 }
 
-const selectCols = `player_id, quest_id, step_index, status, state, deadline_at, started_at, completed_at`
+const selectCols = `player_id, quest_id, step_index, status, state, deadline_at, started_at, completed_at, definition`
 
 const getSQL = `SELECT ` + selectCols + ` FROM player_quests WHERE player_id = $1 AND quest_id = $2`
 
@@ -216,7 +216,7 @@ func scanProgress(row pgx.Row) (domain.QuestProgress, error) {
 		deadlineAt  *time.Time
 		completedAt *time.Time
 	)
-	if err := row.Scan(&p.Player, &p.QuestID, &stepIndex, &status, &state, &deadlineAt, &p.StartedAt, &completedAt); err != nil {
+	if err := row.Scan(&p.Player, &p.QuestID, &stepIndex, &status, &state, &deadlineAt, &p.StartedAt, &completedAt, &p.Definition); err != nil {
 		return domain.QuestProgress{}, err
 	}
 	p.StepIndex = int(stepIndex)

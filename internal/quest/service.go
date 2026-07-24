@@ -2,6 +2,7 @@ package quest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
@@ -116,9 +117,28 @@ func (s *Service) ActiveList(ctx context.Context, player domain.PlayerID) ([]*Ac
 	return out, nil
 }
 
+// resolveDef resolves a progress row's quest definition. A procedural instance
+// (proc:*, TASK-89) carries its frozen definition in prog.Definition (JSONB) and
+// resolves from there; a static quest has none and resolves through the code
+// registry (Lookup). A malformed definition resolves to ok=false so the engine
+// degrades softly, exactly like an unknown id: view drops the quest and the
+// advance paths no-op. Definition is immutable, so one resolve per progress row
+// is reused across a re-locked cur (which carries the same bytes).
+func (s *Service) resolveDef(prog domain.QuestProgress) (Def, bool) {
+	if len(prog.Definition) > 0 {
+		var def Def
+		if err := json.Unmarshal(prog.Definition, &def); err != nil {
+			s.logger.Error("quest resolve definition", "err", err, "quest", prog.QuestID)
+			return Def{}, false
+		}
+		return def, true
+	}
+	return Lookup(prog.QuestID)
+}
+
 // view projects progress + its definition into the API shape.
 func (s *Service) view(p domain.QuestProgress) *ActiveView {
-	def, ok := Lookup(p.QuestID)
+	def, ok := s.resolveDef(p)
 	if !ok {
 		return nil
 	}
@@ -244,7 +264,7 @@ func (s *Service) OnEvent(ctx context.Context, ev Event) error {
 		return err
 	}
 	for _, prog := range active {
-		def, ok := Lookup(prog.QuestID)
+		def, ok := s.resolveDef(prog)
 		if !ok || prog.StepIndex >= len(def.Steps) {
 			continue
 		}
@@ -257,7 +277,7 @@ func (s *Service) OnEvent(ctx context.Context, ev Event) error {
 		if _, ok := step.MatchEvent(ev); !ok {
 			continue
 		}
-		if err := s.applyEvent(ctx, prog.QuestID, ev); err != nil {
+		if err := s.applyEvent(ctx, prog, ev); err != nil {
 			s.logger.ErrorContext(ctx, "quest on-event", "err", err,
 				"player", int64(ev.Player), "quest", prog.QuestID)
 		}
@@ -279,7 +299,7 @@ func (s *Service) OnShipDestroyed(ctx context.Context, victim domain.EntityRef) 
 		return err
 	}
 	for _, prog := range active {
-		def, ok := Lookup(prog.QuestID)
+		def, ok := s.resolveDef(prog)
 		if !ok || prog.StepIndex >= len(def.Steps) {
 			continue
 		}
@@ -291,7 +311,7 @@ func (s *Service) OnShipDestroyed(ctx context.Context, victim domain.EntityRef) 
 		if !decodeState(prog.State).spawnedSet(step.TargetRole)[victim.ID] {
 			continue
 		}
-		if err := s.applyDestroyed(ctx, prog.Player, prog.QuestID, victim); err != nil {
+		if err := s.applyDestroyed(ctx, prog, victim); err != nil {
 			s.logger.ErrorContext(ctx, "quest on-destroyed", "err", err,
 				"player", int64(prog.Player), "quest", prog.QuestID, "victim", victim.ID)
 		}
@@ -302,11 +322,12 @@ func (s *Service) OnShipDestroyed(ctx context.Context, victim domain.EntityRef) 
 // applyDestroyed applies a victim-scoped death to one quest in a FOR UPDATE tx:
 // escort → fail; target-kill → progress toward "all targets dead", then
 // reward + advance/complete. Despawns on any terminal transition.
-func (s *Service) applyDestroyed(ctx context.Context, player domain.PlayerID, questID string, victim domain.EntityRef) error {
-	def, ok := Lookup(questID)
+func (s *Service) applyDestroyed(ctx context.Context, prog domain.QuestProgress, victim domain.EntityRef) error {
+	def, ok := s.resolveDef(prog)
 	if !ok {
 		return nil
 	}
+	player, questID := prog.Player, prog.QuestID
 	now := s.clock.Now()
 	var despawnSt *questState
 	err := s.tx.Do(ctx, func(ctx context.Context, repo TxRepo) error {
@@ -347,16 +368,17 @@ func (s *Service) applyDestroyed(ctx context.Context, player domain.PlayerID, qu
 	return err
 }
 
-func (s *Service) applyEvent(ctx context.Context, questID string, ev Event) error {
-	def, ok := Lookup(questID)
+func (s *Service) applyEvent(ctx context.Context, prog domain.QuestProgress, ev Event) error {
+	def, ok := s.resolveDef(prog)
 	if !ok {
 		return nil
 	}
+	player, questID := prog.Player, prog.QuestID
 	now := s.clock.Now()
 	var despawnSt *questState // set when the tx reaches a terminal transition
 	err := s.tx.Do(ctx, func(ctx context.Context, repo TxRepo) error {
 		despawnSt = nil
-		cur, ok, err := repo.Lock(ctx, ev.Player, questID)
+		cur, ok, err := repo.Lock(ctx, player, questID)
 		if err != nil || !ok || cur.Status != domain.QuestActive || cur.StepIndex >= len(def.Steps) {
 			return err
 		}
@@ -368,19 +390,19 @@ func (s *Service) applyEvent(ctx context.Context, questID string, ev Event) erro
 		st := decodeState(cur.State)
 		st.Progress += delta
 		if st.Progress < step.Goal() {
-			return repo.SetState(ctx, ev.Player, questID, encodeState(st))
+			return repo.SetState(ctx, player, questID, encodeState(st))
 		}
 		// Goal reached — grant reward and advance (or complete).
 		if step.RewardCash > 0 {
-			if _, e := repo.AdjustCash(ctx, ev.Player, step.RewardCash); e != nil {
+			if _, e := repo.AdjustCash(ctx, player, step.RewardCash); e != nil {
 				return e
 			}
 		}
 		if cur.StepIndex == len(def.Steps)-1 {
 			despawnSt = &st
-			return repo.Complete(ctx, ev.Player, questID, cur.StepIndex, now)
+			return repo.Complete(ctx, player, questID, cur.StepIndex, now)
 		}
-		return advanceStep(ctx, repo, ev.Player, questID, cur.StepIndex, st.Spawned)
+		return advanceStep(ctx, repo, player, questID, cur.StepIndex, st.Spawned)
 	})
 	if err == nil && despawnSt != nil {
 		s.despawn(ctx, *despawnSt)
@@ -419,7 +441,7 @@ func (s *Service) ProcessAll(ctx context.Context, limit int) error {
 }
 
 func (s *Service) advance(ctx context.Context, prog domain.QuestProgress) error {
-	def, ok := Lookup(prog.QuestID)
+	def, ok := s.resolveDef(prog)
 	if !ok {
 		return nil
 	}

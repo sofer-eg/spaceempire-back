@@ -15,6 +15,43 @@ type Config struct {
 	Auth          AuthConfig
 	Balance       BalanceConfig
 	Observability ObservabilityConfig
+	Quest         QuestConfig
+}
+
+// QuestConfig tunes the procedural-quest generator and the outfeed pacer
+// (TASK-89, SRS §7.5). Defaults are the owner-approved v1.2 values; override
+// via the CONFIG_PATH YAML (env SE_* is not used for this section). The
+// generator consumes TargetRadius/GoodsRadius and the reward coefficients; the
+// remaining pacing fields are consumed by the pacer (MR4).
+type QuestConfig struct {
+	// TargetRadius is the max gate-hop distance of a generated quest's target
+	// sectors (goto/dock/deliver dropoff/kill) from the player's location.
+	TargetRadius int `default:"3"`
+	// GoodsRadius is the max gate-hop distance at which a tradeable goods buy
+	// point may sit. Defaults equal to TargetRadius.
+	GoodsRadius int `default:"3"`
+	// DocksMin/DocksMax bound the randomised dock count between dock-triggered
+	// offers (pacer, MR4).
+	DocksMin int `default:"10"`
+	DocksMax int `default:"20"`
+	// JumpsMin/JumpsMax bound the randomised inter-sector jump count between
+	// space-triggered offers (pacer, MR4).
+	JumpsMin int `default:"10"`
+	JumpsMax int `default:"20"`
+	// MaxPendingOffers caps a player's live (un-accepted) offers (pacer, MR4).
+	MaxPendingOffers int `default:"3"`
+	// StoryShare is the probability the pacer picks a static story quest instead
+	// of a procedural template when it fires (pacer, MR4).
+	StoryShare float64 `default:"0.25"`
+	// OfferTTL is how long a generated offer lives before the Closer purges it.
+	OfferTTL time.Duration `default:"24h"`
+	// Reward coefficients (FR-09): reward = base + perHop*hops + perUnit*qty
+	// (+ perEnemy*count for kill), floored at base. Grounded in the X-Tension
+	// catalogue (kills ~4k-30k, delivers ~4.5k-25k).
+	RewardBase     int64 `default:"2000"`
+	RewardPerHop   int64 `default:"1500"`
+	RewardPerUnit  int64 `default:"300"`
+	RewardPerEnemy int64 `default:"4000"`
 }
 
 // ObservabilityConfig configures logging, /metrics and /debug/* (phase 7.1).

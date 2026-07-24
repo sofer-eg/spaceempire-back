@@ -118,6 +118,67 @@ func TestIntegration_TradeRepository_ListMarket_ReturnsAllRows(t *testing.T) {
 	require.Len(t, entries, 2) // seed: sells Microchips, buys Iron
 }
 
+// seedOwnerMarket wires a deterministic one-row market for an arbitrary owner
+// so the multi-owner read can be exercised across owner kinds. It first clears
+// any content-seed rows for the owner, so the owner ends up with exactly the
+// single row inserted here.
+func seedOwnerMarket(t *testing.T, pool *pgxpool.Pool, kind domain.EntityKind, ownerID int64, gid int32, buy, sell *int64, stock, maxStock int64) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`DELETE FROM station_goods WHERE owner_kind = $1 AND owner_id = $2`,
+		int16(kind), ownerID)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO station_goods (owner_kind, owner_id, goods_type_id, buy_price, sell_price, stock, max_stock)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		int16(kind), ownerID, gid, buy, sell, stock, maxStock)
+	require.NoError(t, err)
+}
+
+func TestIntegration_TradeRepository_ListMarketsByOwners_ReturnsMultipleOwners(t *testing.T) {
+	t.Parallel()
+	pool := testdb.Setup(t)
+	repo := trade.New(pool)
+
+	sell := int64(180)
+	buy := int64(40)
+	// Station 1 sells good 7; trade-station 2 buys good 4.
+	seedOwnerMarket(t, pool, domain.EntityKindStation, 1, 7, nil, &sell, 200, 500)
+	seedOwnerMarket(t, pool, domain.EntityKindTradeStation, 2, 4, &buy, nil, 0, 500)
+	// A third owner not in the query set must not leak in.
+	seedOwnerMarket(t, pool, domain.EntityKindStation, 99, 5, &buy, &sell, 10, 500)
+
+	owners := []domain.EntityRef{
+		{Kind: domain.EntityKindStation, ID: 1},
+		{Kind: domain.EntityKindTradeStation, ID: 2},
+	}
+	entries, err := repo.ListMarketsByOwners(context.Background(), owners)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+
+	// Ordered by owner_kind, owner_id: station 1 first, trade-station 2 second.
+	assert.Equal(t, domain.EntityKindStation, entries[0].Owner.Kind)
+	assert.EqualValues(t, 1, entries[0].Owner.ID)
+	assert.EqualValues(t, 7, entries[0].GoodsType)
+	require.NotNil(t, entries[0].SellPrice)
+	assert.Nil(t, entries[0].BuyPrice)
+
+	assert.Equal(t, domain.EntityKindTradeStation, entries[1].Owner.Kind)
+	assert.EqualValues(t, 2, entries[1].Owner.ID)
+	require.NotNil(t, entries[1].BuyPrice)
+	assert.Nil(t, entries[1].SellPrice)
+}
+
+func TestIntegration_TradeRepository_ListMarketsByOwners_EmptyOwners(t *testing.T) {
+	t.Parallel()
+	pool := testdb.Setup(t)
+	repo := trade.New(pool)
+
+	entries, err := repo.ListMarketsByOwners(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
 func TestIntegration_TradeRepository_AdjustStock_DecrementsAndIncrements(t *testing.T) {
 	t.Parallel()
 	pool := testdb.Setup(t)

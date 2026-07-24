@@ -148,6 +148,62 @@ func (r *Repository) ListMarket(ctx context.Context, owner domain.EntityRef) ([]
 	return out, nil
 }
 
+const listMarketsByOwnersSQL = `
+SELECT owner_kind, owner_id, goods_type_id, buy_price, sell_price, stock, max_stock
+FROM station_goods
+WHERE (owner_kind, owner_id) IN (SELECT k, i FROM unnest($1::smallint[], $2::bigint[]) AS u(k, i))
+ORDER BY owner_kind, owner_id, goods_type_id
+`
+
+// ListMarketsByOwners returns every station_goods row for the given owners in a
+// single tuple-IN query (TASK-89 procedural quest generator). Owners are matched
+// as (owner_kind, owner_id) pairs; an empty owner list returns nil without a
+// query. Non-station owner kinds simply match no rows (station_goods only holds
+// station-like owners), so the batch method is lenient by design. Results are
+// ordered by owner then goods type so the caller sees a deterministic slice.
+func (r *Repository) ListMarketsByOwners(ctx context.Context, owners []domain.EntityRef) ([]MarketEntry, error) {
+	if len(owners) == 0 {
+		return nil, nil
+	}
+	kinds := make([]int16, len(owners))
+	ids := make([]int64, len(owners))
+	for i, o := range owners {
+		kinds[i] = int16(o.Kind)
+		ids[i] = o.ID
+	}
+	rows, err := r.exec.Query(ctx, listMarketsByOwnersSQL, kinds, ids)
+	if err != nil {
+		return nil, fmt.Errorf("query station_goods by owners: %w", err)
+	}
+	defer rows.Close()
+
+	var out []MarketEntry
+	for rows.Next() {
+		var (
+			ownerKind           int16
+			ownerID             int64
+			gid                 int32
+			buyPrice, sellPrice *int64
+			stock, maxStock     int64
+		)
+		if err := rows.Scan(&ownerKind, &ownerID, &gid, &buyPrice, &sellPrice, &stock, &maxStock); err != nil {
+			return nil, fmt.Errorf("scan station_goods by owners: %w", err)
+		}
+		out = append(out, MarketEntry{
+			Owner:     domain.EntityRef{Kind: domain.EntityKind(ownerKind), ID: ownerID},
+			GoodsType: domain.GoodsTypeID(gid),
+			BuyPrice:  buyPrice,
+			SellPrice: sellPrice,
+			Stock:     stock,
+			MaxStock:  maxStock,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate station_goods by owners: %w", err)
+	}
+	return out, nil
+}
+
 const productionRefMaxesSQL = `
 SELECT goods_type_id, max(max_stock)
 FROM station_goods

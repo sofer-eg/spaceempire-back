@@ -160,6 +160,11 @@ func executeDock(w *Worker, s *sectorState, ship *domain.Ship, target domain.Doc
 		}
 	}
 	s.markDirty(ship.ID)
+	// TASK-89 pacer trigger: announce a player docking to a station /
+	// trade-station. Best-effort, filtered inside the helper (player ships,
+	// station/trade-station only). Both DockCommand and tick auto-dock route
+	// through here, so every dock the pacer cares about is covered in one place.
+	w.publishPlayerDocked(s, ship, ref)
 	return nil
 }
 

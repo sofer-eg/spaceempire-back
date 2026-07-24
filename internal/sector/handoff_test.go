@@ -138,7 +138,7 @@ func TestUnit_JumpCommand_Success(t *testing.T) {
 	assert.Nil(t, saved.Target, "Target must be cleared on handoff")
 
 	msgs := bus.snapshot()
-	require.Len(t, msgs, 2, "expect intake + player-handoff events")
+	require.Len(t, msgs, 3, "expect intake + player-handoff + player-jumped events")
 	assert.Equal(t, "sector.2.intake", msgs[0].topic)
 	var ev sector.JumpEvent
 	require.NoError(t, json.Unmarshal(msgs[0].payload, &ev))
@@ -154,6 +154,13 @@ func TestUnit_JumpCommand_Success(t *testing.T) {
 	assert.Equal(t, domain.ShipID(1), handoff.ShipID)
 	assert.Equal(t, domain.SectorID(1), handoff.SourceSector)
 	assert.Equal(t, domain.SectorID(2), handoff.TargetSector)
+
+	// TASK-89: the fixed-topic PlayerJumpedEvent the quest pacer counts.
+	assert.Equal(t, sector.PlayerJumpedTopic, msgs[2].topic)
+	var jumped sector.PlayerJumpedEvent
+	require.NoError(t, json.Unmarshal(msgs[2].payload, &jumped))
+	assert.Equal(t, pid, jumped.PlayerID)
+	assert.Equal(t, domain.SectorID(2), jumped.TargetSector)
 
 	stats := w.Stats().Sectors[0]
 	assert.Equal(t, uint64(1), stats.HandoffsOut[2], "HandoffsOut must be incremented")

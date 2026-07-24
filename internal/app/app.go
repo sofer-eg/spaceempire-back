@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -51,6 +52,8 @@ import (
 	"spaceempire/back/internal/pkg/config"
 	"spaceempire/back/internal/pkg/database"
 	"spaceempire/back/internal/quest"
+	questgen "spaceempire/back/internal/quest/gen"
+	questpacer "spaceempire/back/internal/quest/pacer"
 	raceref "spaceempire/back/internal/reference/race"
 	"spaceempire/back/internal/sector"
 	"spaceempire/back/internal/social/bounties"
@@ -732,6 +735,77 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}
 	}); err != nil {
 		return fmt.Errorf("subscribe quest trades: %w", err)
+	}
+
+	// Procedural quest pacer (TASK-89): dock/jump triggers accrue per-player
+	// counters; at a randomised threshold one offer (a procedural template or,
+	// with StoryShare probability, a static story quest) is generated, persisted
+	// and pushed to the journal. Generation runs off the sector one-writer loop
+	// here in the subscriber. RNG is time-seeded per source (prod is Go's
+	// math/rand, mirroring sector.NewWorker's loot source; tests inject fixed
+	// seeds).
+	questGenerator := questgen.New(
+		pathRouter,
+		questgen.NewStaticMarket(statics, tradeRepoPersistence),
+		bal,
+		statics,
+		rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // quest generation, not security-sensitive
+		questgen.Config{
+			TargetRadius:   cfg.Quest.TargetRadius,
+			GoodsRadius:    cfg.Quest.GoodsRadius,
+			RewardBase:     cfg.Quest.RewardBase,
+			RewardPerHop:   cfg.Quest.RewardPerHop,
+			RewardPerUnit:  cfg.Quest.RewardPerUnit,
+			RewardPerEnemy: cfg.Quest.RewardPerEnemy,
+		},
+	)
+	questStoryPicker := questpacer.NewStaticStoryPicker(
+		questsrepo.New(pool),
+		rand.New(rand.NewSource(time.Now().UnixNano()+1)), //nolint:gosec // quest story pick, not security-sensitive
+		logger,
+	)
+	questPacer := questpacer.New(
+		questsrepo.NewCounters(pool),
+		questsrepo.NewOffers(pool),
+		questGenerator,
+		questStoryPicker,
+		jumpBus,
+		realClock,
+		rand.New(rand.NewSource(time.Now().UnixNano()+2)), //nolint:gosec // quest pacing, not security-sensitive
+		questpacer.Config{
+			DocksMin:         cfg.Quest.DocksMin,
+			DocksMax:         cfg.Quest.DocksMax,
+			JumpsMin:         cfg.Quest.JumpsMin,
+			JumpsMax:         cfg.Quest.JumpsMax,
+			MaxPendingOffers: cfg.Quest.MaxPendingOffers,
+			StoryShare:       cfg.Quest.StoryShare,
+			OfferTTL:         cfg.Quest.OfferTTL,
+		},
+		logger,
+	)
+	if err := jumpBus.Subscribe(ctx, sector.PlayerDockedTopic, func(payload []byte) {
+		var ev sector.PlayerDockedEvent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			logger.Error("quest pacer: decode player_docked", "err", err)
+			return
+		}
+		if err := questPacer.OnDock(ctx, ev.PlayerID, ev.SectorID); err != nil {
+			logger.Error("quest pacer: on dock", "err", err, "player", int64(ev.PlayerID))
+		}
+	}); err != nil {
+		return fmt.Errorf("subscribe quest dock pacer: %w", err)
+	}
+	if err := jumpBus.Subscribe(ctx, sector.PlayerJumpedTopic, func(payload []byte) {
+		var ev sector.PlayerJumpedEvent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			logger.Error("quest pacer: decode player_jumped", "err", err)
+			return
+		}
+		if err := questPacer.OnJump(ctx, ev.PlayerID, ev.TargetSector); err != nil {
+			logger.Error("quest pacer: on jump", "err", err, "player", int64(ev.PlayerID))
+		}
+	}); err != nil {
+		return fmt.Errorf("subscribe quest jump pacer: %w", err)
 	}
 
 	// Dynamic invasion (9.5): a background spawner injects Xenon waves at the

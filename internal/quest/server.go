@@ -34,23 +34,37 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux, authMW Middleware) {
 	mux.Handle("POST /api/quests/{id}/abandon", authMW(http.HandlerFunc(s.handleAbandon)))
 }
 
+// offerDTO is one personal offer (TASK-89, FR-10). It replaced the phase-8.17
+// static-catalogue shape ({questId,title,totalSteps}); the SPA is updated in the
+// same task's front MR.
 type offerDTO struct {
-	QuestID    string `json:"questId"`
-	Title      string `json:"title"`
-	TotalSteps int    `json:"totalSteps"`
+	OfferID     string `json:"offerId"`
+	Title       string `json:"title"`
+	Desc        string `json:"desc"`
+	Source      string `json:"source"`
+	ExpiresUnix int64  `json:"expiresUnix"`
+	RewardCash  int64  `json:"rewardCash"`
 }
 
-// handleOfferable lists the quests a player can accept (phase 8.17). Static
-// catalog — the panel pairs it with the active list to show Accept buttons.
+// handleOfferable lists the player's personal un-accepted quest offers (FR-10 /
+// AC-8). The static catalogue is no longer served here — story quests reach the
+// player through the same offer stream (via the pacer). Empty when the player
+// has no live offers.
 func (s *Server) handleOfferable(w http.ResponseWriter, r *http.Request) {
-	if _, ok := auth.PlayerIDFromContext(r.Context()); !ok {
+	player, ok := auth.PlayerIDFromContext(r.Context())
+	if !ok {
 		http.Error(w, `{"error":"not authenticated"}`, http.StatusUnauthorized)
 		return
 	}
-	defs := Offerable()
-	out := make([]offerDTO, 0, len(defs))
-	for _, d := range defs {
-		out = append(out, offerDTO{QuestID: d.ID, Title: d.Title, TotalSteps: len(d.Steps)})
+	views, err := s.svc.OfferableList(r.Context(), player)
+	if err != nil {
+		s.logger.Error("quest: offerable", "err", err, "player", int64(player))
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	out := make([]offerDTO, 0, len(views))
+	for _, v := range views {
+		out = append(out, offerDTO(v))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

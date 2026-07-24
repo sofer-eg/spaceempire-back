@@ -13,6 +13,7 @@ import (
 	"spaceempire/back/internal/auth"
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/economy/rent"
+	"spaceempire/back/internal/quest"
 	"spaceempire/back/internal/sector"
 )
 
@@ -113,6 +114,25 @@ type shipCaptureFrame struct {
 	SectorID int64  `json:"sectorId"`
 	Captor   bool   `json:"captor"`
 	Success  bool   `json:"success"`
+}
+
+// questOfferBuffer caps the per-WS queue of quest-offer events (TASK-89). The
+// pacer dozes offers (one per ~10-20 docks/jumps), so offers are rare; a small
+// buffer is ample and overflow drops the oldest (the panel re-fetches via GET
+// /api/quests/offerable, so the offer is never lost — NFR-R).
+const questOfferBuffer = 4
+
+// questOfferFrame is the WS frame pushed to a player when the pacer generates a
+// personal quest offer (TASK-89, FR-10). The SPA logs it in the journal's quest
+// tab with an "accept" button (accept round-trips POST /api/quests/{offerId}/accept).
+type questOfferFrame struct {
+	Type        string `json:"type"`
+	OfferID     string `json:"offerId"`
+	Title       string `json:"title"`
+	Desc        string `json:"desc"`
+	Source      string `json:"source"`
+	ExpiresUnix int64  `json:"expiresUnix"`
+	RewardCash  int64  `json:"rewardCash"`
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +354,38 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, knockCh, hackCh, captureCh, playerID)
+	// Subscribe to per-player quest-offer events (TASK-89) on the same bus. Same
+	// pattern as ship capture: decode and forward to a buffered channel the push
+	// loop drains. Unauthenticated clients skip it.
+	questOfferCh := make(chan questOfferFrame, questOfferBuffer)
+	if s.handoffBus != nil && playerID != 0 {
+		err := s.handoffBus.Subscribe(ctx, quest.OfferTopic(playerID), func(payload []byte) {
+			var ev quest.OfferEvent
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				s.logger.Warn("ws decode quest offer", "err", err, "player", int64(playerID))
+				return
+			}
+			frame := questOfferFrame{
+				Type:        "quest_offer",
+				OfferID:     ev.OfferID,
+				Title:       ev.Title,
+				Desc:        ev.Desc,
+				Source:      ev.Source,
+				ExpiresUnix: ev.ExpiresUnix,
+				RewardCash:  ev.RewardCash,
+			}
+			select {
+			case questOfferCh <- frame:
+			default:
+				s.logger.Warn("ws quest offer event dropped — buffer full", "player", int64(playerID))
+			}
+		})
+		if err != nil {
+			s.logger.Warn("ws quest offer subscribe", "err", err, "player", int64(playerID))
+		}
+	}
+
+	s.wsPushLoop(ctx, conn, sub, unsub, handoffCh, rentCh, policeCh, knockCh, hackCh, captureCh, questOfferCh, playerID)
 }
 
 // initialSubscribeSector chooses which sector a freshly opened WS should
@@ -440,6 +491,7 @@ func (s *Server) wsPushLoop(
 	moduleKnocked <-chan moduleKnockedFrame,
 	stationHacked <-chan stationHackedFrame,
 	shipCapture <-chan shipCaptureFrame,
+	questOffer <-chan questOfferFrame,
 	playerID domain.PlayerID,
 ) {
 	currentSector := sub.SectorID
@@ -520,6 +572,21 @@ func (s *Server) wsPushLoop(
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					s.logger.Debug("ws write ship capture", "err", err)
+				}
+				return
+			}
+		case frame := <-questOffer:
+			payload, err := json.Marshal(frame)
+			if err != nil {
+				s.logger.Warn("ws marshal quest offer", "err", err)
+				continue
+			}
+			writeCtx, wc := context.WithTimeout(ctx, wsWriteTimeout)
+			err = conn.Write(writeCtx, websocket.MessageText, payload)
+			wc()
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					s.logger.Debug("ws write quest offer", "err", err)
 				}
 				return
 			}

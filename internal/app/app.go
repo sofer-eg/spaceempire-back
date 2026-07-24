@@ -671,15 +671,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// Quests (8.12): tutorial/mission engine. Lazy-starts the tutorial on the
 	// first GET /api/quests/active; a background poller advances steps from
 	// player state and grants rewards (reward+advance atomic in one tx).
-	questPool := quest.NewPoolRepo(questsrepo.New(pool), playersRepoPersistence)
+	questOffersRepo := questsrepo.NewOffers(pool)
+	questPool := quest.NewPoolRepo(questsrepo.New(pool), playersRepoPersistence, questOffersRepo)
 	// 8.18: quest-NPC spawn lifecycle over the 9.5 runtime spawn machinery.
 	questNPCs := &questSpawner{
 		ships: shipRepo, aiState: aiStateRepo, pool: sectorPool, topology: topology,
 		classes: shipClasses, npc: npcPlayerID, shipCfg: spawnCfg, logger: logger,
 	}
-	questSvc := quest.New(questPool, quest.NewRepoTxRunner(txManager, questPool), questNPCs, realClock, logger)
+	questSvc := quest.New(questPool, quest.NewRepoTxRunner(txManager, questPool), questPool, questNPCs, realClock, logger)
 	quest.NewServer(questSvc, logger).RegisterRoutes(srv.Mux(), authSrv.RequireAuth)
-	questCloser := quest.NewCloser(questSvc, realClock, logger, 5*time.Second)
+	questCloser := quest.NewCloser(questSvc, questOffersRepo, realClock, logger, 5*time.Second)
 
 	// Quest v2 (8.17/8.18): discrete event-driven steps. Translate the kill bus
 	// and the api-published cargo/trade signals into quest.Event and feed

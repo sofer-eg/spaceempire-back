@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,12 +28,24 @@ func mustDefJSON(t *testing.T, def quest.Def) []byte {
 // targets, and spawns are all preserved.
 func TestUnit_Quest_DefJSONRoundTrip(t *testing.T) {
 	t.Parallel()
+	// A generator-shaped instance: a StepDeliver bound to a concrete station
+	// (EntityRef Target non-zero), plus Qty/Amount/Count fields set — the fields
+	// the earlier round-trip case did not exercise.
+	genShaped := quest.Def{
+		ID: "deliver", Title: "Доставка груза", Offerable: true, Deadline: 12 * time.Hour,
+		Steps: []quest.Step{
+			{Kind: quest.StepAcquireCargo, Qty: 9, Amount: 4200, Goods: 40, Desc: "Купи 9 ед."},
+			{Kind: quest.StepDeliver, Goods: 40, Count: 9, RewardCash: 4200,
+				Target: domain.EntityRef{Kind: domain.EntityKindStation, ID: 3}, Desc: "Доставь 9 ед."},
+		},
+	}
 	for _, def := range []quest.Def{
 		quest.Patrol,         // Deadline (time.Duration)
 		quest.Saga2,          // Sector + Prerequisite
 		quest.Siege,          // Spawns + FromGate
 		quest.DeliverPackage, // multi-step, Goods, spawns in another sector
 		quest.ComplexTrade,   // trade Side
+		genShaped,            // Step.Target (EntityRef), Qty, Amount, Count
 	} {
 		b, err := json.Marshal(def)
 		require.NoError(t, err)

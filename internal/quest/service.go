@@ -4,12 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/pkg/clock"
 )
+
+// procIDPrefix marks a quest id that refers to a generated offer instance
+// (TASK-89). Accept resolves "proc:<offer_id>" through the offer store; every
+// other id is a static catalogue quest resolved through Lookup.
+const procIDPrefix = "proc:"
 
 // ErrNotOfferable / ErrPrerequisiteNotMet gate the accept endpoint.
 var (
@@ -40,8 +49,20 @@ type Spawner interface {
 	Despawn(ctx context.Context, ships []domain.ShipID)
 }
 
+// OfferStore reads the player's generated offers off the pool (TASK-89): the
+// accept path fetches one offer by id (ownership-scoped), the offerable list
+// reads all un-expired ones. Mutations (materialise + delete) run in the accept
+// transaction via TxRepo. Satisfied by *PoolRepo.
+type OfferStore interface {
+	GetOffer(ctx context.Context, id int64, player domain.PlayerID) (domain.QuestOffer, bool, error)
+	ListActiveOffersByPlayer(ctx context.Context, player domain.PlayerID, now time.Time) ([]domain.QuestOffer, error)
+}
+
 // TxRepo is the slice of mutations a step advance needs, bound to one tx so the
-// reward and the step advance commit together (reward-exactly-once).
+// reward and the step advance commit together (reward-exactly-once). It also
+// carries the accept-time mutations (TASK-89): materialising a player_quests row
+// and deleting the consumed offer in the same transaction, so accept is atomic
+// (NFR-R / R-4: the TTL sweep never races a half-applied accept).
 type TxRepo interface {
 	// Lock re-reads the progress row FOR UPDATE so concurrent event/poll
 	// advances serialise on it.
@@ -51,6 +72,11 @@ type TxRepo interface {
 	Complete(ctx context.Context, player domain.PlayerID, questID string, finalStep int, at time.Time) error
 	Fail(ctx context.Context, player domain.PlayerID, questID string, at time.Time) error
 	AdjustCash(ctx context.Context, p domain.PlayerID, delta int64) (int64, error)
+	// Ensure / EnsureWithDefinition materialise a quest on accept; DeleteOffer
+	// consumes the offer that produced it (both in the accept tx).
+	Ensure(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time) error
+	EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error
+	DeleteOffer(ctx context.Context, id int64, player domain.PlayerID) (bool, error)
 }
 
 // TxRunner runs fn inside a transaction with a TxRepo bound to it.
@@ -64,18 +90,23 @@ type TxRunner interface {
 type Service struct {
 	store   Store
 	tx      TxRunner
+	offers  OfferStore
 	spawner Spawner
 	clock   clock.Clock
 	logger  *slog.Logger
+
+	// brokenDefs deduplicates the "malformed definition" log so one zombie proc
+	// row does not spam an Error on every poll tick / ship death (MR2 review).
+	brokenDefs sync.Map
 }
 
 // New wires a Service. spawner may be nil (no quest-NPC spawning). A nil logger
 // falls back to slog.Default.
-func New(store Store, tx TxRunner, spawner Spawner, clk clock.Clock, logger *slog.Logger) *Service {
+func New(store Store, tx TxRunner, offers OfferStore, spawner Spawner, clk clock.Clock, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{store: store, tx: tx, spawner: spawner, clock: clk, logger: logger}
+	return &Service{store: store, tx: tx, offers: offers, spawner: spawner, clock: clk, logger: logger}
 }
 
 // ActiveView is one active/recent quest projected for GET /api/quests/active.
@@ -128,12 +159,22 @@ func (s *Service) resolveDef(prog domain.QuestProgress) (Def, bool) {
 	if len(prog.Definition) > 0 {
 		var def Def
 		if err := json.Unmarshal(prog.Definition, &def); err != nil {
-			s.logger.Error("quest resolve definition", "err", err, "quest", prog.QuestID)
+			s.logBrokenDefOnce("quest:"+prog.QuestID, err)
 			return Def{}, false
 		}
 		return def, true
 	}
 	return Lookup(prog.QuestID)
+}
+
+// logBrokenDefOnce logs a malformed-definition Error the first time it sees a
+// given key, then stays silent for it. Without this, OnShipDestroyed (which
+// iterates every active quest on every ship death) and the poller would re-log
+// the same broken proc row on every tick (MR2 review).
+func (s *Service) logBrokenDefOnce(key string, err error) {
+	if _, seen := s.brokenDefs.LoadOrStore(key, struct{}{}); !seen {
+		s.logger.Error("quest resolve definition", "err", err, "key", key)
+	}
 }
 
 // view projects progress + its definition into the API shape.
@@ -166,9 +207,14 @@ func (s *Service) view(p domain.QuestProgress) *ActiveView {
 	return v
 }
 
-// Accept starts an offerable quest for the player after checking its
-// prerequisite chain. Idempotent (re-accepting an active/done quest is a no-op).
+// Accept starts a quest for the player. A "proc:<offer_id>" id materialises a
+// generated offer (TASK-89); any other id is a static catalogue quest. The
+// static path is unchanged (regression 8.17/8.18): the offerable list no longer
+// surfaces the static catalogue, but a direct static accept still works.
 func (s *Service) Accept(ctx context.Context, player domain.PlayerID, questID string) error {
+	if offerID, ok := parseProcID(questID); ok {
+		return s.acceptOffer(ctx, player, questID, offerID)
+	}
 	def, ok := Lookup(questID)
 	if !ok || !def.Offerable {
 		return ErrNotOfferable
@@ -200,6 +246,164 @@ func (s *Service) Accept(ctx context.Context, player domain.PlayerID, questID st
 		return s.spawnFor(ctx, player, def)
 	}
 	return nil
+}
+
+// parseProcID extracts the offer id from a "proc:<n>" quest id. A malformed or
+// non-proc id returns ok=false (the caller treats it as not offerable → 404).
+func parseProcID(questID string) (int64, bool) {
+	rest, ok := strings.CutPrefix(questID, procIDPrefix)
+	if !ok {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+// acceptOffer materialises a generated offer into an active quest and consumes
+// the offer, atomically (FR-07). A procedural offer freezes its definition into
+// player_quests.definition (with the accepted id stamped so a re-generated kind
+// never collides on the (player, quest_id) PK — MR3 review W3); a story offer
+// resolves through its static template_id and materialises exactly like a direct
+// static accept. Ownership, absence and expiry all map to ErrNotOfferable (404;
+// STRIDE spoofing). Spawns run post-commit, best-effort, like the static path.
+func (s *Service) acceptOffer(ctx context.Context, player domain.PlayerID, questID string, offerID int64) error {
+	offer, ok, err := s.offers.GetOffer(ctx, offerID, player)
+	if err != nil {
+		return fmt.Errorf("get offer: %w", err)
+	}
+	now := s.clock.Now()
+	if !ok || !offer.ExpiresAt.After(now) {
+		// Absent, foreign, or expired — indistinguishable to the caller by
+		// design (no information disclosure), and re-accept is 404 by effect.
+		return ErrNotOfferable
+	}
+
+	proc := len(offer.Definition) > 0
+	var (
+		def         Def
+		activeID    string
+		definition2 []byte
+	)
+	if proc {
+		if err := json.Unmarshal(offer.Definition, &def); err != nil {
+			return fmt.Errorf("unmarshal offer definition: %w", err)
+		}
+		activeID = questID // proc:<offer_id> — stable, collision-free PK
+		def.ID = activeID
+		if definition2, err = json.Marshal(def); err != nil {
+			return fmt.Errorf("marshal accepted definition: %w", err)
+		}
+	} else {
+		d, found := Lookup(offer.TemplateID)
+		if !found {
+			return ErrNotOfferable
+		}
+		def = d
+		activeID = def.ID // static catalogue id, resolves via Lookup thereafter
+	}
+
+	var deadline *time.Time
+	if def.Deadline > 0 {
+		d := now.Add(def.Deadline)
+		deadline = &d
+	}
+
+	if err := s.tx.Do(ctx, func(ctx context.Context, repo TxRepo) error {
+		if proc {
+			if err := repo.EnsureWithDefinition(ctx, player, activeID, deadline, definition2); err != nil {
+				return err
+			}
+		} else if err := repo.Ensure(ctx, player, activeID, deadline); err != nil {
+			return err
+		}
+		if _, err := repo.DeleteOffer(ctx, offerID, player); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("accept offer: %w", err)
+	}
+
+	// Post-commit, best-effort (like the static Accept): procedural instances
+	// carry no spawns; story offers can (X-Tension kill/escort quests).
+	return s.spawnFor(ctx, player, def)
+}
+
+// OfferView is one un-accepted offer projected for GET /api/quests/offerable
+// (FR-10). OfferID is the "proc:<offer_id>" accept handle for both procedural
+// and story offers.
+type OfferView struct {
+	OfferID     string
+	Title       string
+	Desc        string
+	Source      string
+	ExpiresUnix int64
+	RewardCash  int64
+}
+
+// OfferableList returns the player's un-expired, un-accepted offers (FR-10 /
+// AC-8): the offerable endpoint no longer serves the static catalogue, only
+// these personal offers. An offer whose definition/template no longer resolves
+// is skipped (soft degradation), so the list can be empty.
+func (s *Service) OfferableList(ctx context.Context, player domain.PlayerID) ([]OfferView, error) {
+	offers, err := s.offers.ListActiveOffersByPlayer(ctx, player, s.clock.Now())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OfferView, 0, len(offers))
+	for _, o := range offers {
+		def, ok := s.offerDef(o)
+		if !ok {
+			continue
+		}
+		out = append(out, OfferView{
+			OfferID:     fmt.Sprintf("%s%d", procIDPrefix, o.ID),
+			Title:       def.Title,
+			Desc:        offerSummary(def),
+			Source:      o.Source,
+			ExpiresUnix: o.ExpiresAt.Unix(),
+			RewardCash:  offerReward(def),
+		})
+	}
+	return out, nil
+}
+
+// offerDef resolves an offer's definition: a procedural offer carries its frozen
+// JSONB, a story offer resolves through Lookup(TemplateID). ok=false when the
+// JSONB is malformed or the story template is unknown.
+func (s *Service) offerDef(o domain.QuestOffer) (Def, bool) {
+	if len(o.Definition) > 0 {
+		var def Def
+		if err := json.Unmarshal(o.Definition, &def); err != nil {
+			s.logBrokenDefOnce(fmt.Sprintf("offer:%d", o.ID), err)
+			return Def{}, false
+		}
+		return def, true
+	}
+	return Lookup(o.TemplateID)
+}
+
+// offerReward sums a definition's per-step rewards for the journal projection.
+// (Mirrors the pacer's own summary; kept local so this MR does not touch the
+// pacer package.)
+func offerReward(def Def) int64 {
+	var total int64
+	for _, st := range def.Steps {
+		total += st.RewardCash
+	}
+	return total
+}
+
+// offerSummary is the journal one-liner: the first step's description, else the
+// title.
+func offerSummary(def Def) string {
+	if len(def.Steps) > 0 && def.Steps[0].Desc != "" {
+		return def.Steps[0].Desc
+	}
+	return def.Title
 }
 
 // spawnFor resolves a quest's NPC spawns and records role→shipIDs in its state
@@ -441,14 +645,13 @@ func (s *Service) ProcessAll(ctx context.Context, limit int) error {
 }
 
 func (s *Service) advance(ctx context.Context, prog domain.QuestProgress) error {
-	def, ok := s.resolveDef(prog)
-	if !ok {
-		return nil
-	}
 	now := s.clock.Now()
 
-	// Deadline first: an expired quest fails regardless of step kind (and
-	// despawns its NPCs).
+	// Deadline first, BEFORE resolving the definition: an expired quest fails
+	// regardless of step kind (and despawns its NPCs). Doing this ahead of
+	// resolveDef means a proc instance whose definition no longer resolves
+	// (corrupt JSONB) still fails on its deadline instead of lingering active
+	// forever — the deadline path needs no definition (MR2 review).
 	if !prog.DeadlineAt.IsZero() && now.After(prog.DeadlineAt) {
 		var despawnSt *questState
 		err := s.tx.Do(ctx, func(ctx context.Context, repo TxRepo) error {
@@ -467,6 +670,11 @@ func (s *Service) advance(ctx context.Context, prog domain.QuestProgress) error 
 			s.despawn(ctx, *despawnSt)
 		}
 		return err
+	}
+
+	def, ok := s.resolveDef(prog)
+	if !ok {
+		return nil
 	}
 
 	// escort_survive advances by a survival timer (one tick per poll), not the

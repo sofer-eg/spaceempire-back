@@ -12,21 +12,27 @@ import (
 	"spaceempire/back/internal/pkg/database"
 )
 
-// PoolRepo composes the quests and players repositories. The base (pool-backed)
-// instance is the Service's Store; withExecutor binds a fresh set to a
-// transaction for the step-advance TxRepo. Mirrors rent.PoolRepo.
+// PoolRepo composes the quests, players and offers repositories. The base
+// (pool-backed) instance is the Service's Store + OfferStore; withExecutor binds
+// a fresh set to a transaction for the step-advance / accept TxRepo. Mirrors
+// rent.PoolRepo.
 type PoolRepo struct {
 	quests  *questsrepo.Repository
 	players *playersrepo.Repository
+	offers  *questsrepo.OfferRepository
 }
 
 // NewPoolRepo wires a PoolRepo.
-func NewPoolRepo(quests *questsrepo.Repository, players *playersrepo.Repository) *PoolRepo {
-	return &PoolRepo{quests: quests, players: players}
+func NewPoolRepo(quests *questsrepo.Repository, players *playersrepo.Repository, offers *questsrepo.OfferRepository) *PoolRepo {
+	return &PoolRepo{quests: quests, players: players, offers: offers}
 }
 
 func (r *PoolRepo) withExecutor(exec database.Executor) *PoolRepo {
-	return &PoolRepo{quests: r.quests.WithExecutor(exec), players: r.players.WithExecutor(exec)}
+	return &PoolRepo{
+		quests:  r.quests.WithExecutor(exec),
+		players: r.players.WithExecutor(exec),
+		offers:  r.offers.WithExecutor(exec),
+	}
 }
 
 // --- Store (pool) ---
@@ -37,6 +43,25 @@ func (r *PoolRepo) Get(ctx context.Context, player domain.PlayerID, questID stri
 
 func (r *PoolRepo) Ensure(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time) error {
 	return r.quests.Ensure(ctx, player, questID, deadlineAt)
+}
+
+func (r *PoolRepo) EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error {
+	return r.quests.EnsureWithDefinition(ctx, player, questID, deadlineAt, definition)
+}
+
+// --- OfferStore (pool) ---
+
+func (r *PoolRepo) GetOffer(ctx context.Context, id int64, player domain.PlayerID) (domain.QuestOffer, bool, error) {
+	return r.offers.GetOffer(ctx, id, player)
+}
+
+func (r *PoolRepo) ListActiveOffersByPlayer(ctx context.Context, player domain.PlayerID, now time.Time) ([]domain.QuestOffer, error) {
+	return r.offers.ListActiveOffersByPlayer(ctx, player, now)
+}
+
+// DeleteOffer consumes an offer in the accept tx (part of TxRepo).
+func (r *PoolRepo) DeleteOffer(ctx context.Context, id int64, player domain.PlayerID) (bool, error) {
+	return r.offers.DeleteOffer(ctx, id, player)
 }
 
 func (r *PoolRepo) Abandon(ctx context.Context, player domain.PlayerID, questID string) error {

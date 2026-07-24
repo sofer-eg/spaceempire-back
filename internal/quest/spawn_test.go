@@ -35,7 +35,7 @@ func (f *fakeSpawner) Despawn(_ context.Context, ids []domain.ShipID) {
 
 func newSpawnService(store *memStore, sp quest.Spawner) (*quest.Service, *clock.FakeClock) {
 	clk := clock.NewFakeClock(epoch)
-	return quest.New(store, runner{store: store}, sp, clk, nil), clk
+	return quest.New(store, runner{store: store}, store, sp, clk, nil), clk
 }
 
 func shipRef(id int64) domain.EntityRef {

@@ -2,6 +2,7 @@ package quest_test
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -13,13 +14,16 @@ import (
 	"spaceempire/back/internal/quest"
 )
 
-// memStore models the quest Store + TxRepo: progress per (player, quest), cash,
-// and the polled snapshot fields the test sets directly. Keyed by player then
-// quest id so chains (saga1+saga2) coexist for one player.
+// memStore models the quest Store + TxRepo + OfferStore: progress per
+// (player, quest), cash, offers by id, and the polled snapshot fields the test
+// sets directly. Keyed by player then quest id so chains (saga1+saga2) coexist
+// for one player.
 type memStore struct {
-	progress map[domain.PlayerID]map[string]domain.QuestProgress
-	cash     map[domain.PlayerID]int64
-	snap     map[domain.PlayerID]quest.Snapshot
+	progress    map[domain.PlayerID]map[string]domain.QuestProgress
+	cash        map[domain.PlayerID]int64
+	snap        map[domain.PlayerID]quest.Snapshot
+	offers      map[int64]domain.QuestOffer
+	nextOfferID int64
 }
 
 func newStore() *memStore {
@@ -27,7 +31,16 @@ func newStore() *memStore {
 		progress: map[domain.PlayerID]map[string]domain.QuestProgress{},
 		cash:     map[domain.PlayerID]int64{},
 		snap:     map[domain.PlayerID]quest.Snapshot{},
+		offers:   map[int64]domain.QuestOffer{},
 	}
+}
+
+// putOffer stores an offer under a fresh id and returns it (test helper).
+func (m *memStore) putOffer(o domain.QuestOffer) int64 {
+	m.nextOfferID++
+	o.ID = m.nextOfferID
+	m.offers[o.ID] = o
+	return o.ID
 }
 
 func (m *memStore) put(p domain.QuestProgress) {
@@ -136,6 +149,47 @@ func (m *memStore) AdjustCash(_ context.Context, p domain.PlayerID, delta int64)
 	return m.cash[p], nil
 }
 
+func (m *memStore) EnsureWithDefinition(_ context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error {
+	if _, ok := m.progress[player][questID]; ok {
+		return nil // ON CONFLICT DO NOTHING
+	}
+	p := domain.QuestProgress{Player: player, QuestID: questID, Status: domain.QuestActive, Definition: definition}
+	if deadlineAt != nil {
+		p.DeadlineAt = *deadlineAt
+	}
+	m.put(p)
+	return nil
+}
+
+// --- OfferStore + offer deletion (TxRepo) ---
+
+func (m *memStore) GetOffer(_ context.Context, id int64, player domain.PlayerID) (domain.QuestOffer, bool, error) {
+	o, ok := m.offers[id]
+	if !ok || o.Player != player {
+		return domain.QuestOffer{}, false, nil
+	}
+	return o, true, nil
+}
+
+func (m *memStore) ListActiveOffersByPlayer(_ context.Context, player domain.PlayerID, now time.Time) ([]domain.QuestOffer, error) {
+	var out []domain.QuestOffer
+	for _, o := range m.offers {
+		if o.Player == player && o.ExpiresAt.After(now) {
+			out = append(out, o)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (m *memStore) DeleteOffer(_ context.Context, id int64, player domain.PlayerID) (bool, error) {
+	if o, ok := m.offers[id]; ok && o.Player == player {
+		delete(m.offers, id)
+		return true, nil
+	}
+	return false, nil
+}
+
 type runner struct{ store *memStore }
 
 func (r runner) Do(ctx context.Context, fn func(ctx context.Context, repo quest.TxRepo) error) error {
@@ -146,7 +200,7 @@ var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func newService(store *memStore) (*quest.Service, *clock.FakeClock) {
 	clk := clock.NewFakeClock(epoch)
-	return quest.New(store, runner{store: store}, nil, clk, nil), clk
+	return quest.New(store, runner{store: store}, store, nil, clk, nil), clk
 }
 
 func (m *memStore) status(player domain.PlayerID, questID string) domain.QuestStatus {

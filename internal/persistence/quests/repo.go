@@ -48,6 +48,20 @@ func (r *Repository) Ensure(ctx context.Context, player domain.PlayerID, questID
 	return nil
 }
 
+const ensureWithDefinitionSQL = `
+INSERT INTO player_quests (player_id, quest_id, deadline_at, definition) VALUES ($1, $2, $3, $4)
+ON CONFLICT (player_id, quest_id) DO NOTHING`
+
+// EnsureWithDefinition starts a procedural quest instance at step 0, carrying
+// its frozen definition JSONB (TASK-89). Idempotent like Ensure (ON CONFLICT DO
+// NOTHING); used inside the accept transaction alongside the offer's deletion.
+func (r *Repository) EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error {
+	if _, err := r.exec.Exec(ctx, ensureWithDefinitionSQL, int64(player), questID, deadlineAt, definition); err != nil {
+		return fmt.Errorf("ensure quest with definition: %w", err)
+	}
+	return nil
+}
+
 const abandonSQL = `
 UPDATE player_quests SET status = 'abandoned'
 WHERE player_id = $1 AND quest_id = $2 AND status = 'active'`

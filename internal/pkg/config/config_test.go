@@ -69,3 +69,45 @@ func TestUnit_Load_SectorEnvOverride(t *testing.T) {
 		t.Fatalf("Sector.InboxCapacity = %d, want 512", cfg.Sector.InboxCapacity)
 	}
 }
+
+// TestUnit_Load_QuestDefaults locks the TASK-89 v1.2 procedural-quest defaults
+// (SRS §7.5), including the time.Duration and float64 tags whose parse errors
+// would otherwise only surface at runtime.
+func TestUnit_Load_QuestDefaults(t *testing.T) {
+	t.Setenv("CONFIG_PATH", "")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	q := cfg.Quest
+	checks := []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"TargetRadius", q.TargetRadius, 3},
+		{"GoodsRadius", q.GoodsRadius, 3},
+		{"DocksMin", q.DocksMin, 10},
+		{"DocksMax", q.DocksMax, 20},
+		{"JumpsMin", q.JumpsMin, 10},
+		{"JumpsMax", q.JumpsMax, 20},
+		{"MaxPendingOffers", q.MaxPendingOffers, 3},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Fatalf("Quest.%s = %d, want %d", c.name, c.got, c.want)
+		}
+	}
+	if q.StoryShare != 0.25 {
+		t.Fatalf("Quest.StoryShare = %v, want 0.25", q.StoryShare)
+	}
+	if q.OfferTTL.String() != "24h0m0s" {
+		t.Fatalf("Quest.OfferTTL = %s, want 24h0m0s", q.OfferTTL)
+	}
+	if q.RewardBase != 2000 || q.RewardPerHop != 1500 || q.RewardPerUnit != 300 || q.RewardPerEnemy != 4000 {
+		t.Fatalf("Quest reward coeffs = (%d,%d,%d,%d), want (2000,1500,300,4000)",
+			q.RewardBase, q.RewardPerHop, q.RewardPerUnit, q.RewardPerEnemy)
+	}
+}

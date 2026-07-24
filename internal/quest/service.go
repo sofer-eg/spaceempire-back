@@ -72,10 +72,13 @@ type TxRepo interface {
 	Complete(ctx context.Context, player domain.PlayerID, questID string, finalStep int, at time.Time) error
 	Fail(ctx context.Context, player domain.PlayerID, questID string, at time.Time) error
 	AdjustCash(ctx context.Context, p domain.PlayerID, delta int64) (int64, error)
-	// Ensure / EnsureWithDefinition materialise a quest on accept; DeleteOffer
-	// consumes the offer that produced it (both in the accept tx).
-	Ensure(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time) error
-	EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error
+	// EnsureWithDefinition materialises a quest on accept — story (definition
+	// nil → resolved via Lookup) and proc (frozen JSONB) share this one path.
+	// It reports inserted=false when a row already existed (ON CONFLICT DO
+	// NOTHING) so the caller gates the post-commit spawn on a real insert
+	// (review C1). DeleteOffer consumes the offer that produced it (both in the
+	// accept tx).
+	EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) (bool, error)
 	DeleteOffer(ctx context.Context, id int64, player domain.PlayerID) (bool, error)
 }
 
@@ -267,8 +270,17 @@ func parseProcID(questID string) (int64, bool) {
 // player_quests.definition (with the accepted id stamped so a re-generated kind
 // never collides on the (player, quest_id) PK — MR3 review W3); a story offer
 // resolves through its static template_id and materialises exactly like a direct
-// static accept. Ownership, absence and expiry all map to ErrNotOfferable (404;
-// STRIDE spoofing). Spawns run post-commit, best-effort, like the static path.
+// static accept (definition NULL → resolved via Lookup thereafter). Ownership,
+// absence and expiry all map to ErrNotOfferable (404; STRIDE spoofing).
+//
+// Both paths go through the one EnsureWithDefinition call so the spawn is gated
+// on a real insert: the StaticStoryPicker can emit two live offers for the same
+// spawn-bearing story quest (its eligibility check reads the player_quests row,
+// not a live offer), and a concurrent double-accept of a single offer both reach
+// here — in either case the second Ensure hits ON CONFLICT DO NOTHING
+// (inserted=false) and must NOT spawn again, else batch #1 goes untracked (never
+// counted toward the kill goal, never despawned) and its state is clobbered
+// (review C1 / C-note).
 func (s *Service) acceptOffer(ctx context.Context, player domain.PlayerID, questID string, offerID int64) error {
 	offer, ok, err := s.offers.GetOffer(ctx, offerID, player)
 	if err != nil {
@@ -285,7 +297,7 @@ func (s *Service) acceptOffer(ctx context.Context, player domain.PlayerID, quest
 	var (
 		def         Def
 		activeID    string
-		definition2 []byte
+		definition2 []byte // proc: frozen JSONB; story: nil (resolved via Lookup)
 	)
 	if proc {
 		if err := json.Unmarshal(offer.Definition, &def); err != nil {
@@ -303,6 +315,13 @@ func (s *Service) acceptOffer(ctx context.Context, player domain.PlayerID, quest
 		}
 		def = d
 		activeID = def.ID // static catalogue id, resolves via Lookup thereafter
+		// W1 invariant: the story path mirrors the static Accept's Offerable
+		// gate. A cheap guard, not a full prerequisite re-check — the
+		// StaticStoryPicker already gated Prerequisite (completed is terminal)
+		// when it created the offer, so re-verifying here would be redundant.
+		if !def.Offerable {
+			return ErrNotOfferable
+		}
 	}
 
 	var deadline *time.Time
@@ -311,14 +330,13 @@ func (s *Service) acceptOffer(ctx context.Context, player domain.PlayerID, quest
 		deadline = &d
 	}
 
+	var inserted bool
 	if err := s.tx.Do(ctx, func(ctx context.Context, repo TxRepo) error {
-		if proc {
-			if err := repo.EnsureWithDefinition(ctx, player, activeID, deadline, definition2); err != nil {
-				return err
-			}
-		} else if err := repo.Ensure(ctx, player, activeID, deadline); err != nil {
+		ins, err := repo.EnsureWithDefinition(ctx, player, activeID, deadline, definition2)
+		if err != nil {
 			return err
 		}
+		inserted = ins
 		if _, err := repo.DeleteOffer(ctx, offerID, player); err != nil {
 			return err
 		}
@@ -327,9 +345,14 @@ func (s *Service) acceptOffer(ctx context.Context, player domain.PlayerID, quest
 		return fmt.Errorf("accept offer: %w", err)
 	}
 
-	// Post-commit, best-effort (like the static Accept): procedural instances
-	// carry no spawns; story offers can (X-Tension kill/escort quests).
-	return s.spawnFor(ctx, player, def)
+	// Spawn only when this accept actually inserted the row (post-commit,
+	// best-effort like the static Accept). A duplicate accept is a no-op by
+	// effect — 204 without a second spawn. Procedural instances carry no spawns;
+	// story offers can (X-Tension kill/escort quests).
+	if inserted {
+		return s.spawnFor(ctx, player, def)
+	}
+	return nil
 }
 
 // OfferView is one un-accepted offer projected for GET /api/quests/offerable
@@ -383,7 +406,13 @@ func (s *Service) offerDef(o domain.QuestOffer) (Def, bool) {
 		}
 		return def, true
 	}
-	return Lookup(o.TemplateID)
+	def, ok := Lookup(o.TemplateID)
+	if !ok {
+		// S2: an unknown story template silently drops from OfferableList; a
+		// Debug line makes it observable, mirroring the malformed-JSONB path.
+		s.logger.Debug("quest offer template not found", "offer", o.ID, "template", o.TemplateID)
+	}
+	return def, ok
 }
 
 // offerReward sums a definition's per-step rewards for the journal projection.

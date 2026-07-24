@@ -125,6 +125,52 @@ func TestUnit_Quest_AcceptStoryOffer_Spawns(t *testing.T) {
 	assert.NotEmpty(t, sp.spawns, "story offer with spawns spawns on accept")
 }
 
+// TestUnit_Quest_AcceptStoryOffer_DoubleAcceptSpawnsOnce is the C1 regression:
+// the StaticStoryPicker can emit two live offers for one spawn-bearing story
+// quest (its eligibility check reads the player_quests row, not a live offer),
+// so a player can accept both. The first accept inserts the row and spawns the
+// NPC batch; the second hits ON CONFLICT DO NOTHING (inserted=false) and must NOT
+// re-spawn — otherwise batch #1 goes untracked and the quest state is clobbered.
+func TestUnit_Quest_AcceptStoryOffer_DoubleAcceptSpawnsOnce(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newStore()
+	sp := &fakeSpawner{}
+	svc, clk := newSpawnService(store, sp)
+
+	// Two live offers for the SAME spawn-bearing story quest (xt_6008000 spawns
+	// one "target" and is Offerable).
+	id1 := store.putOffer(domain.QuestOffer{
+		Player: questPlayer, TemplateID: "xt_6008000", Definition: nil,
+		Source: "dock", ExpiresAt: clk.Now().Add(time.Hour),
+	})
+	id2 := store.putOffer(domain.QuestOffer{
+		Player: questPlayer, TemplateID: "xt_6008000", Definition: nil,
+		Source: "space", ExpiresAt: clk.Now().Add(time.Hour),
+	})
+
+	// Accept A: inserts the row, consumes offer A, spawns batch #1.
+	require.NoError(t, svc.Accept(ctx, questPlayer, fmt.Sprintf("proc:%d", id1)))
+	require.Len(t, sp.spawns, 1, "first accept spawns the target exactly once")
+	stateAfterA := store.progress[questPlayer]["xt_6008000"].State
+	require.NotEmpty(t, stateAfterA, "batch #1 links recorded in state")
+
+	// Accept B: row already exists → EnsureWithDefinition inserted=false, so NO
+	// second spawn. Offer B is still consumed (204-equivalent no-op).
+	require.NoError(t, svc.Accept(ctx, questPlayer, fmt.Sprintf("proc:%d", id2)))
+	require.Len(t, sp.spawns, 1, "second accept does NOT re-spawn (gate on inserted)")
+
+	_, okA, _ := store.GetOffer(ctx, id1, questPlayer)
+	_, okB, _ := store.GetOffer(ctx, id2, questPlayer)
+	assert.False(t, okA, "offer A consumed")
+	assert.False(t, okB, "offer B consumed by the second accept")
+
+	// State (batch #1 spawn links) intact — a second SetState would clobber it.
+	assert.Equal(t, stateAfterA, store.progress[questPlayer]["xt_6008000"].State,
+		"quest state preserved: batch #1 remains the tracked spawn set")
+	assert.Equal(t, domain.QuestActive, store.status(questPlayer, "xt_6008000"))
+}
+
 // TestUnit_Quest_AcceptOffer_ForeignAndMissing — accepting a nonexistent offer,
 // another player's offer, or a malformed proc id all map to ErrNotOfferable
 // (404), never creating a quest (STRIDE spoofing).

@@ -45,7 +45,7 @@ func (r *PoolRepo) Ensure(ctx context.Context, player domain.PlayerID, questID s
 	return r.quests.Ensure(ctx, player, questID, deadlineAt)
 }
 
-func (r *PoolRepo) EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error {
+func (r *PoolRepo) EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) (bool, error) {
 	return r.quests.EnsureWithDefinition(ctx, player, questID, deadlineAt, definition)
 }
 

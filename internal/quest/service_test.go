@@ -149,16 +149,16 @@ func (m *memStore) AdjustCash(_ context.Context, p domain.PlayerID, delta int64)
 	return m.cash[p], nil
 }
 
-func (m *memStore) EnsureWithDefinition(_ context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error {
+func (m *memStore) EnsureWithDefinition(_ context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) (bool, error) {
 	if _, ok := m.progress[player][questID]; ok {
-		return nil // ON CONFLICT DO NOTHING
+		return false, nil // ON CONFLICT DO NOTHING → not inserted
 	}
 	p := domain.QuestProgress{Player: player, QuestID: questID, Status: domain.QuestActive, Definition: definition}
 	if deadlineAt != nil {
 		p.DeadlineAt = *deadlineAt
 	}
 	m.put(p)
-	return nil
+	return true, nil
 }
 
 // --- OfferStore + offer deletion (TxRepo) ---

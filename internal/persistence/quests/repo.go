@@ -52,14 +52,18 @@ const ensureWithDefinitionSQL = `
 INSERT INTO player_quests (player_id, quest_id, deadline_at, definition) VALUES ($1, $2, $3, $4)
 ON CONFLICT (player_id, quest_id) DO NOTHING`
 
-// EnsureWithDefinition starts a procedural quest instance at step 0, carrying
-// its frozen definition JSONB (TASK-89). Idempotent like Ensure (ON CONFLICT DO
-// NOTHING); used inside the accept transaction alongside the offer's deletion.
-func (r *Repository) EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) error {
-	if _, err := r.exec.Exec(ctx, ensureWithDefinitionSQL, int64(player), questID, deadlineAt, definition); err != nil {
-		return fmt.Errorf("ensure quest with definition: %w", err)
+// EnsureWithDefinition materialises a quest instance at step 0 inside the accept
+// transaction (TASK-89): a procedural offer passes its frozen definition JSONB, a
+// story offer passes nil (resolved via Lookup thereafter). Idempotent (ON CONFLICT
+// DO NOTHING); it reports inserted=false when a row already existed so the caller
+// gates the post-commit NPC spawn on a real insert — a duplicate accept must not
+// re-spawn (review C1).
+func (r *Repository) EnsureWithDefinition(ctx context.Context, player domain.PlayerID, questID string, deadlineAt *time.Time, definition []byte) (bool, error) {
+	tag, err := r.exec.Exec(ctx, ensureWithDefinitionSQL, int64(player), questID, deadlineAt, definition)
+	if err != nil {
+		return false, fmt.Errorf("ensure quest with definition: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 const abandonSQL = `

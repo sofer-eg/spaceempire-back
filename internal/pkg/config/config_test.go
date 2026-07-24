@@ -1,6 +1,9 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"spaceempire/back/internal/pkg/config"
@@ -109,5 +112,36 @@ func TestUnit_Load_QuestDefaults(t *testing.T) {
 	if q.RewardBase != 2000 || q.RewardPerHop != 1500 || q.RewardPerUnit != 300 || q.RewardPerEnemy != 4000 {
 		t.Fatalf("Quest reward coeffs = (%d,%d,%d,%d), want (2000,1500,300,4000)",
 			q.RewardBase, q.RewardPerHop, q.RewardPerUnit, q.RewardPerEnemy)
+	}
+}
+
+// TestUnit_Load_QuestMinThresholdValidation locks S3: a YAML override that sets
+// DocksMin/JumpsMin to 0 is rejected at load rather than silently misbehaving in
+// the pacer (a 0 threshold is treated as "not yet rolled" and re-rolled forever).
+func TestUnit_Load_QuestMinThresholdValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"docks_min_zero", "quest:\n  docks_min: 0\n", "DocksMin"},
+		{"jumps_min_zero", "quest:\n  jumps_min: 0\n", "JumpsMin"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			t.Setenv("CONFIG_PATH", path)
+
+			_, err := config.Load()
+			if err == nil {
+				t.Fatalf("Load: expected error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load error = %q, want it to mention %q", err.Error(), tc.want)
+			}
+		})
 	}
 }

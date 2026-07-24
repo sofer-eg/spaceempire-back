@@ -212,7 +212,9 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 		// TASK-89 pacer trigger: second publication on the fixed PlayerJumpedTopic
 		// so the quest pacer counts inter-sector transitions. Independent of the
 		// per-player handoff topic above (which WS needs) — do not merge them.
-		w.publishPlayerJumped(ship, targetSector)
+		// The helper re-checks NPC-ness (system player + AI controller) so an
+		// NPC jump never fires the pacer, even though its PlayerID is non-zero.
+		w.publishPlayerJumped(s, ship, targetSector)
 	}
 
 	// Phase 10.23: passengers ride along — their WS must follow the host into

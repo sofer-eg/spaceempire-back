@@ -36,12 +36,21 @@ type PlayerJumpedEvent struct {
 	TargetSector domain.SectorID `json:"target_sector"`
 }
 
-// publishPlayerDocked emits PlayerDockedEvent for a player-owned ship that
+// publishPlayerDocked emits PlayerDockedEvent for a real player's ship that
 // docked to a station or trade-station. Best-effort: a nil bus (unit tests) or
-// a publish error is logged, never blocking the tick. Shipyard/pirbase docks,
-// ship-to-ship docks and NPC ships do not fire (SRS §5 trigger scope).
+// a publish error is logged, never blocking the tick.
+//
+// It fires only for human players. NPC ships are system-owned (PlayerID ==
+// SystemPlayerID, which is non-zero here) and always carry an AI controller,
+// so the controller-presence gate excludes them by construction — the same NPC
+// test as police.go / knock.go. A PlayerID == 0 ship is an EVA suit / legacy
+// row with no real player to receive an offer, so it is skipped too. Shipyard/
+// pirbase docks and ship-to-ship docks also do not fire (SRS §5 trigger scope).
 func (w *Worker) publishPlayerDocked(s *sectorState, ship *domain.Ship, target domain.EntityRef) {
 	if w.bus == nil || ship.PlayerID == 0 {
+		return
+	}
+	if _, isNPC := s.controllers[ship.ID]; isNPC {
 		return
 	}
 	if target.Kind != domain.EntityKindStation && target.Kind != domain.EntityKindTradeStation {
@@ -58,11 +67,22 @@ func (w *Worker) publishPlayerDocked(s *sectorState, ship *domain.Ship, target d
 	}
 }
 
-// publishPlayerJumped emits PlayerJumpedEvent for a player-owned ship that
-// completed an inter-sector jump. Best-effort, mirroring publishPlayerDocked;
-// the caller has already confirmed ship.PlayerID != 0.
-func (w *Worker) publishPlayerJumped(ship *domain.Ship, targetSector domain.SectorID) {
-	if w.bus == nil {
+// publishPlayerJumped emits PlayerJumpedEvent for a real player's ship that
+// completed an inter-sector jump. Best-effort, mirroring publishPlayerDocked.
+// Like the dock trigger it fires only for human players: the controller gate
+// excludes NPCs (system-owned, PlayerID == SystemPlayerID, non-zero) and
+// PlayerID == 0 excludes EVA/legacy rows. Called before executeJump evicts the
+// ship, so s.controllers still holds the NPC's controller at this point.
+//
+// S4: only the jumping host ship is counted. Player passengers that ride along
+// receive a PlayerHandoffEvent (so their WS re-binds) but never a
+// PlayerJumpedEvent, so passive transit does not advance a passenger's jump
+// counter — the pacer meters the active pilot's navigation, by design.
+func (w *Worker) publishPlayerJumped(s *sectorState, ship *domain.Ship, targetSector domain.SectorID) {
+	if w.bus == nil || ship.PlayerID == 0 {
+		return
+	}
+	if _, isNPC := s.controllers[ship.ID]; isNPC {
 		return
 	}
 	ctx := context.Background()

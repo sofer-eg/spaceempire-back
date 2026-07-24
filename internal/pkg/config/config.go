@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -179,5 +180,25 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	if err := cfg.Quest.validate(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// validate rejects pacer thresholds that would misbehave (S3). The pacer treats
+// a stored threshold of 0 as "not yet rolled" and re-rolls it, so a min bound
+// of 0 lets randRange produce a 0 threshold that never sticks (and, once the
+// range collapses to 0, fires on every trigger). Requiring min >= 1 keeps a
+// rolled threshold meaningful. Max is left to randRange (it clamps max <= min
+// to min), so only the min bounds need guarding.
+func (q QuestConfig) validate() error {
+	if q.DocksMin < 1 {
+		return fmt.Errorf("config: Quest.DocksMin must be >= 1, got %d", q.DocksMin)
+	}
+	if q.JumpsMin < 1 {
+		return fmt.Errorf("config: Quest.JumpsMin must be >= 1, got %d", q.JumpsMin)
+	}
+	return nil
 }

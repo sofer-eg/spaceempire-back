@@ -254,6 +254,33 @@ func TestUnit_Pacer_StoryShareOne_AlwaysStory(t *testing.T) {
 	assert.Equal(t, "Сага: пролог", ev.Title)
 }
 
+// W1: StoryShare=1.0 always rolls story, but the player has exhausted the story
+// catalogue (Pick ok=false). The pacer must fall back to procedural generation
+// instead of burning the trigger — the offer is still created.
+func TestUnit_Pacer_StoryShareOne_EmptyStory_FallsBackToProcedural(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	cfg.StoryShare = 1.0
+	counters := &fakeCounters{stored: domain.QuestCounters{Player: 7, Docks: 11, NextDocks: 12}, hasRow: true}
+	offers := &fakeOffers{}
+	gen := &fakeGenerator{kind: "deliver", def: procDef(), ok: true}
+	story := &fakeStory{ok: false} // catalogue exhausted
+	pub := &fakePublisher{}
+	p := pacer.New(counters, offers, gen, story, pub, fixedClock(),
+		rand.New(rand.NewSource(1)), cfg, discardLogger())
+
+	require.NoError(t, p.OnDock(context.Background(), 7, 3))
+
+	require.Len(t, offers.inserted, 1, "empty story catalogue falls back to a procedural offer")
+	assert.Equal(t, 1, story.calls, "story picker consulted first")
+	assert.Equal(t, 1, gen.calls, "generator consulted as the fallback")
+	off := offers.inserted[0]
+	assert.Equal(t, "deliver", off.TemplateID)
+	assert.NotNil(t, off.Definition, "procedural fallback freezes its definition")
+	assert.Equal(t, 0, counters.stored.Docks, "threshold consumed by the issued offer")
+	require.Len(t, pub.published, 1, "the fallback offer is still published")
+}
+
 // StoryShare=0.0 always picks a procedural template; the story picker is never
 // consulted.
 func TestUnit_Pacer_StoryShareZero_AlwaysProcedural(t *testing.T) {

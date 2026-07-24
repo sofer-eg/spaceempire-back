@@ -127,16 +127,48 @@ func New(
 	}
 }
 
+// pendingPublish carries the data a fresh offer's journal frame needs, gathered
+// under the mutex by triggerLocked and published by trigger after the lock is
+// released (S1).
+type pendingPublish struct {
+	player    domain.PlayerID
+	offerID   int64
+	def       quest.Def
+	source    string
+	expiresAt time.Time
+}
+
 // trigger applies the shared pacing logic for one dock/jump event. docks and
 // jumps share this body, differing only in which counter/threshold/range they
 // drive and the source tag on the resulting offer.
+//
+// S1: all DB / rng work happens under p.mu inside triggerLocked; the journal
+// publish is done here, AFTER the lock is released. The offer is already
+// persisted by then, so a slow bus subscriber (e.g. a full WS buffer in MR5)
+// can no longer serialise every player's triggers through p.mu or back-pressure
+// the one-writer via the player.docked/jumped buffers.
 func (p *Pacer) trigger(ctx context.Context, player domain.PlayerID, playerSector domain.SectorID, kind triggerKind) error {
+	pub, err := p.triggerLocked(ctx, player, playerSector, kind)
+	if err != nil {
+		return err
+	}
+	if pub != nil {
+		p.publishOffer(ctx, pub.player, pub.offerID, pub.def, pub.source, pub.expiresAt)
+	}
+	return nil
+}
+
+// triggerLocked runs the pacing cycle under the mutex and returns the publish
+// payload for a freshly issued offer (nil when the trigger stayed silent, hit
+// the pending cap, or burned the attempt). Exactly one non-nil return maps to
+// one publish, preserving "one issuance = one publication".
+func (p *Pacer) triggerLocked(ctx context.Context, player domain.PlayerID, playerSector domain.SectorID, kind triggerKind) (*pendingPublish, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	counters, _, err := p.counters.GetCounters(ctx, player)
 	if err != nil {
-		return fmt.Errorf("get counters: %w", err)
+		return nil, fmt.Errorf("get counters: %w", err)
 	}
 	counters.Player = player // absent row reads as zero value with Player 0
 
@@ -147,28 +179,28 @@ func (p *Pacer) trigger(ctx context.Context, player domain.PlayerID, playerSecto
 		*threshold = p.randRange(tmin, tmax)
 	}
 	if *count < *threshold {
-		return p.upsert(ctx, counters) // silence until the threshold is met
+		return nil, p.upsert(ctx, counters) // silence until the threshold is met
 	}
 
 	now := p.clock.Now()
 	active, err := p.offers.CountActiveOffers(ctx, player, now)
 	if err != nil {
-		return fmt.Errorf("count active offers: %w", err)
+		return nil, fmt.Errorf("count active offers: %w", err)
 	}
 	if active >= p.cfg.MaxPendingOffers {
 		// AC-1b: at the live-offer cap, skip generation but still consume the
 		// threshold (reset + re-roll) so the next offer waits a full interval.
-		return p.resetAndUpsert(ctx, &counters, count, threshold, tmin, tmax)
+		return nil, p.resetAndUpsert(ctx, &counters, count, threshold, tmin, tmax)
 	}
 
 	templateID, def, definition, ok, err := p.produce(ctx, player, playerSector)
 	if err != nil {
-		return err // real failure: leave the counter unpersisted, retry next trigger
+		return nil, err // real failure: leave the counter unpersisted, retry next trigger
 	}
 	if !ok {
 		// Fail-closed (AC-3b): nothing solvable / no story candidate — the
 		// attempt burns, threshold re-rolled.
-		return p.resetAndUpsert(ctx, &counters, count, threshold, tmin, tmax)
+		return nil, p.resetAndUpsert(ctx, &counters, count, threshold, tmin, tmax)
 	}
 
 	offer := domain.QuestOffer{
@@ -181,21 +213,36 @@ func (p *Pacer) trigger(ctx context.Context, player domain.PlayerID, playerSecto
 	}
 	id, err := p.offers.InsertOffer(ctx, offer)
 	if err != nil {
-		return fmt.Errorf("insert offer: %w", err)
+		return nil, fmt.Errorf("insert offer: %w", err)
 	}
-	p.publishOffer(ctx, player, id, def, offer.Source, offer.ExpiresAt)
-
-	return p.resetAndUpsert(ctx, &counters, count, threshold, tmin, tmax)
+	if err := p.resetAndUpsert(ctx, &counters, count, threshold, tmin, tmax); err != nil {
+		return nil, err
+	}
+	return &pendingPublish{
+		player:    player,
+		offerID:   id,
+		def:       def,
+		source:    offer.Source,
+		expiresAt: offer.ExpiresAt,
+	}, nil
 }
 
 // produce picks a story quest (probability StoryShare) or a procedural template
 // and returns what the offer/journal need. ok=false means nothing to offer.
 // definition is the frozen instance JSONB for a procedural offer and nil for a
 // story offer (which resolves through its static template_id at accept).
+//
+// W1: when the story roll wins but the player has exhausted the story catalogue
+// (Pick returns ok=false), we fall through to procedural generation rather than
+// burning the trigger. §5 fail-closed is about an unsolvable *procedural*
+// generation, not "story rolled but the catalogue is empty" — so the attempt is
+// only burned when the generator too has nothing solvable.
 func (p *Pacer) produce(ctx context.Context, player domain.PlayerID, playerSector domain.SectorID) (templateID string, def quest.Def, definition []byte, ok bool, err error) {
 	if p.rng.Float64() < p.cfg.StoryShare {
-		templateID, def, ok = p.story.Pick(ctx, player)
-		return templateID, def, nil, ok, nil
+		if templateID, def, ok = p.story.Pick(ctx, player); ok {
+			return templateID, def, nil, true, nil
+		}
+		// Story catalogue exhausted for this player — fall through to procedural.
 	}
 	kind, def, ok, err := p.generator.Generate(ctx, playerSector)
 	if err != nil {

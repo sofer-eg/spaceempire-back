@@ -762,6 +762,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	)
 	questStoryPicker := questpacer.NewStaticStoryPicker(
 		questsrepo.New(pool),
+		questOffersRepo,
+		realClock,
 		rand.New(rand.NewSource(time.Now().UnixNano()+1)), //nolint:gosec // quest story pick, not security-sensitive
 		logger,
 	)

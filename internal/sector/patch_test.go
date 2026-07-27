@@ -136,6 +136,7 @@ func TestUnit_BuildPatch_DetectsAccessToggle(t *testing.T) {
 		1,
 	)
 	require.Len(t, opened.Updated, 1, "opening access must surface the ship")
+	assert.True(t, opened.Updated[0].IsOpen, "the patch must carry the NEW isOpen, not the stale one")
 
 	reclosed := buildPatch(
 		map[domain.ShipID]domain.Ship{1: open},
@@ -143,6 +144,7 @@ func TestUnit_BuildPatch_DetectsAccessToggle(t *testing.T) {
 		1,
 	)
 	require.Len(t, reclosed.Updated, 1, "closing access must surface the ship")
+	assert.False(t, reclosed.Updated[0].IsOpen, "the patch must carry the NEW isOpen, not the stale one")
 }
 
 // TestUnit_BuildPatch_DetectsStealthToggle guards the «СТЕЛС» chip (TASK-126):
@@ -163,6 +165,7 @@ func TestUnit_BuildPatch_DetectsStealthToggle(t *testing.T) {
 		1,
 	)
 	require.Len(t, hidden.Updated, 1, "cloaking must surface the ship")
+	assert.True(t, hidden.Updated[0].IsHidden, "the patch must carry the NEW isHidden, not the stale one")
 
 	surfaced := buildPatch(
 		map[domain.ShipID]domain.Ship{1: cloaked},
@@ -170,4 +173,5 @@ func TestUnit_BuildPatch_DetectsStealthToggle(t *testing.T) {
 		1,
 	)
 	require.Len(t, surfaced.Updated, 1, "decloaking must surface the ship")
+	assert.False(t, surfaced.Updated[0].IsHidden, "the patch must carry the NEW isHidden, not the stale one")
 }

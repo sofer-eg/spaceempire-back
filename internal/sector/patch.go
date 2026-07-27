@@ -162,11 +162,19 @@ func shipEqual(a, b domain.Ship) bool {
 	if !asteroidIDPtrEqual(a.MiningTarget, b.MiningTarget) {
 		return false
 	}
-	// IsOpen drives the «Вход открыт/закрыт» button (its label and its data-active
-	// highlight) and IsHidden the «СТЕЛС» chip, both read off the client's own ship
-	// (TASK-126). Neither moves any other field, so without them here the toggle
-	// only lands on the next welcome snapshot — and the SPA's stale isOpen makes
-	// the second click re-send open=true instead of closing.
+	// IsOpen drives the «Вход открыт/закрыт» button (label + data-active
+	// highlight) and IsHidden the «СТЕЛС» chip, both read off the client's own
+	// ship (TASK-126). The two differ in why they are here:
+	//   - IsOpen is a standalone discriminator: SetShipAccessCommand is its only
+	//     mutator and it touches nothing else, so without this check the toggle
+	//     only lands on the next welcome snapshot — and the SPA's stale isOpen
+	//     makes the second click re-send open=true instead of closing.
+	//   - IsHidden is, today, a cache derived from Equipment (every writer is
+	//     `cloakEngagedFromEquipment(ship.Equipment)`: cold-start, AddShip,
+	//     UpdateShipEquipment, knockoff), so a change in it always comes with an
+	//     Equipment change equipmentEqual catches below — this branch is
+	//     unreachable as an independent discriminator. It stays as the guard for
+	//     the day stealth becomes an explicit toggle instead of "up_hide fitted".
 	if a.IsOpen != b.IsOpen || a.IsHidden != b.IsHidden {
 		return false
 	}

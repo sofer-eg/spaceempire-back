@@ -162,6 +162,14 @@ func shipEqual(a, b domain.Ship) bool {
 	if !asteroidIDPtrEqual(a.MiningTarget, b.MiningTarget) {
 		return false
 	}
+	// IsOpen drives the «Вход открыт/закрыт» button (its label and its data-active
+	// highlight) and IsHidden the «СТЕЛС» chip, both read off the client's own ship
+	// (TASK-126). Neither moves any other field, so without them here the toggle
+	// only lands on the next welcome snapshot — and the SPA's stale isOpen makes
+	// the second click re-send open=true instead of closing.
+	if a.IsOpen != b.IsOpen || a.IsHidden != b.IsHidden {
+		return false
+	}
 	// Equipment travels in the Ship DTO (TASK-100.3.2); a knockoff
 	// (TASK-100.3.9.1) shrinks it, so compare it here or the WS delta would drop
 	// the module loss (NFR-003). A knockoff also changes HP/Shield, so this is

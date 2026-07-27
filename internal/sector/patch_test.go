@@ -116,3 +116,58 @@ func TestUnit_BuildPatch_DetectsMiningTargetChange(t *testing.T) {
 	)
 	require.Len(t, stopped.Updated, 1, "clearing mining must surface the ship")
 }
+
+// TestUnit_BuildPatch_DetectsAccessToggle guards the «Вход открыт/закрыт» button
+// (TASK-126): a docked ship whose IsOpen flips — no Pos/Vel/HP change — must
+// still be broadcast, or the SPA keeps the stale isOpen (button text and its
+// data-active highlight) until a reload and the next click re-sends open=true.
+func TestUnit_BuildPatch_DetectsAccessToggle(t *testing.T) {
+	t.Parallel()
+
+	closed := domain.Ship{ID: 1, Pos: domain.Vec2{X: 1, Y: 1}, HP: 100}
+	open := closed
+	open.IsOpen = true
+
+	assert.False(t, shipEqual(closed, open), "IsOpen must be an observable field")
+
+	opened := buildPatch(
+		map[domain.ShipID]domain.Ship{1: closed},
+		map[domain.ShipID]domain.Ship{1: open},
+		1,
+	)
+	require.Len(t, opened.Updated, 1, "opening access must surface the ship")
+
+	reclosed := buildPatch(
+		map[domain.ShipID]domain.Ship{1: open},
+		map[domain.ShipID]domain.Ship{1: closed},
+		1,
+	)
+	require.Len(t, reclosed.Updated, 1, "closing access must surface the ship")
+}
+
+// TestUnit_BuildPatch_DetectsStealthToggle guards the «СТЕЛС» chip (TASK-126):
+// the client reads IsHidden off its own ship, so a cloak state change has to
+// travel in the delta instead of waiting for the next welcome snapshot.
+func TestUnit_BuildPatch_DetectsStealthToggle(t *testing.T) {
+	t.Parallel()
+
+	visible := domain.Ship{ID: 1, Pos: domain.Vec2{X: 1, Y: 1}, HP: 100}
+	cloaked := visible
+	cloaked.IsHidden = true
+
+	assert.False(t, shipEqual(visible, cloaked), "IsHidden must be an observable field")
+
+	hidden := buildPatch(
+		map[domain.ShipID]domain.Ship{1: visible},
+		map[domain.ShipID]domain.Ship{1: cloaked},
+		1,
+	)
+	require.Len(t, hidden.Updated, 1, "cloaking must surface the ship")
+
+	surfaced := buildPatch(
+		map[domain.ShipID]domain.Ship{1: cloaked},
+		map[domain.ShipID]domain.Ship{1: visible},
+		1,
+	)
+	require.Len(t, surfaced.Updated, 1, "decloaking must surface the ship")
+}

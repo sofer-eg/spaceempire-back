@@ -75,6 +75,16 @@ type SatelliteRepo interface {
 	Delete(ctx context.Context, id domain.SatelliteID) error
 }
 
+// JammerRepo persists player-deployed hyper-interference generators
+// (TASK-131): Create on install (DB-assigned id), Delete on destruction so a
+// restart does not resurrect a killed generator. Nil makes installs RAM-only (a
+// fallback id counter is used) — handy for pure unit tests. Wired via
+// WithJammers.
+type JammerRepo interface {
+	Create(ctx context.Context, j domain.Jammer) (domain.JammerID, error)
+	Delete(ctx context.Context, id domain.JammerID) error
+}
+
 // ContainerRepo is the persistence surface for loot containers (phase
 // 4.6). The real implementation lives in internal/persistence/containers.
 // Wired via WithContainers; nil disables persistence — a dead ship is
@@ -204,6 +214,11 @@ type Worker struct {
 	// 10.15). Nil makes installs RAM-only (fallback id counter). Wired via
 	// WithSatellites.
 	satelliteRepo SatelliteRepo
+
+	// jammerRepo persists hyper-interference-generator install/destruction
+	// (TASK-131). Nil makes installs RAM-only (fallback id counter). Wired via
+	// WithJammers.
+	jammerRepo JammerRepo
 
 	// asteroidRepo persists minable asteroids (phase 5.4). Nil disables
 	// persistence (asteroids still mine down in RAM). Wired via
@@ -426,6 +441,16 @@ func WithTowerPersistence(repo TowerRepo) Option {
 func WithSatellites(repo SatelliteRepo) Option {
 	return func(w *Worker) {
 		w.satelliteRepo = repo
+	}
+}
+
+// WithJammers enables player-deployed hyper-interference generators
+// (TASK-131): the install command persists each new generator (Create) and
+// killStatic deletes a destroyed one. A nil repo keeps installs RAM-only
+// (fallback id counter), used by pure unit tests.
+func WithJammers(repo JammerRepo) Option {
+	return func(w *Worker) {
+		w.jammerRepo = repo
 	}
 }
 
@@ -1031,6 +1056,9 @@ func cloneStatics(s domain.SectorStatics) domain.SectorStatics {
 	}
 	if len(s.Satellites) > 0 {
 		out.Satellites = append([]domain.Satellite(nil), s.Satellites...)
+	}
+	if len(s.Jammers) > 0 {
+		out.Jammers = append([]domain.Jammer(nil), s.Jammers...)
 	}
 	return out
 }

@@ -98,6 +98,9 @@ type Config struct {
 	// Refund around the sector command, phase 10.15). nil disables the
 	// endpoint with 503.
 	SatelliteCargo SatelliteCargo
+	// JammerCargo backs POST /api/cmd/install-jammer (cargo Consume / Refund
+	// around the sector command, TASK-131). nil disables the endpoint with 503.
+	JammerCargo JammerCargo
 	// NpcPlayerID is the reserved system-player's DB id. Ships owned by this
 	// player are NPC (traders, miners, passengers) and the SPA uses IsNPC to
 	// colour them amber instead of red. Zero means "no NPC player loaded" and
@@ -160,6 +163,7 @@ type Server struct {
 	droneCargo        DroneCargo
 	torpedoCargo      TorpedoCargo
 	satelliteCargo    SatelliteCargo
+	jammerCargo       JammerCargo
 	activeShips       ActiveShipReader
 	activeShipWriter  ActiveShipWriter
 	handoffPublisher  bus.Publisher
@@ -199,6 +203,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 		droneCargo:        cfg.DroneCargo,
 		torpedoCargo:      cfg.TorpedoCargo,
 		satelliteCargo:    cfg.SatelliteCargo,
+		jammerCargo:       cfg.JammerCargo,
 		activeShips:       cfg.ActiveShips,
 		activeShipWriter:  cfg.ActiveShipWriter,
 		handoffPublisher:  cfg.HandoffPublisher,
@@ -230,6 +235,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	s.mux.Handle("POST /api/cmd/mine", s.protect(http.HandlerFunc(s.handleMine)))
 	s.mux.Handle("POST /api/cmd/transport-cargo", s.protect(http.HandlerFunc(s.handleTransport)))
 	s.mux.Handle("POST /api/cmd/install-satellite", s.protect(http.HandlerFunc(s.handleInstallSatellite)))
+	s.mux.Handle("POST /api/cmd/install-jammer", s.protect(http.HandlerFunc(s.handleInstallJammer)))
 	s.mux.Handle("POST /api/ship/{id}/activate", s.protect(http.HandlerFunc(s.handleActivateShip)))
 	s.mux.Handle("GET /api/player/ships", s.protect(http.HandlerFunc(s.handleFleet)))
 	s.mux.Handle("POST /api/cmd/cargo/move", s.protect(http.HandlerFunc(s.handleCargoMove)))

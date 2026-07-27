@@ -127,6 +127,11 @@ type sectorState struct {
 	// unit tests). With a repo the id is the DB-assigned primary key.
 	nextSatelliteID domain.SatelliteID
 
+	// nextJammerID is the same fallback id allocator for installed
+	// hyper-interference generators (TASK-131), used only when no JammerRepo
+	// is wired (pure unit tests).
+	nextJammerID domain.JammerID
+
 	// controllers maps each AI-driven ship in this sector to its NPC
 	// controller (phase 5.1). Built once at cold-start from the ai_state
 	// rows (buildControllers) and pruned when a controlled ship leaves the
@@ -495,6 +500,32 @@ func (s *sectorState) addSatellite(sat domain.Satellite) {
 	s.destructibles[d.Ref] = &d
 }
 
+// allocJammerID returns a fallback monotonic id, used only when no JammerRepo
+// is wired (pure unit tests). With a repo the JammerID is the DB-assigned
+// primary key returned by Create.
+func (s *sectorState) allocJammerID() domain.JammerID {
+	s.nextJammerID++
+	return s.nextJammerID
+}
+
+// addJammer registers a freshly-installed hyper-interference generator
+// (TASK-131) in both the rendered layout and the live combat set. Called from
+// the install command after the repo (when wired) returns the DB-assigned id,
+// so the next L2 big-radar diff ships it to clients and lasers can damage it.
+func (s *sectorState) addJammer(jam domain.Jammer) {
+	s.statics.Jammers = append(s.statics.Jammers, jam)
+	d := domain.DestructibleStatic{
+		Ref:            jam.ObjectID(),
+		Pos:            jam.Pos,
+		OwnerID:        jam.OwnerID,
+		HP:             jam.HP,
+		Shield:         jam.Shield,
+		MaxShield:      jam.MaxShield,
+		ShieldRecharge: jam.ShieldRecharge,
+	}
+	s.destructibles[d.Ref] = &d
+}
+
 // satellitesPresent reports whether the sector holds at least one live
 // navigation satellite — the cheap once-per-tick gate for the radar reveal.
 func (s *sectorState) satellitesPresent() bool {
@@ -707,6 +738,11 @@ func (s *sectorState) collectStaticsByRefs(refs []domain.EntityRef) domain.Secto
 	for _, o := range s.statics.Satellites {
 		if _, ok := set[o.ObjectID()]; ok {
 			out.Satellites = append(out.Satellites, o)
+		}
+	}
+	for _, o := range s.statics.Jammers {
+		if _, ok := set[o.ObjectID()]; ok {
+			out.Jammers = append(out.Jammers, o)
 		}
 	}
 	return out

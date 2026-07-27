@@ -21,6 +21,7 @@ func TestUnit_cloneStatics_CopiesAllKinds(t *testing.T) {
 		Pirbases:      []domain.Pirbase{{ID: 1}},
 		LaserTowers:   []domain.LaserTower{{ID: 1}},
 		Satellites:    []domain.Satellite{{ID: 1}},
+		Jammers:       []domain.Jammer{{ID: 1}},
 	}
 
 	out := cloneStatics(in)
@@ -42,5 +43,8 @@ func TestUnit_cloneStatics_CopiesAllKinds(t *testing.T) {
 	}
 	if got := len(out.Satellites); got != 1 {
 		t.Errorf("Satellites not copied: got %d, want 1", got)
+	}
+	if got := len(out.Jammers); got != 1 {
+		t.Errorf("Jammers not copied (regression: generator invisible to client): got %d, want 1", got)
 	}
 }

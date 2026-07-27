@@ -34,9 +34,12 @@ var (
 	// unknown to the topology or equals the ship's current sector. HTTP maps it
 	// to 400.
 	ErrInvalidSector = errors.New("sector: invalid target sector")
-	// ErrJumpBlockedByAntijump is reported by JumpDriveCommand when another powered
-	// up_antijump ship is within Config.AntijumpRange in the same sector
-	// (TASK-100.3.8, port of SP DoJump's hyper-interference gate). HTTP maps it to
+	// ErrJumpBlockedByAntijump is reported by JumpDriveCommand when the seamless
+	// jump is jammed by hyper-interference in the same sector: another powered
+	// up_antijump ship within Config.AntijumpRange (TASK-100.3.8) or a deployed
+	// hyper-interference generator within Config.JammerRange (TASK-131). Both
+	// are branches of the same SP DoJump gate, and the player sees the same
+	// "прыжок невозможен" outcome, so they share one sentinel. HTTP maps it to
 	// 409.
 	ErrJumpBlockedByAntijump = errors.New("sector: jump blocked by antijump field")
 )
@@ -115,10 +118,11 @@ func (c JumpDriveCommand) apply(w *Worker, s *sectorState) {
 		return
 	}
 
-	// Hyper-interference (TASK-100.3.8, SP DoJump): another powered up_antijump
-	// ship in range jams the jump. Checked BEFORE paying the shield/cooldown so a
-	// blocked jump costs nothing.
-	if w.antijumpActive(s, ship) {
+	// Hyper-interference (SP DoJump): a powered up_antijump ship in range
+	// (TASK-100.3.8) or a deployed hyper-interference generator in range
+	// (TASK-131, the SP class-7 drone fallback) jams the jump. Checked BEFORE
+	// paying the shield/cooldown so a blocked jump costs nothing.
+	if w.antijumpActive(s, ship) || w.jammerActive(s, ship) {
 		res.Err = ErrJumpBlockedByAntijump
 		replyOnce(c.Reply, res)
 		return
@@ -168,6 +172,30 @@ func (w *Worker) antijumpActive(s *sectorState, jumper *domain.Ship) bool {
 			continue
 		}
 		if other.Pos.Sub(jumper.Pos).Length() <= w.cfg.AntijumpRange {
+			return true
+		}
+	}
+	return false
+}
+
+// jammerActive reports whether a live hyper-interference generator ("Генератор
+// гипер-помех", TASK-131) sits within Config.JammerRange of the jumper. Ports
+// SP DoJump's fallback `select id from drones where class=7 and
+// sector=object_sector`: it fires only for the jumper's OWN sector (jumping
+// INTO a jammed sector is allowed, as in the original) and carries NO owner
+// filter — the generator jams its owner and their allies exactly as it jams
+// everyone else. Only Built generators count; a destroyed one has already left
+// statics.Jammers via killStatic.
+//
+// The only deliberate departure from SP is the radius: the original blanketed
+// the whole sector, we scope it to Config.JammerRange (see the Config comment).
+func (w *Worker) jammerActive(s *sectorState, jumper *domain.Ship) bool {
+	for i := range s.statics.Jammers {
+		jam := s.statics.Jammers[i]
+		if !jam.Built {
+			continue
+		}
+		if jam.Pos.Sub(jumper.Pos).Length() <= w.cfg.JammerRange {
 			return true
 		}
 	}

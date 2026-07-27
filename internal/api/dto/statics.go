@@ -79,6 +79,20 @@ type Satellite struct {
 	Built    bool    `json:"built"`
 }
 
+// Jammer mirrors domain.Jammer on the wire (TASK-131): a player-deployed
+// hyper-interference generator that blocks the seamless jump drive nearby.
+type Jammer struct {
+	ID       int64   `json:"id"`
+	OwnerID  *int64  `json:"ownerID,omitempty"`
+	SectorID int64   `json:"sectorID"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	HP       int     `json:"hp"`
+	Shield   int     `json:"shield"`
+	Race     int     `json:"race"`
+	Built    bool    `json:"built"`
+}
+
 // SectorStatics bundles every static object kind of a sector for transport
 // over the wire. Empty slices are omitted via omitempty so a sector without
 // pirbases (most of them) won't ship a "pirbases":[] noise line.
@@ -89,6 +103,7 @@ type SectorStatics struct {
 	Pirbases      []Pirbase      `json:"pirbases,omitempty"`
 	LaserTowers   []LaserTower   `json:"laserTowers,omitempty"`
 	Satellites    []Satellite    `json:"satellites,omitempty"`
+	Jammers       []Jammer       `json:"jammers,omitempty"`
 }
 
 // StaticsMessage is the dedicated WS frame the server pushes once per
@@ -224,6 +239,24 @@ func SatelliteFromDomain(s domain.Satellite) Satellite {
 	return out
 }
 
+func JammerFromDomain(j domain.Jammer) Jammer {
+	out := Jammer{
+		ID:       int64(j.ID),
+		SectorID: int64(j.SectorID),
+		X:        j.Pos.X,
+		Y:        j.Pos.Y,
+		HP:       j.HP,
+		Shield:   j.Shield,
+		Race:     j.Race,
+		Built:    j.Built,
+	}
+	if j.OwnerID != nil {
+		o := int64(*j.OwnerID)
+		out.OwnerID = &o
+	}
+	return out
+}
+
 func StaticsFromDomain(s domain.SectorStatics) SectorStatics {
 	out := SectorStatics{}
 	if len(s.Stations) > 0 {
@@ -260,6 +293,12 @@ func StaticsFromDomain(s domain.SectorStatics) SectorStatics {
 		out.Satellites = make([]Satellite, len(s.Satellites))
 		for i, sat := range s.Satellites {
 			out.Satellites[i] = SatelliteFromDomain(sat)
+		}
+	}
+	if len(s.Jammers) > 0 {
+		out.Jammers = make([]Jammer, len(s.Jammers))
+		for i, jam := range s.Jammers {
+			out.Jammers[i] = JammerFromDomain(jam)
 		}
 	}
 	return out

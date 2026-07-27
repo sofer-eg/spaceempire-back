@@ -189,9 +189,7 @@ level 2 = 30 мин** (`up_jump_drive` `max_level=2`). Длительности 
 
 **Follow-up (вне scope, отдельные задачи):** маяки (`DoJump` mode 2 + ACL
 `jump_beacon_acl`); авто-возврат домой (mode 1 + `home_werf`/автопилот
-task-100.3.11); undock-через-прыжок; анти-джамп дрон class 7 (в оригинале
-`DoJump` глушил прыжок ещё и дроном class 7 — в spaceempire такой сущности дрона
-нет, отдельная задача).
+task-100.3.11); undock-через-прыжок.
 
 ### `up_antijump` → блок прыжка соседей (TASK-100.3.8)
 
@@ -213,6 +211,20 @@ task-100.3.11); undock-через-прыжок; анти-джамп дрон cla
   порт как круг для единообразия с `MineRange`/`TransporterRange`/`CaptureRange`.
 - **Уровень модуля** (`max_level=2`) механически на радиус/блок не влияет —
   faithful (SP читал только факт `up_on`, не уровень).
+
+**Вторая ветка того же гейта — «Генератор гипер-помех» (TASK-131).** В SP
+`DoJump` после скана кораблей идёт fallback `select id from drones where
+class=7 and sector=object_sector` — стационарный развёртываемый объект
+(`ct_drones` class 7, `model=5`, cargo_id 27). В spaceempire он портирован
+статиком `domain.Jammer` (`EntityKindJammer`=13, таблица `jammers`), а не
+классом дрона — как и навигационный спутник (class 6, тот же `model=5`).
+`JumpDriveCommand.apply` вызывает `w.antijumpActive(...) || w.jammerActive(...)`
+в одной точке, обе ветки отдают общий `ErrJumpBlockedByAntijump` → HTTP 409.
+Отличия от корабельного поля: глушит **всех, включая владельца и союзников**
+(faithful — у class-7 нет фильтра владельца), радиус `Config.JammerRange`
+(дефолт **2000**, у SP радиуса не было вовсе — глушился весь сектор), нет
+энергоапкипа (объект живёт, пока не разрушен). Полностью — в
+`back/docs/specs/jammer.md`.
 
 **Фронт-UI (реализовано, TASK-129):** кнопка «⚡ Прыжок» в HUD корабля
 (`CombatHUD`, гейт по `up_jump_drive`, disabled без исправного генератора щита)

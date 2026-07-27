@@ -122,6 +122,13 @@ type Config struct {
 	// we port that as a circular Euclidean radius for uniformity with
 	// MineRange/TransporterRange/CaptureRange (all `Pos.Sub().Length()`). Default 640.
 	AntijumpRange float64
+	// JammerRange is the radius (world units) of the no-jump zone a deployed
+	// hyper-interference generator ("Генератор гипер-помех", SP ct_drones class
+	// 7) projects around itself (TASK-131). The original SP jammed the WHOLE
+	// sector with no radius at all; we scope it to a circle for the same reason
+	// AntijumpRange is one — a sector-wide hard block is too blunt at the ±5000
+	// half-extent. Default 2000.
+	JammerRange float64
 }
 
 func (c Config) withDefaults() Config {
@@ -200,6 +207,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.AntijumpRange <= 0 {
 		c.AntijumpRange = 640
+	}
+	if c.JammerRange <= 0 {
+		c.JammerRange = 2000
 	}
 	return c
 }

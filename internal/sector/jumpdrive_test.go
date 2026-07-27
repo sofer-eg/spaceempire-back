@@ -24,7 +24,7 @@ var jumpDriveTime = time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 // handoff over the shared handoffTopology (sectors 1 and 2), so a jump 1→2
 // targets a real sector. The clock is a FakeClock pinned to jumpDriveTime so
 // cooldown tests are deterministic.
-func newJumpDriveWorker(t *testing.T, repo sector.ShipRepo, b bus.Bus, cfg sector.Config, initial []domain.Ship) *sector.Worker {
+func newJumpDriveWorker(t *testing.T, repo sector.ShipRepo, b bus.Bus, cfg sector.Config, initial []domain.Ship, opts ...sector.Option) *sector.Worker {
 	t.Helper()
 	if cfg.TickInterval <= 0 {
 		cfg.TickInterval = time.Second
@@ -36,7 +36,7 @@ func newJumpDriveWorker(t *testing.T, repo sector.ShipRepo, b bus.Bus, cfg secto
 		repo,
 		nil,
 		map[domain.SectorID][]domain.Ship{1: initial},
-		sector.WithHandoff(handoffTopology(), b),
+		append([]sector.Option{sector.WithHandoff(handoffTopology(), b)}, opts...)...,
 	)
 }
 
@@ -407,6 +407,135 @@ func TestUnit_JumpDriveCommand_AntijumpSelfNotBlocking(t *testing.T) {
 
 	require.NoError(t, res.Err, "a ship's own antijump field must not block its own jump")
 	assert.Empty(t, w.Snapshot(1).Ships, "jumper relocated out of the source sector")
+}
+
+// jammerStatics builds a WithJammers-free statics map holding one live
+// hyper-interference generator (TASK-131) owned by owner at pos in sector.
+func jammerStatics(sec domain.SectorID, id int64, owner *domain.PlayerID, pos domain.Vec2) map[domain.SectorID]domain.SectorStatics {
+	return map[domain.SectorID]domain.SectorStatics{sec: {Jammers: []domain.Jammer{{
+		ID: domain.JammerID(id), OwnerID: owner, SectorID: sec, Pos: pos,
+		HP: 100, Built: true,
+	}}}}
+}
+
+// TestUnit_JumpDriveCommand_BlockedByJammer: a live hyper-interference
+// generator within Config.JammerRange jams the seamless jump (TASK-131, port of
+// SP DoJump's `drones where class=7` fallback). The jump costs nothing.
+func TestUnit_JumpDriveCommand_BlockedByJammer(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// Generator owned by someone else, 500 units away (< default 2000).
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, []domain.Ship{jumpDriveShip(pid, 1)},
+		sector.WithStatics(jammerStatics(1, 5, ownerPtr(42), domain.Vec2{X: 500})))
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	assert.ErrorIs(t, res.Err, sector.ErrJumpBlockedByAntijump)
+	assert.Empty(t, repo.saves, "no relocation when the jump is jammed")
+	assert.Empty(t, b.snapshot(), "no handoff published when the jump is jammed")
+
+	jumper, ok := snapshotShipByID(w.Snapshot(1), 1)
+	require.True(t, ok, "jumper stays in the source sector")
+	assert.Equal(t, 100, jumper.Shield, "shield not paid on a blocked jump")
+	assert.True(t, jumper.LastJumpAt.IsZero(), "cooldown not stamped on a blocked jump")
+}
+
+// TestUnit_JumpDriveCommand_JammerOutOfRange: the generator's zone is a circle
+// of Config.JammerRange, not the whole sector (agreed departure from SP) — a
+// generator past that radius does not reach the jumper.
+func TestUnit_JumpDriveCommand_JammerOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// 2500 units away (> default 2000).
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, []domain.Ship{jumpDriveShip(pid, 1)},
+		sector.WithStatics(jammerStatics(1, 5, ownerPtr(42), domain.Vec2{X: 2500})))
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	require.NoError(t, res.Err, "an out-of-range generator must not block the jump")
+	_, ok := snapshotShipByID(w.Snapshot(1), 1)
+	assert.False(t, ok, "jumper relocated out of the source sector")
+	require.Len(t, repo.saves, 1)
+	assert.Equal(t, domain.SectorID(2), repo.saves[0].SectorID)
+}
+
+// TestUnit_JumpDriveCommand_JammerBlocksOwner: faithful SP DoJump — the class-7
+// generator carries no owner filter, so a player's own generator jams their own
+// jump too (and an ally's likewise).
+func TestUnit_JumpDriveCommand_JammerBlocksOwner(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	w := newJumpDriveWorker(t, repo, b, sector.Config{}, []domain.Ship{jumpDriveShip(pid, 1)},
+		sector.WithStatics(jammerStatics(1, 5, ownerPtr(int64(pid)), domain.Vec2{X: 100})))
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	assert.ErrorIs(t, res.Err, sector.ErrJumpBlockedByAntijump,
+		"a player's own generator jams their own jump (no owner filter, faithful SP)")
+	assert.Empty(t, repo.saves)
+}
+
+// TestUnit_JumpDriveCommand_JammerDestroyedAllowsJump: while the generator
+// lives the jump is jammed; once it is shot down the same jump goes through.
+func TestUnit_JumpDriveCommand_JammerDestroyedAllowsJump(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// An attacker in the same sector one-shots the generator during tick 1.
+	// Commands are drained before combat, so the tick-1 jump still sees it live.
+	attacker := staticAttacker(3, 100, domain.Vec2{X: 0, Y: 0}, 1000, jammerRef(5))
+	w := newJumpDriveWorker(t, repo, b, sector.Config{},
+		[]domain.Ship{jumpDriveShip(pid, 1), attacker},
+		sector.WithStatics(jammerStatics(1, 5, ownerPtr(42), domain.Vec2{X: 100})),
+		sector.WithHostility(ownerBasedHostility),
+	)
+
+	blocked := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+	assert.ErrorIs(t, blocked.Err, sector.ErrJumpBlockedByAntijump, "jammed while the generator lives")
+	require.Empty(t, w.Snapshot(1).Statics.Jammers, "generator destroyed during tick 1")
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+	require.NoError(t, res.Err, "the jump goes through once the generator is destroyed")
+	_, ok := snapshotShipByID(w.Snapshot(1), 1)
+	assert.False(t, ok, "jumper relocated out of the source sector")
+}
+
+// TestUnit_JumpDriveCommand_JammerInOtherSectorIgnored: only the jumper's OWN
+// sector is scanned (SP DoJump tests `sector = object_sector`). A generator in
+// the destination sector, at the very same coordinates, neither blocks the
+// departure nor the arrival.
+func TestUnit_JumpDriveCommand_JammerInOtherSectorIgnored(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeShipRepo{}
+	b := &fakeBus{}
+	pid := domain.PlayerID(7)
+	// One worker owning both sectors; the generator sits in sector 2 at (0,0) —
+	// exactly where the sector-1 jumper is, so a sector-blind scan would block.
+	w := sector.NewWorker(0,
+		sector.Config{TickInterval: time.Second},
+		clock.NewFakeClock(jumpDriveTime), repo, nil,
+		map[domain.SectorID][]domain.Ship{1: {jumpDriveShip(pid, 1)}, 2: nil},
+		sector.WithHandoff(handoffTopology(), b),
+		sector.WithStatics(jammerStatics(2, 5, ownerPtr(42), domain.Vec2{X: 0, Y: 0})),
+	)
+
+	res := jumpDriveReply(t, w, sector.JumpDriveCommand{PlayerID: pid, ShipID: 1, TargetSectorID: 2})
+
+	require.NoError(t, res.Err, "a generator in another sector must not block the jump")
+	require.Len(t, repo.saves, 1)
+	assert.Equal(t, domain.SectorID(2), repo.saves[0].SectorID)
 }
 
 func TestUnit_JumpDriveCommand_HandoffUnavailable(t *testing.T) {

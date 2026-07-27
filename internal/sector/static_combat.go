@@ -10,15 +10,16 @@ import (
 
 // IsStaticTargetKind reports whether k is a destructible static a weapon may
 // lock onto besides ships (phase 6.2b): station, shipyard, trade station,
-// pirbase, laser tower, satellite. Gates are intentionally excluded — they are
-// not destructible (ЧТЗ C-04, lifted by TASK-110). Exported so the HTTP launch
-// handlers gate on the exact same set the worker enforces (TASK-113 FR-06,
-// NFR-03 — one source of truth for the targetable-static set).
+// pirbase, laser tower, satellite, jammer. Gates are intentionally excluded —
+// they are not destructible (ЧТЗ C-04, lifted by TASK-110). Exported so the
+// HTTP launch handlers gate on the exact same set the worker enforces
+// (TASK-113 FR-06, NFR-03 — one source of truth for the targetable-static set).
 func IsStaticTargetKind(k domain.EntityKind) bool {
 	switch k {
 	case domain.EntityKindStation, domain.EntityKindShipyard,
 		domain.EntityKindTradeStation, domain.EntityKindPirbase,
-		domain.EntityKindLaserTower, domain.EntityKindSatellite:
+		domain.EntityKindLaserTower, domain.EntityKindSatellite,
+		domain.EntityKindJammer:
 		return true
 	}
 	return false
@@ -87,6 +88,14 @@ func (w *Worker) killStatic(ctx context.Context, s *sectorState, d *domain.Destr
 			w.logger.ErrorContext(ctx, "kill: persist satellite destruction", "err", err, "satellite", ref.ID)
 		}
 	}
+	// Persist jammer destruction (TASK-131) so cold-start does not resurrect a
+	// killed hyper-interference generator. Best-effort, same contract as the
+	// tower — and the jump gate stops seeing it the moment it leaves the layout.
+	if ref.Kind == domain.EntityKindJammer && w.jammerRepo != nil {
+		if err := w.jammerRepo.Delete(ctx, domain.JammerID(ref.ID)); err != nil {
+			w.logger.ErrorContext(ctx, "kill: persist jammer destruction", "err", err, "jammer", ref.ID)
+		}
+	}
 	// Static kills carry no killer/victim-player attribution (bounties target
 	// players, not stations) — Killer/VictimPlayer stay 0.
 	w.publishKilled(ctx, s, EntityKilledEvent{Victim: ref, SectorID: s.sectorID, Pos: pos})
@@ -126,6 +135,8 @@ func removeStaticFromLayout(s *domain.SectorStatics, ref domain.EntityRef) {
 		s.LaserTowers = dropStatic(s.LaserTowers, func(o domain.LaserTower) bool { return int64(o.ID) == ref.ID })
 	case domain.EntityKindSatellite:
 		s.Satellites = dropStatic(s.Satellites, func(o domain.Satellite) bool { return int64(o.ID) == ref.ID })
+	case domain.EntityKindJammer:
+		s.Jammers = dropStatic(s.Jammers, func(o domain.Jammer) bool { return int64(o.ID) == ref.ID })
 	}
 }
 

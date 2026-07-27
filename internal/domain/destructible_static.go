@@ -51,7 +51,7 @@ func (d *DestructibleStatic) ChargeShield() bool {
 // cold-start to seed the per-sector destructible map.
 func DestructiblesFromStatics(s SectorStatics) []DestructibleStatic {
 	out := make([]DestructibleStatic, 0,
-		len(s.Stations)+len(s.Shipyards)+len(s.TradeStations)+len(s.Pirbases)+len(s.LaserTowers)+len(s.Satellites))
+		len(s.Stations)+len(s.Shipyards)+len(s.TradeStations)+len(s.Pirbases)+len(s.LaserTowers)+len(s.Satellites)+len(s.Jammers))
 	for _, o := range s.Stations {
 		out = append(out, DestructibleStatic{Ref: o.ObjectID(), Pos: o.Pos, OwnerID: o.OwnerID, HP: o.HP, Shield: o.Shield, MaxShield: o.MaxShield, ShieldRecharge: o.ShieldRecharge})
 	}
@@ -71,6 +71,9 @@ func DestructiblesFromStatics(s SectorStatics) []DestructibleStatic {
 		out = append(out, DestructibleStatic{Ref: ref, Pos: o.Pos, OwnerID: o.OwnerID, HP: o.HP, Shield: o.Shield, MaxShield: o.MaxShield, ShieldRecharge: o.ShieldRecharge})
 	}
 	for _, o := range s.Satellites {
+		out = append(out, DestructibleStatic{Ref: o.ObjectID(), Pos: o.Pos, OwnerID: o.OwnerID, HP: o.HP, Shield: o.Shield, MaxShield: o.MaxShield, ShieldRecharge: o.ShieldRecharge})
+	}
+	for _, o := range s.Jammers {
 		out = append(out, DestructibleStatic{Ref: o.ObjectID(), Pos: o.Pos, OwnerID: o.OwnerID, HP: o.HP, Shield: o.Shield, MaxShield: o.MaxShield, ShieldRecharge: o.ShieldRecharge})
 	}
 	return out

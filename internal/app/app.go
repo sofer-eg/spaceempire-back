@@ -37,6 +37,7 @@ import (
 	containersrepo "spaceempire/back/internal/persistence/containers"
 	dronesrepo "spaceempire/back/internal/persistence/drones"
 	insurancerepo "spaceempire/back/internal/persistence/insurance"
+	jammersrepo "spaceempire/back/internal/persistence/jammers"
 	lasertowersrepo "spaceempire/back/internal/persistence/lasertowers"
 	npcshipsrepo "spaceempire/back/internal/persistence/npcships"
 	playersrepo "spaceempire/back/internal/persistence/players"
@@ -157,6 +158,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	stationsRepo := stationsrepo.New(pool)
 	laserTowersRepo := lasertowersrepo.New(pool)
 	satellitesRepo := satellitesrepo.New(pool)
+	jammersRepo := jammersrepo.New(pool)
 	asteroidsRepo := asteroidsrepo.New(pool)
 	cargoRepoPersistence := cargorepo.New(pool)
 	txManager := database.NewTxManager(pool)
@@ -198,6 +200,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			return fmt.Errorf("load satellites sector %d: %w", s.ID, err)
 		}
 		sectorStatics.Satellites = sats
+		jams, err := jammersRepo.LoadAll(ctx, s.ID)
+		if err != nil {
+			return fmt.Errorf("load jammers sector %d: %w", s.ID, err)
+		}
+		sectorStatics.Jammers = jams
 		statics[s.ID] = sectorStatics
 		warnOutOfBounds(logger, s.ID, sectorStatics, cfg.Sector.BoundsRadius)
 
@@ -444,6 +451,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		// 10.15: player-deployed navigation satellites — persist install/destroy
 		// so a deployed satellite survives a restart and a killed one stays dead.
 		sector.WithSatellites(satellitesRepo),
+		// TASK-131: player-deployed hyper-interference generators — persist
+		// install/destroy so a deployed generator survives a restart and a
+		// killed one stays dead.
+		sector.WithJammers(jammersRepo),
 		// 9.4: police — the main-race navy scans player ships for contraband,
 		// confiscates it (via cargo), drops the player's race standing, and
 		// drops standing again when a player destroys a faction ship.
@@ -521,6 +532,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		EventBus:          jumpBus,
 		MissileCargo:      cargoSvc,
 		SatelliteCargo:    cargoSvc,
+		JammerCargo:       cargoSvc,
 		DroneCargo:        cargoSvc,
 		TorpedoCargo:      cargoSvc,
 		NpcPlayerID:       npcPlayerID,
@@ -956,6 +968,9 @@ func warnOutOfBounds(
 	}
 	for _, sat := range statics.Satellites {
 		check("satellite", int64(sat.ID), sat.Pos.X, sat.Pos.Y)
+	}
+	for _, jam := range statics.Jammers {
+		check("jammer", int64(jam.ID), jam.Pos.X, jam.Pos.Y)
 	}
 }
 

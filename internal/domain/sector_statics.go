@@ -13,11 +13,13 @@ type SectorStatics struct {
 	Pirbases      []Pirbase
 	LaserTowers   []LaserTower
 	Satellites    []Satellite
+	Jammers       []Jammer
 }
 
 // IsEmpty reports whether every slice is empty.
 func (s SectorStatics) IsEmpty() bool {
 	return len(s.Stations) == 0 && len(s.Shipyards) == 0 &&
 		len(s.TradeStations) == 0 && len(s.Pirbases) == 0 &&
-		len(s.LaserTowers) == 0 && len(s.Satellites) == 0
+		len(s.LaserTowers) == 0 && len(s.Satellites) == 0 &&
+		len(s.Jammers) == 0
 }

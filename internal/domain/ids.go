@@ -11,6 +11,7 @@ type (
 	PirbaseID      int64
 	LaserTowerID   int64
 	SatelliteID    int64
+	JammerID       int64
 	ContainerID    int64
 	ClanID         int64
 	ShipClassID    int64
@@ -44,6 +45,11 @@ const (
 	// can lock onto and destroy an incoming torpedo (ЧТЗ doc-1 §3 FR-008). See
 	// isProjectileTargetKind, the single point that makes it a weapon target.
 	EntityKindTorpedo EntityKind = 12
+	// EntityKindJammer is a player-deployed hyper-interference generator
+	// (TASK-131, SP ct_drones class 7 "Генератор гипер-помех"): a destructible
+	// static that jams the seamless jump drive of every ship within
+	// Config.JammerRange. Same static machinery as the satellite.
+	EntityKindJammer EntityKind = 13
 )
 
 type EntityRef struct {

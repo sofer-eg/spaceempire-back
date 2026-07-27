@@ -68,6 +68,12 @@ func TestUnit_InstallJammer_OK(t *testing.T) {
 	require.EqualValues(t, 2, stock, "cargo decremented by 1")
 	require.Equal(t, 1, consume)
 	require.Equal(t, 0, refund)
+
+	// Assert the literal id, not api.JammerGoodsType — comparing the handler's
+	// constant against itself would pass even if it pointed at the satellite's
+	// goods 26. 27 is «Генератор гипер-помех» in configs/balance.yaml.
+	consumed, _ := fake.goodsTypes()
+	require.EqualValues(t, 27, consumed, "one Генератор гипер-помех (goods 27) debited")
 }
 
 // TestUnit_InstallJammer_NoCargo: an empty hold is rejected before the worker
@@ -99,6 +105,10 @@ func TestUnit_InstallJammer_SectorRejectsRefundsCargo(t *testing.T) {
 	require.EqualValues(t, 3, stock, "cargo restored after worker rejection")
 	require.Equal(t, 1, consume)
 	require.Equal(t, 1, refund)
+
+	consumed, refunded := fake.goodsTypes()
+	require.EqualValues(t, 27, refunded, "the refund returns the same goods the debit took")
+	require.Equal(t, consumed, refunded)
 }
 
 // TestUnit_InstallJammer_NoCargoService_503: without JammerCargo the endpoint

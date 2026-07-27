@@ -105,7 +105,7 @@ ship is not docked (`ErrShipDocked`), then `installJammer`: `jammersRepo.Create`
 `addJammer` inserts it into `statics.Jammers` and the `destructibles` map at the
 ship's current position. The new generator reaches clients on the next tick via
 the 10.20 L2 `StaticsAdded` delta (it is in `destructibles`, hence in
-`staticRefsInRadius`, and `collectStaticsByRefs` renders the full object).
+`visibleStaticRefs`, and `collectStaticsByRefs` renders the full object).
 
 ## Not a satellite
 

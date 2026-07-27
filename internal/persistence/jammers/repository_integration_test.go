@@ -12,7 +12,11 @@ import (
 )
 
 // jammers carries no migration seed, so the round-trip tests use sector 2.
-const freeSector = domain.SectorID(2)
+// otherSector holds the decoy row that makes LoadAll's sector filter observable.
+const (
+	freeSector  = domain.SectorID(2)
+	otherSector = domain.SectorID(3)
+)
 
 func sampleJammer(sector domain.SectorID) domain.Jammer {
 	return domain.Jammer{
@@ -49,9 +53,15 @@ func TestIntegration_Jammers_CreateLoadAll(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, id)
 
+	// A second generator one sector over: LoadAll must not hand it back, which
+	// is the only way the WHERE sector_id = $1 clause is actually exercised.
+	decoy, err := repo.Create(context.Background(), sampleJammer(otherSector))
+	require.NoError(t, err)
+	require.NotEqual(t, id, decoy)
+
 	got, err := repo.LoadAll(context.Background(), freeSector)
 	require.NoError(t, err)
-	require.Len(t, got, 1)
+	require.Len(t, got, 1, "only the generator in freeSector is returned")
 	require.Equal(t, id, got[0].ID)
 	require.Equal(t, domain.Vec2{X: 12, Y: -34}, got[0].Pos)
 	require.Equal(t, 7500, got[0].HP)

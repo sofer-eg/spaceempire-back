@@ -23,18 +23,24 @@ import (
 
 // fakeMissileCargo is an in-memory api.MissileCargo. It records every
 // Consume/Refund call so tests can assert the cargo lifecycle around
-// the worker reply.
+// the worker reply. It also remembers WHICH goods type each side asked for:
+// the handler picks that id from a package constant, and without recording it
+// a wrong constant (e.g. a jammer debiting the satellite's id) would pass every
+// assertion about counts and stock.
 type fakeMissileCargo struct {
-	mu      sync.Mutex
-	stock   int64 // missiles currently in cargo (for the test ship)
-	consume int   // call count
-	refund  int   // call count
+	mu          sync.Mutex
+	stock       int64 // missiles currently in cargo (for the test ship)
+	consume     int   // call count
+	refund      int   // call count
+	consumeType domain.GoodsTypeID
+	refundType  domain.GoodsTypeID
 }
 
-func (f *fakeMissileCargo) Consume(_ context.Context, _ domain.EntityRef, _ domain.GoodsTypeID, qty int64) error {
+func (f *fakeMissileCargo) Consume(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.consume++
+	f.consumeType = gtype
 	if f.stock < qty {
 		return cargo.ErrInsufficientQuantity
 	}
@@ -42,10 +48,11 @@ func (f *fakeMissileCargo) Consume(_ context.Context, _ domain.EntityRef, _ doma
 	return nil
 }
 
-func (f *fakeMissileCargo) Refund(_ context.Context, _ domain.EntityRef, _ domain.GoodsTypeID, qty int64) error {
+func (f *fakeMissileCargo) Refund(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refund++
+	f.refundType = gtype
 	f.stock += qty
 	return nil
 }
@@ -54,6 +61,13 @@ func (f *fakeMissileCargo) snapshot() (stock int64, consume, refund int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.stock, f.consume, f.refund
+}
+
+// goodsTypes returns the goods ids of the last Consume and Refund calls.
+func (f *fakeMissileCargo) goodsTypes() (consumed, refunded domain.GoodsTypeID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.consumeType, f.refundType
 }
 
 func missileTestShip() domain.Ship {

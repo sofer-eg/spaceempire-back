@@ -126,6 +126,21 @@ type MinerLogistics interface {
 	AddOre(ctx context.Context, ship domain.EntityRef, ore domain.GoodsTypeID, qty int64) error
 }
 
+// StaticInstaller deploys a player-owned static object and charges its goods in
+// ONE transaction (TASK-144): the cargo debit and the object INSERT commit
+// together, so a lost ack can never yield a free jammer/satellite and a failed
+// insert can never eat the goods. owner is the installing ship's cargo hold and
+// gtype the goods id the command carries (the sector package stays free of the
+// goods catalog). Wired via WithStaticInstaller; nil falls back to the plain
+// *Repo.Create path (no goods accounting), which is what pure unit tests use.
+// The real implementation lives in app/ over cargo + the object repositories,
+// keeping the sector package free of cargo dependencies (mirrors
+// MinerLogistics).
+type StaticInstaller interface {
+	InstallJammer(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, j domain.Jammer) (domain.JammerID, error)
+	InstallSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, s domain.Satellite) (domain.SatelliteID, error)
+}
+
 // Relations is the worker's hostility oracle (phase 6.2a): ship-vs-ship
 // standing for laser friendly-fire gating and drone auto-acquire. Injected
 // via WithRelations; nil keeps the pre-6.2a behaviour (lasers fire at any
@@ -219,6 +234,12 @@ type Worker struct {
 	// (TASK-131). Nil makes installs RAM-only (fallback id counter). Wired via
 	// WithJammers.
 	jammerRepo JammerRepo
+
+	// staticInstaller charges the goods and creates the object in one
+	// transaction on the install path (TASK-144). Nil falls back to the plain
+	// satelliteRepo/jammerRepo Create (no goods accounting) — pure unit tests.
+	// Wired via WithStaticInstaller.
+	staticInstaller StaticInstaller
 
 	// asteroidRepo persists minable asteroids (phase 5.4). Nil disables
 	// persistence (asteroids still mine down in RAM). Wired via
@@ -451,6 +472,16 @@ func WithSatellites(repo SatelliteRepo) Option {
 func WithJammers(repo JammerRepo) Option {
 	return func(w *Worker) {
 		w.jammerRepo = repo
+	}
+}
+
+// WithStaticInstaller injects the transactional installer the install-jammer /
+// install-satellite commands use to charge the goods and create the object
+// together (TASK-144). Nil keeps the plain *Repo.Create path, which does no
+// goods accounting — used by pure unit tests.
+func WithStaticInstaller(i StaticInstaller) Option {
+	return func(w *Worker) {
+		w.staticInstaller = i
 	}
 }
 

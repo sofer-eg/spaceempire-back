@@ -105,20 +105,36 @@ func (s *Service) Consume(ctx context.Context, owner domain.EntityRef, gtype dom
 		return ErrNonPositiveQuantity
 	}
 	return s.tx.Do(ctx, func(ctx context.Context, txRepo Repo) error {
-		if _, err := txRepo.GoodsType(ctx, gtype); err != nil {
-			if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
-				return ErrGoodsTypeNotFound
-			}
-			return err
-		}
-		if err := txRepo.Subtract(ctx, owner, gtype, qty, unownedGoods); err != nil {
-			if errors.Is(err, cargorepo.ErrInsufficientQuantity) {
-				return ErrInsufficientQuantity
-			}
-			return fmt.Errorf("subtract on consume: %w", err)
-		}
-		return nil
+		return ConsumeIn(ctx, txRepo, owner, gtype, qty)
 	})
+}
+
+// ConsumeIn is Consume's body over a caller-supplied repo, so an operation
+// that must commit together with the debit can run both inside ONE
+// transaction of its own. Used by the install-jammer / install-satellite path
+// (TASK-144): the goods debit and the object INSERT share a transaction, which
+// removes the "cargo taken but no object" / "object built but goods refunded"
+// windows a two-call Consume+Refund orchestration leaves open.
+//
+// repo must already be bound to that transaction (persistence/cargo
+// Repository.WithExecutor(tx)). Error semantics are identical to Consume.
+func ConsumeIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
+	if qty <= 0 {
+		return ErrNonPositiveQuantity
+	}
+	if _, err := repo.GoodsType(ctx, gtype); err != nil {
+		if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
+			return ErrGoodsTypeNotFound
+		}
+		return err
+	}
+	if err := repo.Subtract(ctx, owner, gtype, qty, unownedGoods); err != nil {
+		if errors.Is(err, cargorepo.ErrInsufficientQuantity) {
+			return ErrInsufficientQuantity
+		}
+		return fmt.Errorf("subtract on consume: %w", err)
+	}
+	return nil
 }
 
 // Refund inserts (or grows) qty units of gtype back into the owner's

@@ -93,19 +93,52 @@ blocked jump costs the player nothing. Both branches report the shared sentinel
 There is no seed. A player deploys a generator from a ship's cargo:
 
 `POST /api/cmd/install-jammer {shipID}`. The handler (orchestrator, mirrors
-`install-satellite`):
-1. `Consume` 1× goods id 27 ("Генератор гипер-помех", `configs/balance.yaml`,
-   avg_price 1 134 216) from the ship's hold (Postgres transaction).
-2. Send `InstallJammerCommand` to the sector worker, wait for ack.
-3. On worker rejection or timeout — `Refund` the goods and propagate the error.
+`install-satellite`) owns **no cargo** — it only routes and maps:
+1. Send `InstallJammerCommand{PlayerID, ShipID, GoodsType: 27}` to the sector
+   worker. Goods id 27 is "Генератор гипер-помех" (`configs/balance.yaml`,
+   avg_price 1 134 216); the handler owns that constant so the sector package
+   stays free of the goods catalog.
+2. Wait for ack (`AckTimeout`) and map the outcome: `ErrShipNotFound` → 404,
+   `ErrForbidden` → 403, `ErrShipDocked` → 400, `cargo.ErrInsufficientQuantity`
+   → 400 "no jammer in cargo", `cargo.ErrGoodsTypeNotFound` → 500, ack timeout
+   → 504 with **no compensation** (see atomicity below).
 
 `InstallJammerCommand.apply` validates ownership (`ErrForbidden`) and that the
-ship is not docked (`ErrShipDocked`), then `installJammer`: `jammersRepo.Create`
-(DB-assigned id; fallback counter when no repo, for pure unit tests) →
+ship is not docked (`ErrShipDocked`) — a rejected gate never touches the goods.
+Then `installJammer` debits the hold and creates the generator through
+`sector.StaticInstaller` (app-side adapter over `database.TxManager` +
+`cargo.ConsumeIn` + `jammersRepo.WithExecutor(tx).Create`), and only on success
 `addJammer` inserts it into `statics.Jammers` and the `destructibles` map at the
 ship's current position. The new generator reaches clients on the next tick via
 the 10.20 L2 `StaticsAdded` delta (it is in `destructibles`, hence in
 `visibleStaticRefs`, and `collectStaticsByRefs` renders the full object).
+
+With no installer wired the command falls back to a bare `jammersRepo.Create`
+(or a fallback id counter) and accounts for no goods — that path exists only for
+pure unit tests.
+
+### Atomicity of the install (TASK-144)
+
+**Invariant: the goods debit and the generator INSERT commit in ONE
+transaction.** Either the player paid and the generator exists, or neither
+happened. Nothing is added to the sector's RAM unless the transaction committed.
+
+This replaced a `Consume`-before-`Send` / `Refund`-on-failure orchestration in
+the handler, which leaked a free generator: `AckTimeout` is only
+`TickInterval + 1s`, so a delayed tick made the handler refund and answer 504
+while the command was still in the inbox and applied normally a moment later
+— goods returned, generator built, repeatable at will (≈ 1.13M cr each).
+
+Consequences of the new invariant:
+- A 504 means "outcome unknown", not "nothing happened": the player checks the
+  hold and retries only if no generator appeared. A retry on an empty hold is
+  refused with 400.
+- The lost ack itself is harmless — `replyInstallJammer` writing into an
+  abandoned `buf=1` channel drops the result, but the world and the hold already
+  agree.
+- The install's DB call is bounded by `Config.RepoTimeout` (default 2 s) instead
+  of an uninterruptible background context, so a hung Postgres stalls the tick
+  for at most that long instead of forever.
 
 ## Not a satellite
 

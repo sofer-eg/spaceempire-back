@@ -455,6 +455,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		// install/destroy so a deployed generator survives a restart and a
 		// killed one stays dead.
 		sector.WithJammers(jammersRepo),
+		// TASK-144: the install-jammer / install-satellite commands charge the
+		// goods and create the object in ONE transaction, so a lost ack can no
+		// longer hand out a free generator (nor eat the goods on a failed
+		// insert). This replaces the handler-side Consume/Refund pair.
+		sector.WithStaticInstaller(staticInstaller{
+			tx:         txManager,
+			cargo:      cargoRepoPersistence,
+			jammers:    jammersRepo,
+			satellites: satellitesRepo,
+		}),
 		// 9.4: police — the main-race navy scans player ships for contraband,
 		// confiscates it (via cargo), drops the player's race standing, and
 		// drops standing again when a player destroys a faction ship.
@@ -531,8 +541,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		HandoffBus:        jumpBus,
 		EventBus:          jumpBus,
 		MissileCargo:      cargoSvc,
-		SatelliteCargo:    cargoSvc,
-		JammerCargo:       cargoSvc,
 		DroneCargo:        cargoSvc,
 		TorpedoCargo:      cargoSvc,
 		NpcPlayerID:       npcPlayerID,

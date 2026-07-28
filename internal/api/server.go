@@ -94,13 +94,6 @@ type Config struct {
 	// TorpedoCargo backs POST /api/cmd/launch-torpedo (cargo Consume / Refund
 	// around the sector command). nil disables the endpoint with 503.
 	TorpedoCargo TorpedoCargo
-	// SatelliteCargo backs POST /api/cmd/install-satellite (cargo Consume /
-	// Refund around the sector command, phase 10.15). nil disables the
-	// endpoint with 503.
-	SatelliteCargo SatelliteCargo
-	// JammerCargo backs POST /api/cmd/install-jammer (cargo Consume / Refund
-	// around the sector command, TASK-131). nil disables the endpoint with 503.
-	JammerCargo JammerCargo
 	// NpcPlayerID is the reserved system-player's DB id. Ships owned by this
 	// player are NPC (traders, miners, passengers) and the SPA uses IsNPC to
 	// colour them amber instead of red. Zero means "no NPC player loaded" and
@@ -162,8 +155,6 @@ type Server struct {
 	missileCargo      MissileCargo
 	droneCargo        DroneCargo
 	torpedoCargo      TorpedoCargo
-	satelliteCargo    SatelliteCargo
-	jammerCargo       JammerCargo
 	activeShips       ActiveShipReader
 	activeShipWriter  ActiveShipWriter
 	handoffPublisher  bus.Publisher
@@ -202,8 +193,6 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 		missileCargo:      cfg.MissileCargo,
 		droneCargo:        cfg.DroneCargo,
 		torpedoCargo:      cfg.TorpedoCargo,
-		satelliteCargo:    cfg.SatelliteCargo,
-		jammerCargo:       cfg.JammerCargo,
 		activeShips:       cfg.ActiveShips,
 		activeShipWriter:  cfg.ActiveShipWriter,
 		handoffPublisher:  cfg.HandoffPublisher,

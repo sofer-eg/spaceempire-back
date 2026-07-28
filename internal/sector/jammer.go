@@ -27,13 +27,16 @@ type InstallJammerResult struct {
 
 // InstallJammerCommand deploys a hyper-interference generator (TASK-131) at the
 // ship's current position. Ownership is enforced (PlayerID must match the
-// ship's owner) and the ship must be in space (not docked). The cargo debit
-// (1× goods id 27) happens outside the worker — the HTTP handler consumes it
-// before Send and refunds on reply.Err, mirroring install-satellite.
+// ship's owner) and the ship must be in space (not docked). GoodsType is the
+// goods id one generator costs (27); the handler owns that constant, the sector
+// package stays free of the goods catalog. The debit happens inside apply, in
+// the same transaction as the INSERT (TASK-144), so a lost ack cannot yield a
+// free generator.
 type InstallJammerCommand struct {
-	PlayerID domain.PlayerID
-	ShipID   domain.ShipID
-	Reply    chan<- InstallJammerResult
+	PlayerID  domain.PlayerID
+	ShipID    domain.ShipID
+	GoodsType domain.GoodsTypeID
+	Reply     chan<- InstallJammerResult
 }
 
 func (c InstallJammerCommand) apply(w *Worker, s *sectorState) {
@@ -47,17 +50,25 @@ func (c InstallJammerCommand) apply(w *Worker, s *sectorState) {
 	case ship.Docked != nil:
 		res.Err = ErrShipDocked
 	default:
-		res.JammerID, res.Err = w.installJammer(s, ship)
+		res.JammerID, res.Err = w.installJammer(s, ship, c.GoodsType)
 	}
 	replyInstallJammer(c.Reply, res)
 }
 
-// installJammer creates the generator (persisted when a repo is wired, else a
-// fallback id is allocated for pure unit tests) and adds it to the sector's
-// rendered layout + live combat set. The new generator reaches clients on the
-// next tick via the 10.20 L2 big-radar StaticsAdded delta, and starts jamming
-// jumps immediately (jammerActive reads statics.Jammers).
-func (w *Worker) installJammer(s *sectorState, ship *domain.Ship) (domain.JammerID, error) {
+// installJammer charges the generator and creates it, then adds it to the
+// sector's rendered layout + live combat set. The new generator reaches clients
+// on the next tick via the 10.20 L2 big-radar StaticsAdded delta, and starts
+// jamming jumps immediately (jammerActive reads statics.Jammers).
+//
+// With a staticInstaller wired (production) the goods debit and the INSERT
+// commit as one transaction — nothing is added to RAM unless both succeeded.
+// Without one we fall back to the bare repo Create (or a fallback id) and no
+// goods are accounted for; that path exists only for pure unit tests.
+//
+// The command apply path carries no context, so the DB call is bounded by
+// cfg.RepoTimeout instead of running under an uninterruptible background
+// context: a hung Postgres stalls the tick for at most that long (AC#3).
+func (w *Worker) installJammer(s *sectorState, ship *domain.Ship, gtype domain.GoodsTypeID) (domain.JammerID, error) {
 	owner := ship.PlayerID
 	jam := domain.Jammer{
 		OwnerID:        &owner,
@@ -70,13 +81,25 @@ func (w *Worker) installJammer(s *sectorState, ship *domain.Ship) (domain.Jammer
 		MaxShield:      jammerShield,
 		ShieldRecharge: jammerShieldRecharge,
 	}
-	if w.jammerRepo != nil {
-		id, err := w.jammerRepo.Create(context.Background(), jam)
+
+	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
+	defer cancel()
+
+	switch {
+	case w.staticInstaller != nil:
+		hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
+		id, err := w.staticInstaller.InstallJammer(ctx, hold, gtype, jam)
 		if err != nil {
 			return 0, err
 		}
 		jam.ID = id
-	} else {
+	case w.jammerRepo != nil:
+		id, err := w.jammerRepo.Create(ctx, jam)
+		if err != nil {
+			return 0, err
+		}
+		jam.ID = id
+	default:
 		jam.ID = s.allocJammerID()
 	}
 	s.addJammer(jam)

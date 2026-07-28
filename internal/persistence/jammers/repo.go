@@ -28,6 +28,13 @@ func New(exec database.Executor) *Repository {
 	return &Repository{exec: exec}
 }
 
+// WithExecutor returns a Repository bound to a different executor. Used by the
+// install path (TASK-144) to run Create inside the same transaction as the
+// cargo debit, so a generator can never appear without being paid for.
+func (r *Repository) WithExecutor(exec database.Executor) *Repository {
+	return &Repository{exec: exec}
+}
+
 const loadAllSQL = `
 SELECT id, owner_id, sector_id, pos_x, pos_y, race, built, hp, shield, max_shield, shield_recharge
 FROM jammers

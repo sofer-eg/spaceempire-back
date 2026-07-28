@@ -40,20 +40,47 @@ tower.
 
 There is no seed. A player deploys a satellite from a ship's cargo:
 
-`POST /api/cmd/install-satellite {shipID}`. The handler (orchestrator, mirrors
-`launch-missile`):
-1. `Consume` 1× goods id 26 ("Навигационный спутник",
-   `configs/balance.yaml`) from the ship's hold (Postgres transaction).
-2. Send `InstallSatelliteCommand` to the sector worker, wait for ack.
-3. On worker rejection or timeout — `Refund` the goods and propagate the error.
+`POST /api/cmd/install-satellite {shipID}`. The handler (orchestrator) owns
+**no cargo** — it only routes and maps:
+1. Send `InstallSatelliteCommand{PlayerID, ShipID, GoodsType: 26}` to the sector
+   worker. Goods id 26 is "Навигационный спутник" (`configs/balance.yaml`); the
+   handler owns that constant so the sector package stays free of the goods
+   catalog.
+2. Wait for ack (`AckTimeout`) and map the outcome: `ErrShipNotFound` → 404,
+   `ErrForbidden` → 403, `ErrShipDocked` → 400, `cargo.ErrInsufficientQuantity`
+   → 400 "no satellite in cargo", `cargo.ErrGoodsTypeNotFound` → 500, ack
+   timeout → 504 with **no compensation** (see atomicity below).
 
 `InstallSatelliteCommand.apply` validates ownership and that the ship is not
-docked, then `installSatellite`: `satellitesRepo.Create` (DB-assigned id;
-fallback counter when no repo, for pure unit tests) → `addSatellite` inserts it
-into `statics.Satellites` and the `destructibles` map at the ship's current
-position. The new satellite reaches clients on the next tick via the 10.20 L2
-`StaticsAdded` delta (it is in `destructibles`, hence in `staticRefsInRadius`,
-and `collectStaticsByRefs` renders the full object).
+docked — a rejected gate never touches the goods. Then `installSatellite` debits
+the hold and creates the satellite through `sector.StaticInstaller` (app-side
+adapter over `database.TxManager` + `cargo.ConsumeIn` +
+`satellitesRepo.WithExecutor(tx).Create`), and only on success `addSatellite`
+inserts it into `statics.Satellites` and the `destructibles` map at the ship's
+current position. The new satellite reaches clients on the next tick via the
+10.20 L2 `StaticsAdded` delta (it is in `destructibles`, hence in
+`staticRefsInRadius`, and `collectStaticsByRefs` renders the full object).
+
+With no installer wired the command falls back to a bare `satellitesRepo.Create`
+(or a fallback id counter) and accounts for no goods — that path exists only for
+pure unit tests.
+
+### Atomicity of the install (TASK-144)
+
+**Invariant: the goods debit and the satellite INSERT commit in ONE
+transaction.** Either the player paid and the satellite exists, or neither
+happened; nothing enters the sector's RAM unless the transaction committed.
+
+This replaced a `Consume`-before-`Send` / `Refund`-on-failure orchestration in
+the handler: since `AckTimeout` is only `TickInterval + 1s`, a delayed tick made
+the handler refund and answer 504 while the command was still queued and applied
+normally afterwards — goods returned, satellite built, free and repeatable. The
+same hole (and the same fix) applies to `install-jammer`, where the object costs
+≈ 1.13M cr; see `jammer.md` for the full write-up.
+
+A 504 therefore means "outcome unknown", not "nothing happened", and the
+install's DB call is bounded by `Config.RepoTimeout` (default 2 s) so a hung
+Postgres cannot park the tick goroutine indefinitely.
 
 Install HP/Shield are package constants (`satelliteHP` etc.) — these are deploy
 defaults, not per-tick knobs, so they stay out of `Config`.

@@ -140,28 +140,24 @@ func ConsumeIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype dom
 	return nil
 }
 
-// Refund inserts (or grows) qty units of gtype back into the owner's
-// stack — used to undo a Consume after a downstream operation failed
-// (e.g. the sector worker refused a missile launch). It deliberately
-// skips the capacity check: the qty being refunded already fitted in
-// the owner's hold a moment ago, and reintroducing it must never fail.
-func (s *Service) Refund(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
-	if qty <= 0 {
-		return ErrNonPositiveQuantity
-	}
-	return s.tx.Do(ctx, func(ctx context.Context, txRepo Repo) error {
-		return RefundIn(ctx, txRepo, owner, gtype, qty)
-	})
-}
-
-// RefundIn is Refund's body over a caller-supplied repo, the mirror of
-// ConsumeIn: an operation that must commit together with the credit runs both
-// inside ONE transaction of its own. Used by the recall-drones path (TASK-152),
-// where the drone rows are deleted and the units credited together — a
-// two-call orchestration would let a lost ack delete the drones and pay nothing.
+// RefundIn inserts (or grows) qty units of gtype into the owner's stack from
+// inside the caller's ALREADY OPEN transaction — the mirror of ConsumeIn, for an
+// operation that must commit together with the credit. Used by the recall-drones
+// path (TASK-152), where the drone rows are deleted and the units credited
+// together; a two-call orchestration would let a lost ack delete the drones and
+// pay nothing back.
+//
+// It deliberately skips the capacity check that Add makes: the credit must not
+// be refusable, or the caller is left holding a deleted object it cannot pay for.
+// The consequence — a recall can overfill a hold the ship filled while its drones
+// were out — is TASK-156's to resolve.
+//
+// There is no Service-level Refund wrapper: since TASK-152 every compensation
+// left in the codebase happens inside a caller's transaction, and the wrapper had
+// no production caller.
 //
 // repo must already be bound to that transaction (persistence/cargo
-// Repository.WithExecutor(tx)). Error semantics are identical to Refund.
+// Repository.WithExecutor(tx)). Returns ErrNonPositiveQuantity for qty<=0.
 func RefundIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
 	if qty <= 0 {
 		return ErrNonPositiveQuantity

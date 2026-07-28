@@ -160,8 +160,11 @@ func TestUnit_RecallDrones(t *testing.T) {
 	require.Equal(t, 4, launchDrones(t, w, 100, 1, 2, 4).Spawned)
 
 	reply := make(chan sector.RecallDronesResult, 1)
+	// GoodsType is what the credit is booked against; omitting it here would pass
+	// against the fake (which ignores the catalog) while a real repository takes
+	// the zero id to a foreign-key violation and rolls the whole recall back.
 	require.NoError(t, w.Send(testSector, sector.RecallDronesCommand{
-		PlayerID: 100, ShipID: 1, Reply: reply,
+		PlayerID: 100, ShipID: 1, GoodsType: testDroneGoods, Reply: reply,
 	}))
 	w.Tick(ctx)
 	res := <-reply

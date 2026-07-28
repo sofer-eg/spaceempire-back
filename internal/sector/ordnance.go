@@ -9,11 +9,13 @@ import (
 	"spaceempire/back/internal/domain"
 )
 
-// The three helpers below are the worker's side of the Ordnance contract
-// (TASK-147). They share one shape, mirroring installJammer/installSatellite:
+// The four helpers below are the worker's side of the Ordnance contract
+// (TASK-147; recallDrones added by TASK-152). They share one shape, mirroring
+// installJammer/installSatellite:
 //
 //   - a nil Ordnance refuses the launch (ErrOrdnanceUnavailable) rather than
-//     firing for free — the ordnance is what charges the player;
+//     firing for free — the ordnance is what charges the player, and for the
+//     recall what pays them back;
 //   - the command apply path carries no context, so the DB call is bounded by
 //     cfg.RepoTimeout instead of running under an uninterruptible background
 //     context (which is what the pre-TASK-147 torpedo/drone INSERTs did): a hung
@@ -131,6 +133,13 @@ func (w *Worker) recallDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ids [
 	if w.ordnance == nil {
 		return 0, ErrOrdnanceUnavailable
 	}
+	if len(ids) == 0 {
+		// Nothing to delete and nothing to credit: no transaction, no round trip.
+		// Deliberately AFTER the nil gate, so a misconfigured worker answers the
+		// same way whether or not the ship has drones out — an admin poking the
+		// endpoint after a deploy is exactly who must not get a cheerful 200.
+		return 0, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
 	defer cancel()
 
@@ -140,6 +149,18 @@ func (w *Worker) recallDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ids [
 	if err != nil {
 		w.logRecallError(err, ship, gtype, len(ids))
 		return 0, err
+	}
+	if credited < len(ids) {
+		// The one event that confirms (or refutes) a past "recall outcome in doubt"
+		// ERROR: those rows were deleted and paid for by an earlier attempt whose
+		// COMMIT landed after the deadline fired. Worth a line either way — if rows
+		// ever start vanishing for a real reason (an out-of-band DELETE, a cascade
+		// from the owning ship), players quietly lose consumables and this is the
+		// only place that would show it.
+		w.logger.Warn("recall credited fewer units than drones removed: rows already gone",
+			"requested", len(ids), "credited", credited, "ship", int64(ship.ID),
+			"player", int64(ship.PlayerID), "sector", int64(ship.SectorID),
+			"goods_type", int64(gtype))
 	}
 	return credited, nil
 }
@@ -179,8 +200,12 @@ func (w *Worker) logOrdnanceError(err error, kind string, ship *domain.Ship, gty
 // the caller only clears RAM on a confirmed success. That residue is bounded and
 // self-correcting — the drones fly on until their TTL or the next restart, and a
 // retried recall clears them while crediting nothing (their rows are gone, so
-// there is nothing left to pay for). The opposite choice — clearing RAM on an
-// ambiguous outcome — is worse: if the transaction actually rolled back, the
+// there is nothing left to pay for). Self-correcting in the LEDGER, not on the
+// battlefield: until that TTL the player holds both the credited units and N
+// still-firing ghosts, so he can field up to 2N drones for the price of N. That
+// is why this is an ERROR and not an accounting footnote. The opposite choice —
+// clearing RAM on an ambiguous outcome — is still worse: if the transaction
+// actually rolled back, the
 // drones vanish from the sector with their rows intact and come back from the
 // dead at the next cold start, having been paid for once. ERROR carries the
 // counts for hand reconciliation; every other error rolled the transaction back

@@ -169,8 +169,10 @@ func (w *Worker) acquireDroneTarget(s *sectorState, d *domain.Drone) *domain.Shi
 }
 
 // removeDrone deletes a drone from RAM and the DB (immediate), records the
-// supplied impact for the WS broadcast, and clears any dirty flag. Used by
-// both the TTL/owner-loss path and RecallDronesCommand.
+// supplied impact for the WS broadcast, and clears any dirty flag. Used by the
+// TTL/owner-loss path — a drone that dies on its own. RecallDronesCommand does
+// not come through here: since TASK-152 its delete rides the crediting
+// transaction, and a recall emits no impact.
 func (w *Worker) removeDrone(ctx context.Context, s *sectorState, id domain.DroneID, imp DroneImpact) {
 	s.addDroneImpact(imp)
 	delete(s.drones, id)

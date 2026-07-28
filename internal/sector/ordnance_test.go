@@ -1,9 +1,11 @@
 package sector_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -805,7 +807,14 @@ func TestUnit_RecallDrones_LostAckCreditsCargo(t *testing.T) {
 func TestUnit_RecallDrones_CreditsOnlyDeletedRows(t *testing.T) {
 	t.Parallel()
 	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
-	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+	// A capturing logger: the shortfall is the only event that confirms a past
+	// "outcome in doubt" ERROR, and it would also be the only trace if drone rows
+	// ever started disappearing for a real reason (review round 2, point 1).
+	var logs bytes.Buffer
+	w := sector.NewWorker(0, ordnanceCfg(), clock.NewRealClock(), nil,
+		slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		map[domain.SectorID][]domain.Ship{testSector: launchPair()},
+		sector.WithOrdnance(ord))
 
 	// Two is the up_drone_control cap of launcherShip, so the salvo is the whole
 	// live set; one of the two rows is already gone in the DB.
@@ -821,6 +830,10 @@ func TestUnit_RecallDrones_CreditsOnlyDeletedRows(t *testing.T) {
 	assert.EqualValues(t, 1, ord.credited[testDroneGoods])
 	assert.EqualValues(t, 1, ord.left(testDroneGoods))
 	assert.Empty(t, w.Snapshot(testSector).Drones, "both stop flying")
+
+	// Tick ran on this goroutine, so the buffer is settled.
+	assert.Contains(t, logs.String(), "recall credited fewer units", "the shortfall is reported")
+	assert.Contains(t, logs.String(), "requested=2 credited=1")
 }
 
 // TestUnit_RecallDrones_AllRowsGoneCreditsNothing is the self-healing half of the
@@ -913,21 +926,40 @@ func TestUnit_RecallDrones_HungDBKeepsDronesFlying(t *testing.T) {
 // ordnance cannot launch any.
 func TestUnit_RecallDrones_WithoutOrdnanceRefused(t *testing.T) {
 	t.Parallel()
-	live := []domain.Drone{
-		{ID: 7, SectorID: testSector, OwnerShipID: 1, PlayerID: 100, HP: 20,
-			Target: shipTarget(2), ExpiresAt: time.Now().Add(time.Hour)},
-	}
-	w := sector.NewWorker(0, ordnanceCfg(), clock.NewRealClock(), nil, nil,
-		map[domain.SectorID][]domain.Ship{testSector: launchPair()},
-		sector.WithDrones(nil, map[domain.SectorID][]domain.Drone{testSector: live}))
 
-	reply := make(chan sector.RecallDronesResult, 1)
-	sendRecall(t, w, reply)
+	t.Run("with live drones", func(t *testing.T) {
+		t.Parallel()
+		live := []domain.Drone{
+			{ID: 7, SectorID: testSector, OwnerShipID: 1, PlayerID: 100, HP: 20,
+				Target: shipTarget(2), ExpiresAt: time.Now().Add(time.Hour)},
+		}
+		w := sector.NewWorker(0, ordnanceCfg(), clock.NewRealClock(), nil, nil,
+			map[domain.SectorID][]domain.Ship{testSector: launchPair()},
+			sector.WithDrones(nil, map[domain.SectorID][]domain.Drone{testSector: live}))
 
-	res := <-reply
-	require.ErrorIs(t, res.Err, sector.ErrOrdnanceUnavailable)
-	assert.Zero(t, res.Recalled)
-	assert.Len(t, w.Snapshot(testSector).Drones, 1, "the drone is not deleted uncredited")
+		reply := make(chan sector.RecallDronesResult, 1)
+		sendRecall(t, w, reply)
+
+		res := <-reply
+		require.ErrorIs(t, res.Err, sector.ErrOrdnanceUnavailable)
+		assert.Zero(t, res.Recalled)
+		assert.Len(t, w.Snapshot(testSector).Drones, 1, "the drone is not deleted uncredited")
+	})
+
+	// A ship with no drones out must be refused just the same (review round 2,
+	// point 4). Nothing is at stake for the player either way, but this is the
+	// call an admin makes to check the endpoint after a deploy: answering
+	// 200 {recalled: 0} would hide the missing wiring until someone loses drones.
+	t.Run("with no live drones", func(t *testing.T) {
+		t.Parallel()
+		w := sector.NewWorker(0, ordnanceCfg(), clock.NewRealClock(), nil, nil,
+			map[domain.SectorID][]domain.Ship{testSector: launchPair()})
+
+		reply := make(chan sector.RecallDronesResult, 1)
+		sendRecall(t, w, reply)
+
+		require.ErrorIs(t, (<-reply).Err, sector.ErrOrdnanceUnavailable)
+	})
 }
 
 // TestUnit_RecallDrones_ChargesDrainBudget: the recall writes to the DB inside

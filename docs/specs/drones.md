@@ -117,8 +117,10 @@ drones owned by the ship, hands them to `sector.Ordnance.RecallDrones`
 `Ordnance` is the **only** recall path: a worker built without one
 refuses with `ErrOrdnanceUnavailable` → 503 rather than deleting drones
 with nobody to credit the player (the nil-implementation doctrine of
-TASK-144, read backwards). A recall that finds no live drones is a no-op
-and never opens a transaction.
+TASK-144, read backwards). That refusal comes **before** the empty-set
+short-circuit, so a misconfigured worker answers the same way whether or
+not the ship has drones out; a recall that finds no live drones on a
+properly wired worker is a no-op and never opens a transaction.
 
 This replaced a worker-deletes / handler-`Refund`s-after-the-ack
 orchestration with the mirror image of the launch hole: `AckTimeout` is
@@ -137,12 +139,28 @@ Consequences:
   writer and is parked in the call for its duration, so the collected
   ids cannot go stale. A `RepoTimeout` deadline (COMMIT possibly in
   flight) is therefore treated as a failure: the drones keep flying,
-  logged at ERROR. That residue is self-correcting — a retried recall
-  finds the rows gone, clears RAM and credits nothing, so the player is
-  never paid twice. The opposite choice would resurrect paid-for drones
-  from their surviving rows at the next cold start.
+  logged at ERROR. That residue is self-correcting **in the ledger** — a
+  retried recall finds the rows gone, clears RAM and credits nothing, so
+  the player is never paid twice. It is **not** self-correcting on the
+  battlefield: if the COMMIT did land, the player holds the credited
+  units *and* N still-firing ghost drones until their TTL (or the next
+  restart, whose `LoadAll` finds no rows), so he can field up to 2N
+  drones for the price of N. Hence ERROR, not a debug line. The opposite
+  choice — clearing RAM on an ambiguous outcome — would resurrect
+  paid-for drones from their surviving rows at the next cold start.
+- **A shortfall is logged.** `credited < len(ids)` emits a WARN with both
+  counts: it is what confirms (or refutes) an earlier "outcome in doubt"
+  ERROR, and the only trace there would be if drone rows ever started
+  vanishing for a real reason (out-of-band DELETE, cascade).
 - The DB time is bounded by `Config.RepoTimeout` and charged to the
   drain's DB budget, exactly like a launch.
+- **The credit skips the capacity check** (`cargo.RefundIn`, not `Add`):
+  it must not be refusable, or the transaction would delete drones it
+  cannot pay for. Unlike the launch-side refund it replaced, this is
+  *not* covered by "the units fitted a moment ago" — a whole drone TTL
+  can pass, and the ship can dock and fill its hold meanwhile, so a
+  recall can legitimately overfill it. Known and deliberate; **TASK-156**
+  owns what should happen instead.
 
 ## 3. Persistence (immediate, unlike missiles)
 

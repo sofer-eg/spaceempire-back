@@ -861,13 +861,9 @@ func (c RecallDronesCommand) apply(w *Worker, s *sectorState) {
 			ids = append(ids, id)
 		}
 	}
-	if len(ids) == 0 {
-		// Nothing to delete and nothing to credit: a no-op needs no transaction
-		// (and no ordnance).
-		replyRecallDrones(c.Reply, res)
-		return
-	}
-
+	// An empty id set is not short-circuited here: recallDrones still applies the
+	// nil-Ordnance gate to it, so a misconfigured worker refuses every recall
+	// rather than only the ones that would have moved something.
 	credited, err := w.recallDrones(ship, c.GoodsType, ids)
 	if err != nil {
 		res.Err = err

@@ -426,7 +426,9 @@ func TestUnit_CargoService_Consume_UnknownGoodsType(t *testing.T) {
 	require.ErrorIs(t, err, cargo.ErrGoodsTypeNotFound)
 }
 
-func TestUnit_CargoService_Refund_RestoresStack(t *testing.T) {
+// RefundIn is called with a repo already bound to the caller's transaction, so
+// these drive it directly — there is no Service wrapper any more (TASK-152).
+func TestUnit_CargoRefundIn_RestoresStack(t *testing.T) {
 	t.Parallel()
 
 	repo := newStubRepo()
@@ -435,17 +437,32 @@ func TestUnit_CargoService_Refund_RestoresStack(t *testing.T) {
 	repo.goodsTypes[50] = domain.GoodsType{ID: 50, Name: "Missile", Space: 2}
 	repo.seed(owner, 50, 0, 3)
 
-	svc := cargo.New(repo, inlineTx{repo: repo})
-	require.NoError(t, svc.Refund(context.Background(), owner, 50, 2))
+	require.NoError(t, cargo.RefundIn(context.Background(), repo, owner, 50, 2))
 	assert.EqualValues(t, 5, repo.stacks[owner][stackKey{50, 0}])
 }
 
-func TestUnit_CargoService_Refund_RejectsNonPositive(t *testing.T) {
+func TestUnit_CargoRefundIn_RejectsNonPositive(t *testing.T) {
 	t.Parallel()
 	repo := newStubRepo()
-	svc := cargo.New(repo, inlineTx{repo: repo})
-	err := svc.Refund(context.Background(), domain.EntityRef{Kind: 1, ID: 1}, 50, 0)
+	err := cargo.RefundIn(context.Background(), repo, domain.EntityRef{Kind: 1, ID: 1}, 50, 0)
 	require.ErrorIs(t, err, cargo.ErrNonPositiveQuantity)
+}
+
+// TestUnit_CargoRefundIn_IgnoresCapacity pins the deliberate asymmetry with Add:
+// the credit must never be refusable, because its caller has already deleted the
+// object it is paying for (TASK-152). Overfilling a hold that filled up while the
+// drones were out is the known consequence — TASK-156.
+func TestUnit_CargoRefundIn_IgnoresCapacity(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
+	repo.capacities[owner] = 2 // room for one unit of a Space:2 good
+	repo.goodsTypes[50] = domain.GoodsType{ID: 50, Name: "Missile", Space: 2}
+	repo.seed(owner, 50, 0, 1)
+
+	require.NoError(t, cargo.RefundIn(context.Background(), repo, owner, 50, 3))
+	assert.EqualValues(t, 4, repo.stacks[owner][stackKey{50, 0}], "credited past capacity")
 }
 
 func TestUnit_CargoService_Move_UnknownGoodsType(t *testing.T) {

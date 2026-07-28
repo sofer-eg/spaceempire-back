@@ -77,6 +77,10 @@ func (o ordnance) LaunchTorpedo(ctx context.Context, owner domain.EntityRef, gty
 func (o ordnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error) {
 	ids := make([]domain.DroneID, 0, len(ds))
 	err := o.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// Reset per attempt: TxManager.Do runs the closure once today, but an
+		// accumulator that lives outside it would silently double on the first
+		// retry anyone adds.
+		ids = ids[:0]
 		if err := cargo.ConsumeIn(ctx, o.cargo.WithExecutor(tx), owner, gtype, int64(len(ds))); err != nil {
 			return err
 		}
@@ -110,13 +114,19 @@ func (o ordnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtyp
 // permanently unable to recall. Every other delete error rolls the whole
 // transaction back: nothing deleted, nothing credited.
 //
-// cargo.RefundIn (not Service.Refund) because the transaction is ours and the
-// DELETEs must ride along in it; Refund semantics — no capacity check — are what
-// the pre-TASK-152 handler used, and are right here: the units fitted in this
-// hold a moment ago.
+// cargo.RefundIn (not cargo.AddIn) because the transaction is ours and the
+// DELETEs must ride along in it, and because the credit must not fail on a full
+// hold: refusing it would mean deleting the drones with nothing paid back, the
+// very hole this method closes. That skipped capacity check is NOT the launch
+// side's "the units fitted here a moment ago" argument — a drone's whole TTL can
+// pass between launch and recall, and the ship can dock and fill the hold in
+// between, so a recall can legitimately overfill it. Deliberate for now;
+// TASK-156 owns choosing what should happen instead (drop to a container,
+// partial credit, refuse the recall).
 func (o ordnance) RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
 	var credited int
 	err := o.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		credited = 0 // see LaunchDrones: an accumulator outside the closure
 		repo := o.drones.WithExecutor(tx)
 		for _, id := range ids {
 			switch err := repo.Delete(ctx, id); {

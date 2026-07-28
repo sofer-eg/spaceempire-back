@@ -178,7 +178,10 @@ func (w *Worker) removeDrone(ctx context.Context, s *sectorState, id domain.Dron
 	delete(s.drones, id)
 	delete(s.dronesDirty, id)
 	if w.droneRepo != nil {
-		if err := w.droneRepo.Delete(ctx, id); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.droneRepo.Delete(ctx, id)
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "drone delete failed",
 				"err", err, "drone", int64(id), "sector", int64(s.sectorID))
 		}

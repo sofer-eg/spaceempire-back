@@ -111,7 +111,9 @@ func (w *Worker) mineForPlayer(ctx context.Context, s *sectorState, ship *domain
 func (w *Worker) depositMinedOre(ctx context.Context, s *sectorState, ship *domain.Ship, ast *domain.Asteroid, level int, amount int64) bool {
 	if level >= 2 && w.minerLogistics != nil {
 		shipRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
-		err := w.minerLogistics.AddOre(ctx, shipRef, ast.OreType, amount)
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.minerLogistics.AddOre(ctx, shipRef, ast.OreType, amount)
+		})
 		if err == nil {
 			return true
 		}
@@ -137,11 +139,16 @@ func (w *Worker) spawnOreContainer(ctx context.Context, s *sectorState, ast *dom
 	if w.containerRepo == nil {
 		return
 	}
-	c, err := w.containerRepo.SpawnContainer(ctx, s.sectorID, domain.ContainerDrop{
-		Pos:       containerDropPos(ast.Pos, 1, 2), // off-centre so it is not on the asteroid
-		ExpiresAt: w.clock.Now().Add(w.cfg.ContainerTTL),
-		GoodsType: ast.OreType,
-		Quantity:  amount,
+	var c domain.Container
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		var err error
+		c, err = w.containerRepo.SpawnContainer(ctx, s.sectorID, domain.ContainerDrop{
+			Pos:       containerDropPos(ast.Pos, 1, 2), // off-centre so it is not on the asteroid
+			ExpiresAt: w.clock.Now().Add(w.cfg.ContainerTTL),
+			GoodsType: ast.OreType,
+			Quantity:  amount,
+		})
+		return err
 	})
 	if err != nil {
 		w.logger.ErrorContext(ctx, "player mining spawn ore container failed",

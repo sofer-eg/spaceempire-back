@@ -94,7 +94,10 @@ func (w *Worker) persistDirty(ctx context.Context, s *sectorState) {
 		return
 	}
 	ships := s.collectDirty()
-	if err := w.repo.BatchUpdate(ctx, ships); err != nil {
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		return w.repo.BatchUpdate(ctx, ships)
+	})
+	if err != nil {
 		w.logger.ErrorContext(ctx, "snapshot batch update failed",
 			"err", err, "sector", int64(s.sectorID), "dirty_count", len(ships))
 		return
@@ -117,7 +120,10 @@ func (w *Worker) persistDirtyDrones(ctx context.Context, s *sectorState) {
 		return
 	}
 	ds := s.collectDirtyDrones()
-	if err := w.droneRepo.BatchUpdate(ctx, ds); err != nil {
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		return w.droneRepo.BatchUpdate(ctx, ds)
+	})
+	if err != nil {
 		w.logger.ErrorContext(ctx, "drone snapshot batch update failed",
 			"err", err, "sector", int64(s.sectorID), "dirty_count", len(ds))
 		return
@@ -138,7 +144,10 @@ func (w *Worker) persistDirtyTorpedos(ctx context.Context, s *sectorState) {
 		return
 	}
 	ts := s.collectDirtyTorpedos()
-	if err := w.torpedoRepo.BatchUpdate(ctx, ts); err != nil {
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		return w.torpedoRepo.BatchUpdate(ctx, ts)
+	})
+	if err != nil {
 		w.logger.ErrorContext(ctx, "torpedo snapshot batch update failed",
 			"err", err, "sector", int64(s.sectorID), "dirty_count", len(ts))
 		return
@@ -160,7 +169,10 @@ func (w *Worker) persistAsteroids(ctx context.Context, s *sectorState) {
 		return
 	}
 	as := s.collectDirtyAsteroids()
-	if err := w.asteroidRepo.BatchUpdate(ctx, as); err != nil {
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		return w.asteroidRepo.BatchUpdate(ctx, as)
+	})
+	if err != nil {
 		w.logger.ErrorContext(ctx, "asteroid snapshot batch update failed",
 			"err", err, "sector", int64(s.sectorID), "dirty_count", len(as))
 		return

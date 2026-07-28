@@ -283,17 +283,19 @@ type Worker struct {
 	// WithOrdnance.
 	ordnance Ordnance
 
-	// dbBudget is the DB time the commands that write synchronously (installs,
-	// TASK-144; ammunition charges, TASK-147) may still spend in the current inbox
-	// drain. Config.RepoTimeout bounds ONE such call; without a per-drain budget a
-	// full inbox of them against a hung Postgres would park the Run goroutine —
-	// and with it every sector this worker owns — with no tick in between, which
-	// any player can trigger since an install or a launch with an empty hold now
-	// reaches the worker. Reset at the start of every drain; charged only by those
-	// commands' DB calls, so the rest of the hot path pays nothing. It gates
-	// whether the drain continues, never the per-command deadline: clamping that
-	// would fail a legal command with a spurious DeadlineExceeded. ONE drain is
-	// therefore bounded by ~2 × RepoTimeout.
+	// dbBudget is the DB time the commands that write synchronously may still
+	// spend in the current inbox drain. Config.RepoTimeout bounds ONE such call;
+	// without a per-drain budget a full inbox of them against a hung Postgres
+	// would park the Run goroutine — and with it every sector this worker owns —
+	// with no tick in between, which any player can trigger since an install or a
+	// launch with an empty hold now reaches the worker. Reset at the start of
+	// every drain; charged by every DB call the worker makes (TASK-148 routed all
+	// of them through dbCall, where TASK-144/147/152 charged only the install,
+	// launch and recall paths), so a pickup, a hack or a dock now bounds a drain
+	// exactly like an install does. It gates whether the drain continues, never
+	// the per-command deadline: clamping that would fail a legal command with a
+	// spurious DeadlineExceeded. ONE drain is therefore bounded by
+	// ~2 × RepoTimeout.
 	//
 	// What this does NOT bound is the total: Run resets the budget on every
 	// wake-up (applyAndDrain), and the overflow is still sitting in the inbox, so
@@ -303,8 +305,8 @@ type Worker struct {
 	// budget buys is that Run returns to its select between those payments, so the
 	// sectors keep ticking at a reduced rate (measured ~40-80% of nominal, against
 	// a single tick with the budget disabled) instead of the goroutine being parked
-	// outright. Bounding the total — a budget per tick window, or moving these
-	// writes off the tick goroutine — is TASK-148.
+	// outright. Bounding the total — moving these writes off the tick goroutine
+	// altogether — is still open; TASK-148 bounded every individual call instead.
 	dbBudget time.Duration
 
 	// dbSince measures what one synchronous DB call really cost, and is the only
@@ -780,17 +782,34 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
+// saveShip persists one ship through the Save path under the in-tick DB
+// contract (see dbCall). Returns nil when persistence is disabled (w.repo ==
+// nil, pure unit tests) so callers need no separate guard. Takes the ship by
+// value: handoff saves a relocated copy and the capture saves a prospective
+// one, neither of which is the live RAM ship yet.
+func (w *Worker) saveShip(ship domain.Ship) error {
+	if w.repo == nil {
+		return nil
+	}
+	return w.dbCall(context.Background(), func(ctx context.Context) error {
+		return w.repo.Save(ctx, ship)
+	})
+}
+
 // immediateSave wraps the optional repo.Save with the same logging
 // convention used by flushAll: a save failure is logged but never
 // propagated to the caller — at worst the next periodic BatchUpdate
 // (or the shutdown flush) carries the change. Used for command-driven
 // immediate writes (AttackCommand, CeaseFireCommand) where the player
 // has already moved on to the next click by the time we return.
+//
+// "At worst the next BatchUpdate" is true only for the fields BatchUpdate
+// writes (FinalTarget/HP/Shield). Everything else — ownership, docking, the
+// access flag — is Save-only, which is why the paths that change those do NOT
+// use this helper: they roll their RAM change back and report the failure
+// (docking.go, ship_access.go) or refuse to apply it at all (changeShipOwner).
 func (w *Worker) immediateSave(ship *domain.Ship) {
-	if w.repo == nil {
-		return
-	}
-	if err := w.repo.Save(context.Background(), *ship); err != nil {
+	if err := w.saveShip(*ship); err != nil {
 		w.logger.Error("immediate save failed",
 			"err", err, "ship", int64(ship.ID), "sector", int64(ship.SectorID))
 	}
@@ -805,7 +824,9 @@ func (w *Worker) immediateSaveEquipment(ship *domain.Ship) {
 	if w.repo == nil {
 		return
 	}
-	if err := w.repo.SaveEquipment(context.Background(), *ship); err != nil {
+	if err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		return w.repo.SaveEquipment(ctx, *ship)
+	}); err != nil {
 		w.logger.Error("immediate save-equipment failed",
 			"err", err, "ship", int64(ship.ID), "sector", int64(ship.SectorID))
 	}
@@ -1037,7 +1058,12 @@ func (w *Worker) runProduction(ctx context.Context, s *sectorState, now time.Tim
 	if w.production == nil || len(s.statics.Stations) == 0 {
 		return
 	}
-	cycles, err := w.production.Tick(ctx, s.statics.Stations, now)
+	var cycles int
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		var err error
+		cycles, err = w.production.Tick(ctx, s.statics.Stations, now)
+		return err
+	})
 	if err != nil {
 		w.logger.ErrorContext(ctx, "production tick", "err", err, "sector", int64(s.sectorID))
 	}
@@ -1113,9 +1139,9 @@ func (w *Worker) drainQueued() {
 }
 
 // spendDBBudget charges the current drain for a synchronous DB call that began
-// at started. Only the install (TASK-144), launch (TASK-147) and recall
-// (TASK-152) commands call it — every other command does no I/O, so the budget
-// costs the hot path nothing.
+// at started. Since TASK-148 every DB call in the package charges it, through
+// dbCall — a command that does no I/O still costs the budget nothing, because
+// nothing calls this on its behalf.
 //
 // It takes the start instant rather than a duration so that measuring the call
 // is dbCallCost's job alone: every helper charges through it and none can drift
@@ -1139,6 +1165,75 @@ func (w *Worker) dbCallCost(started time.Time) time.Duration {
 		return time.Since(started)
 	}
 	return w.dbSince(started)
+}
+
+// dbCall runs one synchronous DB (or bus) call from the Run goroutine and is
+// the only sanctioned way to make one anywhere in this package (TASK-148). It
+// does two things, and both must happen for every such call:
+//
+//   - bounds it by cfg.RepoTimeout. TASK-144/147/152 did this for the install,
+//     launch and recall commands only; everything else — saves, deletes,
+//     pickups, hauls, robs, publishes, the periodic batches — still ran under a
+//     bare context.Background() or an unbounded tick context, so a hung Postgres
+//     parked the Run goroutine, and with it every sector this worker owns,
+//     through whichever command or tick step happened to touch the DB first. The
+//     tick has no context of its own to inherit a deadline from, so the deadline
+//     has to be attached here.
+//   - charges the call's real cost to the current drain's DB budget, so a queue
+//     of DB-touching commands cannot chain one RepoTimeout stall per command with
+//     no tick in between (see the dbBudget field).
+//
+// parent is context.Background() for the command-apply path (a command carries
+// no context) and the tick's own context for the tick path, so a shutdown still
+// cancels a tick-driven call immediately instead of waiting out the deadline.
+//
+// The budget is charged from the tick path too, even though only drainQueued
+// reads it: drainInbox resets it at the top of every Tick, so a tick's own
+// spending is discarded before the next drain and cannot starve it. Charging
+// unconditionally keeps one code path here rather than a "does this site count?"
+// decision at forty call sites.
+//
+// What this does NOT bound is one tick's total DB time: a tick that kills ships,
+// mines, publishes and then flushes pays up to RepoTimeout per call. The bound is
+// per call and therefore proportional to how many DB operations a tick performs
+// — finite and self-limiting, unlike the previous "forever".
+func (w *Worker) dbCall(parent context.Context, fn func(ctx context.Context) error) error {
+	ctx, cancel := context.WithTimeout(parent, w.cfg.RepoTimeout)
+	defer cancel()
+
+	started := time.Now()
+	err := fn(ctx)
+	w.spendDBBudget(started)
+	return err
+}
+
+// publish emits one bus message under the same contract as a DB call (TASK-148),
+// and for the same reason rather than out of symmetry: bus.InMemory.Publish
+// blocks once a subscriber is more than SubscriberBuffer messages behind — it
+// takes back-pressure over silent loss deliberately — and under
+// context.Background() that block had no end. A worker whose intake subscriber
+// stopped draining (its own Run goroutine already parked on a hung DB, say) could
+// therefore park the publishing worker too, which is how a single stuck sector
+// becomes two.
+//
+// Callers must have checked w.bus != nil; every publish site already gates on it
+// to stay a no-op in pure unit tests.
+func (w *Worker) publish(parent context.Context, topic string, payload []byte) error {
+	return w.dbCall(parent, func(ctx context.Context) error {
+		return w.bus.Publish(ctx, topic, payload)
+	})
+}
+
+// dbDeadline reports whether err is the in-tick deadline (or a shutdown
+// cancellation) firing rather than the DB answering. It is the "outcome in
+// doubt" test: cfg.RepoTimeout can expire while COMMIT is already in flight, in
+// which case pgx tears the connection down and reports DeadlineExceeded while
+// Postgres commits anyway. Every other error means the transaction rolled back
+// and nothing happened. Callers use it to pick ERROR (in doubt, needs hand
+// reconciliation) over WARN (clean failure), the same split logInstallError and
+// logOrdnanceError spell out inline.
+func dbDeadline(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 // logInstallError records a failed jammer/satellite install (TASK-144). A

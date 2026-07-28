@@ -140,7 +140,7 @@ func (w *Worker) publishModuleKnocked(ctx context.Context, s *sectorState, ship 
 		w.logger.ErrorContext(ctx, "knock: marshal event", "err", err, "player", int64(ship.PlayerID))
 		return
 	}
-	if err := w.bus.Publish(ctx, ModuleKnockedTopic(ship.PlayerID), payload); err != nil {
+	if err := w.publish(ctx, ModuleKnockedTopic(ship.PlayerID), payload); err != nil {
 		w.logger.ErrorContext(ctx, "knock: publish event", "err", err, "player", int64(ship.PlayerID))
 	}
 }

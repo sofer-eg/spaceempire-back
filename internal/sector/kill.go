@@ -82,7 +82,10 @@ func (w *Worker) killShip(ctx context.Context, s *sectorState, ship *domain.Ship
 	// killer's standing with that race. LastAttacker is the attributed player
 	// (same one bounties use); the scanner ignores NPC killers.
 	if w.police != nil && w.policeRaces[ship.Race] && ship.LastAttacker != 0 {
-		if err := w.police.OnRaceShipKilled(ctx, ship.LastAttacker, ship.Race); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.police.OnRaceShipKilled(ctx, ship.LastAttacker, ship.Race)
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "police: standing on race-ship kill",
 				"err", err, "killer", int64(ship.LastAttacker), "race", int(ship.Race))
 		}
@@ -93,7 +96,10 @@ func (w *Worker) killShip(ctx context.Context, s *sectorState, ship *domain.Ship
 	// nothing — the same own-kill exclusion bounties.OnKill applies. Immediate
 	// write inside the tick, like the police standing drop above.
 	if w.reputation != nil && ship.LastAttacker != 0 && ship.LastAttacker != ship.PlayerID {
-		if err := w.reputation.OnShipKilled(ctx, ship.LastAttacker); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.reputation.OnShipKilled(ctx, ship.LastAttacker)
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "reputation: war on kill",
 				"err", err, "killer", int64(ship.LastAttacker), "victim", int64(ship.ID))
 		}
@@ -126,7 +132,12 @@ func (w *Worker) publishEntityKilled(ctx context.Context, s *sectorState, ship *
 // the live set so the next snapshot broadcasts them. On a read error the
 // plan falls back to empty so RecordKill still deletes the ship.
 func (w *Worker) dropLoot(ctx context.Context, s *sectorState, ship *domain.Ship) {
-	items, err := w.containerRepo.ShipCargo(ctx, ship.ID)
+	var items []domain.CargoItem
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		var err error
+		items, err = w.containerRepo.ShipCargo(ctx, ship.ID)
+		return err
+	})
 	if err != nil {
 		w.logger.ErrorContext(ctx, "kill: load ship cargo",
 			"err", err, "ship", int64(ship.ID), "sector", int64(s.sectorID))
@@ -153,7 +164,12 @@ func (w *Worker) dropLoot(ctx context.Context, s *sectorState, ship *domain.Ship
 		}
 	}
 
-	containers, err := w.containerRepo.RecordKill(ctx, ship.ID, s.sectorID, drops)
+	var containers []domain.Container
+	err = w.dbCall(ctx, func(ctx context.Context) error {
+		var err error
+		containers, err = w.containerRepo.RecordKill(ctx, ship.ID, s.sectorID, drops)
+		return err
+	})
 	if err != nil {
 		w.logger.ErrorContext(ctx, "kill: record kill",
 			"err", err, "ship", int64(ship.ID), "sector", int64(s.sectorID))

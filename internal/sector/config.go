@@ -39,16 +39,20 @@ type Config struct {
 	// so this flush is the only thing that ends a clean run with fresh
 	// coordinates. Wired from cfg.Server.ShutdownTimeout.
 	ShutdownTimeout time.Duration
-	// RepoTimeout bounds one synchronous DB call made from inside the tick by a
-	// command that must write before it can answer: the install-jammer /
-	// install-satellite installs (TASK-144) and the launch-missile /
-	// launch-torpedo / launch-drone ammunition charges (TASK-147). The command
-	// apply path has no context of its own, so without a deadline a hung Postgres
-	// parks the whole tick goroutine forever. With it the worker stalls at most
-	// RepoTimeout and the command fails with context.DeadlineExceeded. Default
-	// 2 s — longer than any healthy INSERT+commit, shorter than the tick budget a
-	// player would notice. It bounds ONE call; what bounds a whole inbox drain of
-	// them is Worker.dbBudget.
+	// RepoTimeout bounds EVERY synchronous DB (and bus) call the worker makes from
+	// its Run goroutine — command-driven writes, the tick's own writes, and the
+	// periodic batches alike. It started life bounding only the installs
+	// (TASK-144) and ammunition charges (TASK-147/152); TASK-148 routed the rest
+	// through Worker.dbCall, which is what makes the name honest. The command apply
+	// path has no context of its own and the tick's context has no deadline, so
+	// without this a hung Postgres parks the whole tick goroutine — and every
+	// sector the worker owns — forever, through whichever call it reaches first.
+	// With it the worker stalls at most RepoTimeout per call and the command fails
+	// with context.DeadlineExceeded. Default 2 s — longer than any healthy
+	// INSERT+commit, shorter than the tick budget a player would notice. It bounds
+	// ONE call; what bounds a whole inbox drain of them is Worker.dbBudget. The
+	// graceful-shutdown flush is the one path that does not use it — it has its own
+	// ShutdownTimeout and is not the tick.
 	RepoTimeout time.Duration
 	// ContainerTTL is how long a loot container (dropped by a ship death,
 	// phase 4.6) survives before the tick sweeps it. Default 600 s.

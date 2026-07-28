@@ -167,8 +167,15 @@ Consequences of the new invariant:
   20 times, but the sector ticks 4–8 times in that window (10 nominal) instead of
   exactly once, which is what the same measurement gives with the budget check
   disabled. So the win is "sectors keep ticking at a reduced rate" rather than
-  "the stalls cannot chain". Bounding the total — a budget per tick window, or
-  moving the install off the tick goroutine — is **TASK-148**.
+  "the stalls cannot chain". Bounding the total — moving the install off the tick
+  goroutine — is still open.
+- TASK-148 extended both halves of this contract to **every** DB and bus call the
+  worker makes from its Run goroutine (pickups, hauls, hacks, captures, saves,
+  deletes, publishes, the periodic batches), so `RepoTimeout` now bounds all of
+  them and all of them charge the same drain budget. The install path is unchanged
+  — it is where the discipline came from. See
+  [`tick_db_timeouts.md`](tick_db_timeouts.md) for the per-call policy, including
+  what an ambiguous deadline is taken to mean on the cargo-moving paths.
 
 #### Residual window: in-doubt commit
 

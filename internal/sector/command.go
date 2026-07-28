@@ -270,7 +270,10 @@ func (c RemoveShipCommand) apply(w *Worker, s *sectorState) {
 	// The ship was in RAM, so its row exists; a delete error is logged but the
 	// RAM removal already stands.
 	if w.repo != nil {
-		if err := w.repo.Delete(context.Background(), c.ShipID); err != nil {
+		err := w.dbCall(context.Background(), func(ctx context.Context) error {
+			return w.repo.Delete(ctx, c.ShipID)
+		})
+		if err != nil {
 			w.logger.Error("remove ship: delete row",
 				"err", err, "ship", int64(c.ShipID), "sector", int64(s.sectorID))
 		}
@@ -1059,9 +1062,21 @@ func (c CaptureShipCommand) apply(w *Worker, s *sectorState) {
 	}
 	if w.rng.Float64()*1000 > threshold {
 		oldOwner := target.PlayerID
-		w.changeShipOwner(context.Background(), s, target, c.PlayerID)
+		if err := w.changeShipOwner(context.Background(), s, target, c.PlayerID); err != nil {
+			// The roll succeeded but the transfer could not be persisted, so the
+			// ship stays with its old owner in both RAM and the DB (TASK-148). The
+			// attempt is reported as failed — the energy is spent either way
+			// (FR-C3/C5), exactly as on a losing roll. Reporting success instead
+			// would hand the captor a ship that reverts at the next cold start.
+			res.Err = err
+			replyCapture(c.Reply, res)
+			return
+		}
 		if w.reputation != nil {
-			if err := w.reputation.OnShipCaptured(context.Background(), c.PlayerID, capturedRace); err != nil {
+			err := w.dbCall(context.Background(), func(ctx context.Context) error {
+				return w.reputation.OnShipCaptured(ctx, c.PlayerID, capturedRace)
+			})
+			if err != nil {
 				w.logger.Error("reputation: on capture",
 					"err", err, "capturer", int64(c.PlayerID), "ship", int64(target.ID))
 			}

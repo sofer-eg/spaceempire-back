@@ -234,7 +234,10 @@ func (w *Worker) removeTorpedo(ctx context.Context, s *sectorState, id domain.To
 	delete(s.torpedos, id)
 	delete(s.torpedosDirty, id)
 	if w.torpedoRepo != nil {
-		if err := w.torpedoRepo.Delete(ctx, id); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.torpedoRepo.Delete(ctx, id)
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "torpedo delete failed",
 				"err", err, "torpedo", int64(id), "sector", int64(s.sectorID))
 		}

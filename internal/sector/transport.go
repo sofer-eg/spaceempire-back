@@ -78,7 +78,14 @@ func (w *Worker) transportCargo(s *sectorState, c TransportCargoCommand) error {
 	}
 	srcRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(c.SourceShipID)}
 	destRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(c.ShipID)}
-	if err := w.traderLogistics.Haul(context.Background(), srcRef, destRef, c.GoodsType, c.Quantity); err != nil {
+	// Commit first, mutate RAM after (TASK-152's ordering, TASK-148's deadline):
+	// the haul is one transaction, so the goods are in exactly one hold whatever
+	// happens, and the energy debit below only lands once they have moved.
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		return w.traderLogistics.Haul(ctx, srcRef, destRef, c.GoodsType, c.Quantity)
+	})
+	if err != nil {
+		w.logTeleportError(err, c)
 		return err
 	}
 	if w.cfg.TransporterEnergyCost > 0 {
@@ -87,4 +94,28 @@ func (w *Worker) transportCargo(s *sectorState, c TransportCargoCommand) error {
 	s.markDirty(c.ShipID)
 	s.markDirty(c.SourceShipID)
 	return nil
+}
+
+// logTeleportError records a failed cargo teleport (TASK-148). Haul is one
+// transaction over both holds, so the cargo itself is never at risk: it either
+// moved or it did not, and the player is told which. What an ambiguous deadline
+// can leave behind is a haul that COMMITted after the deadline fired — the goods
+// are in the destination hold, but the energy was not debited and neither ship
+// was marked dirty, so the move reaches the DB (it is the cargo tables' own
+// state) while the client keeps showing the pre-teleport holds until its next
+// refresh. Free of charge and confusing, hence ERROR with everything needed to
+// reconcile it. A clean failure (no room, no such goods, rolled-back tx) changed
+// nothing and is a WARN — the player already has the reason on the ack.
+func (w *Worker) logTeleportError(err error, c TransportCargoCommand) {
+	if dbDeadline(err) {
+		w.logger.Error("cargo teleport outcome in doubt: goods may have moved with no energy charged",
+			"err", err, "player", int64(c.PlayerID), "ship", int64(c.ShipID),
+			"source_ship", int64(c.SourceShipID), "goods_type", int64(c.GoodsType),
+			"qty", c.Quantity, "repo_timeout", w.cfg.RepoTimeout)
+		return
+	}
+	w.logger.Warn("cargo teleport failed",
+		"err", err, "player", int64(c.PlayerID), "ship", int64(c.ShipID),
+		"source_ship", int64(c.SourceShipID), "goods_type", int64(c.GoodsType),
+		"qty", c.Quantity)
 }

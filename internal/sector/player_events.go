@@ -62,7 +62,7 @@ func (w *Worker) publishPlayerDocked(s *sectorState, ship *domain.Ship, target d
 		w.logger.ErrorContext(ctx, "quest: marshal player docked event", "err", err, "player", int64(ship.PlayerID))
 		return
 	}
-	if err := w.bus.Publish(ctx, PlayerDockedTopic, payload); err != nil {
+	if err := w.publish(ctx, PlayerDockedTopic, payload); err != nil {
 		w.logger.ErrorContext(ctx, "quest: publish player docked event", "err", err, "player", int64(ship.PlayerID))
 	}
 }
@@ -91,7 +91,7 @@ func (w *Worker) publishPlayerJumped(s *sectorState, ship *domain.Ship, targetSe
 		w.logger.Warn("quest: marshal player jumped event", "err", err, "player", int64(ship.PlayerID))
 		return
 	}
-	if err := w.bus.Publish(ctx, PlayerJumpedTopic, payload); err != nil {
+	if err := w.publish(ctx, PlayerJumpedTopic, payload); err != nil {
 		w.logger.Warn("quest: publish player jumped event", "err", err, "player", int64(ship.PlayerID))
 	}
 }

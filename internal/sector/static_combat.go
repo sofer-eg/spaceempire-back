@@ -77,14 +77,20 @@ func (w *Worker) killStatic(ctx context.Context, s *sectorState, d *domain.Destr
 	// the next restart) but never blocks the kill. Other static kinds remain
 	// RAM-only this phase (stations have millions of HP — see 8.5 deferred).
 	if ref.Kind == domain.EntityKindLaserTower && w.towerRepo != nil {
-		if err := w.towerRepo.Delete(ctx, domain.LaserTowerID(ref.ID)); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.towerRepo.Delete(ctx, domain.LaserTowerID(ref.ID))
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "kill: persist tower destruction", "err", err, "tower", ref.ID)
 		}
 	}
 	// Persist satellite destruction (10.15) so cold-start does not resurrect a
 	// killed navigation satellite. Best-effort, same contract as the tower.
 	if ref.Kind == domain.EntityKindSatellite && w.satelliteRepo != nil {
-		if err := w.satelliteRepo.Delete(ctx, domain.SatelliteID(ref.ID)); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.satelliteRepo.Delete(ctx, domain.SatelliteID(ref.ID))
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "kill: persist satellite destruction", "err", err, "satellite", ref.ID)
 		}
 	}
@@ -92,7 +98,10 @@ func (w *Worker) killStatic(ctx context.Context, s *sectorState, d *domain.Destr
 	// killed hyper-interference generator. Best-effort, same contract as the
 	// tower — and the jump gate stops seeing it the moment it leaves the layout.
 	if ref.Kind == domain.EntityKindJammer && w.jammerRepo != nil {
-		if err := w.jammerRepo.Delete(ctx, domain.JammerID(ref.ID)); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.jammerRepo.Delete(ctx, domain.JammerID(ref.ID))
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "kill: persist jammer destruction", "err", err, "jammer", ref.ID)
 		}
 	}
@@ -113,7 +122,7 @@ func (w *Worker) publishKilled(ctx context.Context, s *sectorState, ev EntityKil
 		w.logger.ErrorContext(ctx, "kill: marshal entity_killed", "err", err, "victim_kind", ev.Victim.Kind, "victim_id", ev.Victim.ID)
 		return
 	}
-	if err := w.bus.Publish(ctx, EntityKilledTopic, payload); err != nil {
+	if err := w.publish(ctx, EntityKilledTopic, payload); err != nil {
 		w.logger.ErrorContext(ctx, "kill: publish entity_killed", "err", err, "victim_kind", ev.Victim.Kind, "victim_id", ev.Victim.ID)
 	}
 }

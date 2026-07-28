@@ -155,16 +155,23 @@ func (c HackStationCommand) apply(w *Worker, s *sectorState) {
 
 	depositToHold := shipEquipmentLevel(ship, hackModuleType) >= 2
 	shipRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
-	rob, err := w.robber.Rob(context.Background(), c.Target, domain.RaceID(station.race),
-		c.PlayerID, shipRef, depositToHold)
+	// Commit first, mutate RAM after (TASK-152's ordering, TASK-148's deadline):
+	// the stock deduction, the hold deposit and the standing drop are one
+	// transaction, and the energy debit / container drop / journal below only run
+	// once it has landed.
+	var rob RobResult
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		var err error
+		rob, err = w.robber.Rob(ctx, c.Target, domain.RaceID(station.race),
+			c.PlayerID, shipRef, depositToHold)
+		return err
+	})
 	if err != nil {
 		// A depleted station is a clean reject (no energy spent); anything else is
 		// surfaced as-is so the handler maps it (500 by default).
 		res.Err = err
 		if !errors.Is(err, ErrHackTooLittleGoods) {
-			w.logger.Error("hack rob failed",
-				"err", err, "ship", int64(ship.ID), "station", c.Target.ID,
-				"sector", int64(s.sectorID))
+			w.logRobError(err, s, ship, c.Target)
 		}
 		replyHack(c.Reply, res)
 		return
@@ -194,6 +201,33 @@ func (c HackStationCommand) apply(w *Worker, s *sectorState) {
 	})
 	res.Robbed = rob.Robbed
 	replyHack(c.Reply, res)
+}
+
+// logRobError records a failed station raid (TASK-148). The rob is one
+// transaction — stock down, loot into the hold (level 2), standing down — so a
+// clean failure leaves the station and the hacker exactly as they were: WARN,
+// the player has the reason on the ack.
+//
+// A deadline is the one outcome that can cost goods, and unlike Pickup/Haul the
+// ordering cannot fix it: the loot's destination for a level-1 hack is a
+// container this worker spawns AFTER the rob returns, so a COMMIT that lands
+// after the deadline fired takes the goods off the station's shelf with nothing
+// created to hold them. They are gone. That window is inherent to the two-step
+// rob-then-drop design and predates the deadline (a successful rob followed by a
+// failed SpawnContainer loses the same goods); closing it needs the drop to ride
+// the rob's transaction. Until then it is an ERROR carrying the station, ship and
+// player so the amount can be reconstructed from the station's stock history.
+func (w *Worker) logRobError(err error, s *sectorState, ship *domain.Ship, target domain.EntityRef) {
+	if dbDeadline(err) {
+		w.logger.Error("hack outcome in doubt: station stock may be deducted with the loot never delivered",
+			"err", err, "ship", int64(ship.ID), "player", int64(ship.PlayerID),
+			"station_kind", target.Kind, "station", target.ID,
+			"sector", int64(s.sectorID), "repo_timeout", w.cfg.RepoTimeout)
+		return
+	}
+	w.logger.Error("hack rob failed",
+		"err", err, "ship", int64(ship.ID), "station", target.ID,
+		"sector", int64(s.sectorID))
 }
 
 // replyHack delivers a HackResult on a buffered reply channel, never blocking.
@@ -251,11 +285,16 @@ func (w *Worker) spawnHackContainer(ctx context.Context, s *sectorState, at doma
 	if w.containerRepo == nil {
 		return
 	}
-	c, err := w.containerRepo.SpawnContainer(ctx, s.sectorID, domain.ContainerDrop{
-		Pos:       containerDropPos(at, 1, 2), // off-centre so it is not on the station
-		ExpiresAt: w.clock.Now().Add(w.cfg.ContainerTTL),
-		GoodsType: gtype,
-		Quantity:  qty,
+	var c domain.Container
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		var err error
+		c, err = w.containerRepo.SpawnContainer(ctx, s.sectorID, domain.ContainerDrop{
+			Pos:       containerDropPos(at, 1, 2), // off-centre so it is not on the station
+			ExpiresAt: w.clock.Now().Add(w.cfg.ContainerTTL),
+			GoodsType: gtype,
+			Quantity:  qty,
+		})
+		return err
 	})
 	if err != nil {
 		w.logger.ErrorContext(ctx, "hack spawn loot container failed",
@@ -277,7 +316,7 @@ func (w *Worker) publishStationHacked(ctx context.Context, s *sectorState, ev St
 		w.logger.ErrorContext(ctx, "hack: marshal event", "err", err, "player", int64(ev.PlayerID))
 		return
 	}
-	if err := w.bus.Publish(ctx, StationHackedTopic(ev.PlayerID), payload); err != nil {
+	if err := w.publish(ctx, StationHackedTopic(ev.PlayerID), payload); err != nil {
 		w.logger.ErrorContext(ctx, "hack: publish event", "err", err, "player", int64(ev.PlayerID))
 	}
 }

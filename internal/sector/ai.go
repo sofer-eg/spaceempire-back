@@ -97,7 +97,10 @@ func (w *Worker) applyAIAction(ctx context.Context, s *sectorState, ship *domain
 		if w.traderLogistics == nil {
 			return
 		}
-		if err := w.traderLogistics.Haul(ctx, a.From, a.To, a.GoodsType, a.MaxUnits); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.traderLogistics.Haul(ctx, a.From, a.To, a.GoodsType, a.MaxUnits)
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "trader haul failed",
 				"err", err, "ship", int64(ship.ID),
 				"from_kind", a.From.Kind, "from_id", a.From.ID,
@@ -173,7 +176,10 @@ func (w *Worker) applyMine(ctx context.Context, s *sectorState, ship *domain.Shi
 
 	if w.minerLogistics != nil {
 		shipRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
-		if err := w.minerLogistics.AddOre(ctx, shipRef, ast.OreType, amount); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.minerLogistics.AddOre(ctx, shipRef, ast.OreType, amount)
+		})
+		if err != nil {
 			// Hold full (or another deposit error): leave the asteroid intact
 			// and try again next tick. The miner's own load counter still
 			// advances it home, so this does not spin forever.
@@ -200,7 +206,10 @@ func (w *Worker) depleteAsteroid(ctx context.Context, s *sectorState, ast *domai
 	if w.asteroidRepo == nil {
 		return
 	}
-	if err := w.asteroidRepo.Delete(ctx, id); err != nil {
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		return w.asteroidRepo.Delete(ctx, id)
+	})
+	if err != nil {
 		w.logger.ErrorContext(ctx, "delete depleted asteroid failed",
 			"err", err, "sector", int64(s.sectorID), "asteroid", int64(id))
 	}
@@ -242,7 +251,10 @@ func (w *Worker) persistAIState(ctx context.Context, s *sectorState) {
 	}
 	states := w.collectAIState(s)
 	if len(states) > 0 {
-		if err := w.aiStateRepo.BatchUpsert(ctx, states); err != nil {
+		err := w.dbCall(ctx, func(ctx context.Context) error {
+			return w.aiStateRepo.BatchUpsert(ctx, states)
+		})
+		if err != nil {
 			w.logger.ErrorContext(ctx, "ai state snapshot failed",
 				"err", err, "sector", int64(s.sectorID), "count", len(states))
 			return

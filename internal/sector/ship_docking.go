@@ -1,7 +1,6 @@
 package sector
 
 import (
-	"context"
 	"fmt"
 
 	"spaceempire/back/internal/domain"
@@ -83,11 +82,9 @@ func (w *Worker) applyShipDock(s *sectorState, ship, host *domain.Ship) error {
 	ship.CurrentTargetRef = nil
 	ship.MiningTarget = nil
 
-	if w.repo != nil {
-		if err := w.repo.Save(context.Background(), *ship); err != nil {
-			*ship = prev
-			return fmt.Errorf("save ship-docked ship: %w", err)
-		}
+	if err := w.saveShip(*ship); err != nil {
+		*ship = prev
+		return fmt.Errorf("save ship-docked ship: %w", err)
 	}
 	s.markDirty(ship.ID)
 	return nil

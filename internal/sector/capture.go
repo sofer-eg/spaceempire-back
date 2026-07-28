@@ -66,7 +66,7 @@ func (w *Worker) publishShipCapture(ctx context.Context, s *sectorState, recipie
 		w.logger.ErrorContext(ctx, "capture: marshal journal", "err", err, "player", int64(recipient))
 		return
 	}
-	if err := w.bus.Publish(ctx, ShipCaptureTopic(recipient), payload); err != nil {
+	if err := w.publish(ctx, ShipCaptureTopic(recipient), payload); err != nil {
 		w.logger.ErrorContext(ctx, "capture: publish journal", "err", err, "player", int64(recipient))
 	}
 }

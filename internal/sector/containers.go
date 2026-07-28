@@ -21,7 +21,10 @@ func (w *Worker) tickContainers(ctx context.Context, s *sectorState, now time.Ti
 	for _, id := range expired {
 		s.removeContainer(id)
 		if w.containerRepo != nil {
-			if err := w.containerRepo.Delete(ctx, id); err != nil {
+			err := w.dbCall(ctx, func(ctx context.Context) error {
+				return w.containerRepo.Delete(ctx, id)
+			})
+			if err != nil {
 				w.logger.ErrorContext(ctx, "container expiry delete failed",
 					"err", err, "container", int64(id), "sector", int64(s.sectorID))
 			}

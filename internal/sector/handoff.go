@@ -152,19 +152,21 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 		}
 	}
 
-	if w.repo != nil {
-		if err := w.repo.Save(context.Background(), relocated); err != nil {
-			return fmt.Errorf("save ship: %w", err)
-		}
+	if err := w.saveShip(relocated); err != nil {
+		w.logHandoffError(err, "save ship", ship, s.sectorID, targetSector)
+		return fmt.Errorf("save ship: %w", err)
 	}
 
 	if ctrlKind != "" && w.aiStateRepo != nil {
-		if err := w.aiStateRepo.BatchUpsert(context.Background(), []domain.AIState{{
-			ShipID:         ship.ID,
-			SectorID:       targetSector,
-			ControllerKind: ctrlKind,
-			StateJSON:      ctrlState,
-		}}); err != nil {
+		err := w.dbCall(context.Background(), func(ctx context.Context) error {
+			return w.aiStateRepo.BatchUpsert(ctx, []domain.AIState{{
+				ShipID:         ship.ID,
+				SectorID:       targetSector,
+				ControllerKind: ctrlKind,
+				StateJSON:      ctrlState,
+			}})
+		})
+		if err != nil {
 			// Non-fatal: the destination still rebuilds from the event. A
 			// crash before the destination's next snapshot would leave the
 			// row pointing at the source sector, which cold-start prunes.
@@ -184,7 +186,8 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 	if err != nil {
 		return fmt.Errorf("marshal jump event: %w", err)
 	}
-	if err := w.bus.Publish(context.Background(), IntakeTopic(targetSector), payload); err != nil {
+	if err := w.publish(context.Background(), IntakeTopic(targetSector), payload); err != nil {
+		w.logHandoffError(err, "publish jump event", ship, s.sectorID, targetSector)
 		return fmt.Errorf("publish jump event: %w", err)
 	}
 
@@ -205,7 +208,7 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 		if err != nil {
 			w.logger.Warn("marshal player handoff event",
 				"err", err, "player", int64(ship.PlayerID), "ship", int64(ship.ID))
-		} else if err := w.bus.Publish(context.Background(), PlayerHandoffTopic(ship.PlayerID), handoffPayload); err != nil {
+		} else if err := w.publish(context.Background(), PlayerHandoffTopic(ship.PlayerID), handoffPayload); err != nil {
 			w.logger.Warn("publish player handoff event",
 				"err", err, "player", int64(ship.PlayerID), "ship", int64(ship.ID))
 		}
@@ -228,7 +231,7 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 			w.logger.Warn("marshal passenger handoff", "err", err, "player", int64(pid), "host", int64(ship.ID))
 			continue
 		}
-		if err := w.bus.Publish(context.Background(), PlayerHandoffTopic(pid), pp); err != nil {
+		if err := w.publish(context.Background(), PlayerHandoffTopic(pid), pp); err != nil {
 			w.logger.Warn("publish passenger handoff", "err", err, "player", int64(pid), "host", int64(ship.ID))
 		}
 	}
@@ -241,6 +244,46 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 	// on the target worker is the same handoff.
 	w.metrics.IncHandoff(s.sectorID, targetSector)
 	return nil
+}
+
+// logHandoffError records a jump that could not be completed (TASK-148). The
+// handoff is the one path where the deadline had to be argued for rather than
+// simply added, because a ship in flight between two workers is a ship that can
+// end up in both sectors or in neither:
+//
+//   - the ROW is written first, so a save that fails leaves ship and row agreed
+//     in the source sector and the jump is simply refused. A save that COMMITs
+//     after its deadline fires is the in-doubt case: the row says the target
+//     sector while the ship keeps flying in the source one, and it silently
+//     changes sector at the next cold start. Nothing is duplicated and nothing is
+//     lost, but it is worth an ERROR — it is the one outcome an operator cannot
+//     infer from the player's "jump failed";
+//   - the PUBLISH is where a deadline could duplicate the ship, and today it
+//     cannot: bus.InMemory.Publish sends to each subscriber under
+//     `select { case sub.ch <- payload: case <-ctx.Done(): }`, so a context error
+//     means this subscriber did not receive it, and an intake topic has exactly
+//     one subscriber (the worker that owns the target sector). Refusing the jump
+//     is therefore correct — the ship stays in the source sector, no second copy
+//     appears in the target one.
+//
+// That second argument is a property of the in-memory bus, not of the Bus
+// interface. An external broker (Redis/NATS, which the bus package exists to
+// allow) answers a publish deadline with "unknown", and then refusing is exactly
+// wrong: the row already names the target sector, so the source worker must drop
+// the ship instead of keeping a copy that the target may also be flying. Whoever
+// swaps the implementation has to revisit this, which is why the reasoning is
+// recorded at the call site rather than in a commit message.
+func (w *Worker) logHandoffError(err error, stage string, ship *domain.Ship, from, to domain.SectorID) {
+	if dbDeadline(err) {
+		w.logger.Error("handoff outcome in doubt: the ship may be recorded in the target sector while it still flies in the source one",
+			"err", err, "stage", stage, "ship", int64(ship.ID),
+			"player", int64(ship.PlayerID), "from", int64(from), "to", int64(to),
+			"repo_timeout", w.cfg.RepoTimeout)
+		return
+	}
+	w.logger.Warn("handoff failed",
+		"err", err, "stage", stage, "ship", int64(ship.ID),
+		"player", int64(ship.PlayerID), "from", int64(from), "to", int64(to))
 }
 
 // JumpIntakeCommand is the worker-internal command synthesised from an

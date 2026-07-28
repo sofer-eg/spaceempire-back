@@ -110,7 +110,12 @@ func (w *Worker) tickPoliceScan(ctx context.Context, s *sectorState) {
 			if d.X*d.X+d.Y*d.Y > rangeSq {
 				continue
 			}
-			res, err := w.police.Scan(ctx, police.Race, targetID, target.PlayerID)
+			var res PoliceScanResult
+			err := w.dbCall(ctx, func(ctx context.Context) error {
+				var err error
+				res, err = w.police.Scan(ctx, police.Race, targetID, target.PlayerID)
+				return err
+			})
 			if err != nil {
 				w.logger.ErrorContext(ctx, "police scan failed",
 					"err", err, "police", int64(police.ID), "target", int64(targetID),
@@ -144,7 +149,7 @@ func (w *Worker) publishPoliceScan(ctx context.Context, s *sectorState, player d
 		w.logger.ErrorContext(ctx, "police: marshal scan event", "err", err, "player", int64(player))
 		return
 	}
-	if err := w.bus.Publish(ctx, PoliceScanTopic(player), payload); err != nil {
+	if err := w.publish(ctx, PoliceScanTopic(player), payload); err != nil {
 		w.logger.ErrorContext(ctx, "police: publish scan event", "err", err, "player", int64(player))
 	}
 }

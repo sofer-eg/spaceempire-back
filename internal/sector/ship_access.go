@@ -1,7 +1,6 @@
 package sector
 
 import (
-	"context"
 	"fmt"
 
 	"spaceempire/back/internal/domain"
@@ -33,13 +32,11 @@ func (c SetShipAccessCommand) apply(w *Worker, s *sectorState) {
 	}
 	prev := ship.IsOpen
 	ship.IsOpen = c.Open
-	if w.repo != nil {
-		if err := w.repo.Save(context.Background(), *ship); err != nil {
-			ship.IsOpen = prev
-			res.Err = fmt.Errorf("save ship access: %w", err)
-			replyOnce(c.Reply, res)
-			return
-		}
+	if err := w.saveShip(*ship); err != nil {
+		ship.IsOpen = prev
+		res.Err = fmt.Errorf("save ship access: %w", err)
+		replyOnce(c.Reply, res)
+		return
 	}
 	s.markDirty(c.ShipID)
 	replyOnce(c.Reply, res)

@@ -1,7 +1,6 @@
 package sector
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -153,11 +152,9 @@ func executeDock(w *Worker, s *sectorState, ship *domain.Ship, target domain.Doc
 	// MoveCommand mining reset (phase 10.3.6).
 	ship.MiningTarget = nil
 
-	if w.repo != nil {
-		if err := w.repo.Save(context.Background(), *ship); err != nil {
-			*ship = prev
-			return fmt.Errorf("save docked ship: %w", err)
-		}
+	if err := w.saveShip(*ship); err != nil {
+		*ship = prev
+		return fmt.Errorf("save docked ship: %w", err)
 	}
 	s.markDirty(ship.ID)
 	// TASK-89 pacer trigger: announce a player docking to a station /
@@ -180,11 +177,9 @@ func executeUndock(w *Worker, s *sectorState, ship *domain.Ship) error {
 	ship.FinalTarget = nil
 	ship.CurrentTargetRef = nil
 
-	if w.repo != nil {
-		if err := w.repo.Save(context.Background(), *ship); err != nil {
-			*ship = prev
-			return fmt.Errorf("save undocked ship: %w", err)
-		}
+	if err := w.saveShip(*ship); err != nil {
+		*ship = prev
+		return fmt.Errorf("save undocked ship: %w", err)
 	}
 	s.markDirty(ship.ID)
 	return nil

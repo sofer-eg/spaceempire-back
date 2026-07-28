@@ -530,6 +530,58 @@ func TestUnit_Launch_HungDBBoundedByRepoTimeout(t *testing.T) {
 	})
 }
 
+// TestUnit_Launch_DrainBudgetBoundsOneDrain is the launch-side counterpart of
+// TestUnit_Install_DrainBudgetBoundsOneDrain (review round 2). Since TASK-147 the
+// launch commands write to the DB inside the tick too, so they must charge the
+// same per-drain budget — without that, 256 queued launch-missiles against a hung
+// Postgres would chain a RepoTimeout each and park the Run goroutine (and every
+// sector this worker owns) for InboxCapacity × RepoTimeout with no tick in
+// between. Any player can fill that queue: a launch with an empty magazine now
+// reaches the worker. Delete spendDBBudget from the launch helpers and this test
+// is the one that fails.
+//
+// launch-missile is the cheapest of the three to express: no projectile repo to
+// wire, and the live set is visible straight from the Snapshot.
+func TestUnit_Launch_DrainBudgetBoundsOneDrain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const (
+		queued      = 10
+		repoTimeout = 50 * time.Millisecond
+	)
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testMissileGoods: queued})
+	ord.blockUntilCancel = true
+	cfg := ordnanceCfg()
+	cfg.InboxCapacity = 64
+	cfg.RepoTimeout = repoTimeout
+	w := ordnanceWorker(t, ord, cfg, launchPair())
+
+	for i := 0; i < queued; i++ {
+		require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
+			PlayerID: 100, ShipID: 1, Target: shipTarget(2),
+			GoodsType: testMissileGoods, Reply: nil,
+		}))
+	}
+
+	started := time.Now()
+	w.Tick(ctx)
+	elapsed := time.Since(started)
+
+	assert.Less(t, elapsed, queued*repoTimeout/2,
+		"one drain must not chain a RepoTimeout stall per queued launch")
+	assert.Equal(t, 1, ord.calls, "the budget stops the drain after the first stall")
+	assert.Empty(t, w.Snapshot(testSector).Missiles, "the stalled launch fired nothing")
+
+	// The DB answers again: the commands the budget left queued apply on the next
+	// tick, so nothing was dropped — only deferred. The stalled one never charged
+	// (the fake blocks before the debit), so the magazine covers the rest.
+	ord.blockUntilCancel = false
+	w.Tick(ctx)
+	assert.Equal(t, queued, ord.calls, "the remainder was still in the inbox")
+	assert.Equal(t, queued-1, ord.debits, "every command but the stalled one charged")
+	assert.Len(t, w.Snapshot(testSector).Missiles, queued-1)
+}
+
 // TestUnit_Launch_WithoutOrdnanceRefused: a worker built without WithOrdnance
 // must refuse every launch instead of firing for free. The ordnance is the only
 // thing that charges the player, so a refactor that drops the wiring has to

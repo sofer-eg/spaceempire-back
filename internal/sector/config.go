@@ -39,13 +39,16 @@ type Config struct {
 	// so this flush is the only thing that ends a clean run with fresh
 	// coordinates. Wired from cfg.Server.ShutdownTimeout.
 	ShutdownTimeout time.Duration
-	// RepoTimeout bounds the synchronous DB call the install-jammer /
-	// install-satellite commands make from inside the tick (TASK-144). The
-	// command apply path has no context of its own, so without a deadline a
-	// hung Postgres parks the whole tick goroutine forever. With it the worker
-	// stalls at most RepoTimeout and the command fails with
-	// context.DeadlineExceeded. Default 2 s — longer than any healthy
-	// INSERT+commit, shorter than the tick budget a player would notice.
+	// RepoTimeout bounds one synchronous DB call made from inside the tick by a
+	// command that must write before it can answer: the install-jammer /
+	// install-satellite installs (TASK-144) and the launch-missile /
+	// launch-torpedo / launch-drone ammunition charges (TASK-147). The command
+	// apply path has no context of its own, so without a deadline a hung Postgres
+	// parks the whole tick goroutine forever. With it the worker stalls at most
+	// RepoTimeout and the command fails with context.DeadlineExceeded. Default
+	// 2 s — longer than any healthy INSERT+commit, shorter than the tick budget a
+	// player would notice. It bounds ONE call; what bounds a whole inbox drain of
+	// them is Worker.dbBudget.
 	RepoTimeout time.Duration
 	// ContainerTTL is how long a loot container (dropped by a ship death,
 	// phase 4.6) survives before the tick sweeps it. Default 600 s.

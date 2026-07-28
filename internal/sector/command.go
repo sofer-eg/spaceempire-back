@@ -531,10 +531,11 @@ func replyLaunchMissile(reply chan<- LaunchMissileResult, res LaunchMissileResul
 }
 
 // LaunchTorpedoResult carries the torpedo id allocated for a launch back to the
-// HTTP handler so the response can echo it. The torpedo object's spawn and
-// persistence are sub-task TASK-100.3.5.4; in this sub-task a successful launch
-// only enforces the gates and the action-energy cost, so TorpedoID stays zero
-// (the .4 seam fills it). On error TorpedoID is zero and Err is non-nil.
+// HTTP handler so the response can echo it. On success TorpedoID is the
+// DB-assigned primary key of the torpedos row the launch created (TASK-100.3.5.4
+// spawned the object; TASK-147 made that row and the ammunition debit one
+// transaction), so a non-zero id is also proof the player paid. On error
+// TorpedoID is zero and Err is non-nil.
 type LaunchTorpedoResult struct {
 	Err       error
 	TorpedoID domain.TorpedoID
@@ -773,6 +774,8 @@ func (c LaunchDroneCommand) apply(w *Worker, s *sectorState) {
 		replyLaunchDrone(c.Reply, res)
 		return
 	}
+	// ids[i] belongs to ds[i]; launchDrones guarantees the two lengths match, so
+	// the pairing cannot go out of range or drop a charged drone.
 	for i, id := range ids {
 		d := ds[i]
 		d.ID = id

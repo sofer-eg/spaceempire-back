@@ -51,6 +51,34 @@ func cargoQty(t *testing.T, pool *pgxpool.Pool, owner domain.EntityRef, gtype do
 	return qty
 }
 
+// cargoStack is one cargo row: how much, and whose deposit it is.
+type cargoStack struct {
+	Quantity   int64
+	GoodsOwner int64
+}
+
+// cargoStacks lists every stack the owner holds of one goods type, so a test
+// can tell "merged into one row" from "split per depositor".
+func cargoStacks(t *testing.T, pool *pgxpool.Pool, owner domain.EntityRef, gtype domain.GoodsTypeID) []cargoStack {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT quantity, goods_owner_id FROM cargo
+		 WHERE owner_kind=$1 AND owner_id=$2 AND goods_type_id=$3
+		 ORDER BY goods_owner_id`,
+		int16(owner.Kind), owner.ID, int32(gtype))
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var out []cargoStack
+	for rows.Next() {
+		var s cargoStack
+		require.NoError(t, rows.Scan(&s.Quantity, &s.GoodsOwner))
+		out = append(out, s)
+	}
+	require.NoError(t, rows.Err())
+	return out
+}
+
 func shipExists(t *testing.T, pool *pgxpool.Pool, id domain.ShipID) bool {
 	t.Helper()
 	var n int
@@ -148,6 +176,34 @@ func TestIntegration_Containers_Pickup(t *testing.T) {
 	loaded, err := repo.LoadAll(context.Background(), 10)
 	require.NoError(t, err)
 	require.Empty(t, loaded, "container removed after pickup")
+}
+
+// Picking up goods the hold already carries takes the ON CONFLICT DO UPDATE
+// branch: the quantities add up instead of raising a conflict. The merged stack
+// stays unowned (goods_owner_id = 0) — a ship hold has no per-depositor split,
+// and cargo.Subtract passes goodsOwner = 0 for ship cargo, so a stack landing
+// under any other depositor would be unreachable to its own owner.
+func TestIntegration_Containers_PickupMergesExistingStack(t *testing.T) {
+	t.Parallel()
+	pool := testdb.Setup(t)
+	pid := seedPlayer(t, pool)
+	ship := seedShip(t, pool, pid, 10, 1000)
+	shipRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship)}
+	seedCargo(t, pool, shipRef, 7, 30)
+
+	victim := seedShip(t, pool, pid, 10, 1000)
+	seedCargo(t, pool, domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(victim)}, 7, 50)
+	repo := newRepo(pool)
+
+	created, err := repo.RecordKill(context.Background(), victim, 10, []domain.ContainerDrop{sampleDrop(7, 50)})
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+
+	require.NoError(t, repo.Pickup(context.Background(), created[0].ID, ship))
+
+	require.Equal(t, []cargoStack{{Quantity: 80, GoodsOwner: 0}},
+		cargoStacks(t, pool, shipRef, 7),
+		"loot merged into the single unowned stack (30 + 50), not split per depositor")
 }
 
 func TestIntegration_Containers_PickupNoSpace(t *testing.T) {

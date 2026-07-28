@@ -119,7 +119,13 @@ single `TxManager` transaction:
   capacity-check the **ship** (`Capacity`/`UsedSpace`), `Add` every stack
   to the ship, then delete the container's cargo + the container. All or
   nothing — if the ship cannot fit the whole container, `ErrNoSpace` and
-  nothing moves.
+  nothing moves. Loot lands in the hold **unowned** (`cargo.goods_owner_id
+  = 0`, phase 10.22): a ship hold is never split per depositor, so a pickup
+  merges into the ship's existing unowned stack of that goods type instead
+  of opening a second row. The move's `ON CONFLICT` target must therefore
+  name all four columns of `cargo_owner_goods_uniq` (migration 0050) —
+  a narrower target is rejected at plan time (`42P10`) on *every* pickup,
+  not just on an actual conflict.
 - **`Delete(ctx, id)`**: TTL expiry — delete the container's cargo + the
   container row.
 - **`LoadAll(ctx, sectorID)`**: cold-start, mirrors the drones repo.

@@ -214,11 +214,20 @@ SELECT s.cargobay - COALESCE((
 ), 0)
 FROM ships s WHERE s.id = $1
 `
+	// Merges the container's stacks into the picker's hold. goods_owner_id is
+	// written as an explicit 0 (unowned) instead of being carried over from the
+	// source row: a ship hold has no per-depositor split, and cargo.Add /
+	// cargo.Subtract always pass goodsOwner = 0 for ship cargo, so a stack
+	// landing under any other depositor would be unreachable to its own owner.
+	// The ON CONFLICT target must name all four columns of
+	// cargo_owner_goods_uniq (migration 0050) — Postgres rejects a narrower
+	// target at plan time with 42P10, i.e. on every pickup rather than only on
+	// an actual conflict.
 	moveCargoSQL = `
-INSERT INTO cargo (owner_kind, owner_id, goods_type_id, quantity)
-SELECT $1, $2, goods_type_id, quantity
+INSERT INTO cargo (owner_kind, owner_id, goods_type_id, quantity, goods_owner_id)
+SELECT $1, $2, goods_type_id, quantity, 0
 FROM cargo WHERE owner_kind = $3 AND owner_id = $4
-ON CONFLICT (owner_kind, owner_id, goods_type_id)
+ON CONFLICT (owner_kind, owner_id, goods_type_id, goods_owner_id)
 DO UPDATE SET quantity = cargo.quantity + EXCLUDED.quantity
 `
 )

@@ -13,7 +13,12 @@ import (
 	"strings"
 )
 
-// skippedDirNames are never scanned wherever they appear.
+// skippedDirNames are never scanned wherever they appear: none of them holds
+// first-party Go sources. Nothing is excluded by module-relative path on
+// purpose -- a catalogue of "harmless" packages silently hides whatever upsert
+// shows up there later (cmd/starwind-tools assembles ON CONFLICT clauses as
+// text fragments today, but a seeding command in the same tree would be a real
+// runtime upsert).
 var skippedDirNames = map[string]struct{}{
 	".git":         {},
 	"vendor":       {},
@@ -21,17 +26,16 @@ var skippedDirNames = map[string]struct{}{
 	"bin":          {},
 }
 
-// skippedRelPaths are module-relative directories excluded from the scan.
-// cmd/starwind-tools generates *migration text*: it assembles ON CONFLICT
-// clauses through strings.Builder, so whatever literals it holds are fragments
-// that never run as statements. internal/webui/dist is the embedded SPA bundle.
-var skippedRelPaths = map[string]struct{}{
-	"cmd/starwind-tools":  {},
-	"internal/webui/dist": {},
-}
+// identPattern is the regexp fragment for one SQL identifier, bare or double-quoted.
+const identPattern = `(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_]*)`
 
 var (
-	insertIntoRe = regexp.MustCompile(`(?is)INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
+	// insertIntoRe captures the INSERT target as written, including quotes and an
+	// optional schema qualifier: the capture is passed to to_regclass(), which
+	// resolves both forms, and dropping either part would misname the table in the
+	// drift report (to_regclass('public') is NULL, so the report would claim the
+	// table has no keys at all).
+	insertIntoRe = regexp.MustCompile(`(?is)INSERT\s+INTO\s+(` + identPattern + `(?:\.` + identPattern + `)?)`)
 	onConflictRe = regexp.MustCompile(`(?is)ON\s+CONFLICT`)
 )
 
@@ -58,9 +62,6 @@ func FindUpserts(root string) ([]Upsert, error) {
 				return nil
 			}
 			if _, ok := skippedDirNames[entry.Name()]; ok {
-				return fs.SkipDir
-			}
-			if _, ok := skippedRelPaths[rel]; ok {
 				return fs.SkipDir
 			}
 			return nil

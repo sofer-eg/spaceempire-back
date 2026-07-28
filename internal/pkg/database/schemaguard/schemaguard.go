@@ -15,6 +15,12 @@
 // target right next to the SQL constants, and a line-based scan would splice
 // the comment onto a neighbouring INSERT INTO. With parser mode 0 comments are
 // not part of the AST at all, so prose can never be mistaken for a statement.
+//
+// Known limitation: only whole statements written as a single string literal are
+// found. A statement spliced together from parts ("INSERT INTO t ..." +
+// onConflictClause) carries half the pattern in each literal and is invisible to
+// the guard. There is no such upsert in the tree today; keep upsert SQL in one
+// literal so it stays covered.
 package schemaguard
 
 // Upsert is one INSERT ... ON CONFLICT string literal found in the sources.

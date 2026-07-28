@@ -65,6 +65,47 @@ INSERT INTO cargo (owner_kind, owner_id) VALUES ($1, $2)
 	assert.Empty(t, got, "comments mentioning ON CONFLICT must not produce upserts")
 }
 
+// TestUnit_FindUpserts_TableNameForms covers the ways a real INSERT can spell
+// its target. Both non-bare forms used to be handled wrongly: a quoted name did
+// not match at all, so the literal dropped out of the guard's coverage without
+// changing any count, and a schema-qualified name yielded the *schema* as the
+// table, which makes the drift report list the keys of a relation that does not
+// exist ("the table has no UNIQUE or PRIMARY KEY at all") and sends the reader
+// hunting for a problem that is not there.
+func TestUnit_FindUpserts_TableNameForms(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		table string
+		want  string
+	}{
+		{name: "bare", table: `cargo`, want: `cargo`},
+		{name: "quoted reserved word", table: `"user"`, want: `"user"`},
+		{name: "schema qualified", table: `public.cargo`, want: `public.cargo`},
+		{name: "schema qualified and quoted", table: `public."user"`, want: `public."user"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			writeGoFile(t, dir, "repo.go", `package repo
+
+const q = `+"`"+`INSERT INTO `+tc.table+` (id) VALUES ($1) ON CONFLICT (id) DO NOTHING`+"`"+`
+`)
+
+			got, err := schemaguard.FindUpserts(dir)
+			require.NoError(t, err, "table %s", tc.table)
+			require.Len(t, got, 1, "literal must be found for table %s", tc.table)
+			// The captured name goes straight into to_regclass(), which accepts
+			// quoted and schema-qualified names as written.
+			assert.Equal(t, tc.want, got[0].Table)
+		})
+	}
+}
+
 func TestUnit_FindUpserts_SkipsTestFiles(t *testing.T) {
 	t.Parallel()
 
@@ -171,14 +212,23 @@ func TestUnit_FindUpserts_ProductionUpserts(t *testing.T) {
 		byFile[up.File] = append(byFile[up.File], up.Table)
 		assert.NotEmpty(t, up.SQL)
 		assert.Positive(t, up.Line)
+		// The generators under cmd/starwind-tools are scanned like everything else
+		// (nothing is excluded by path), and they must stay out of the result on
+		// their own merit: they build ON CONFLICT clauses with strings.Builder, so
+		// no single literal there carries both halves of the pattern.
 		assert.NotContains(t, up.File, "cmd/starwind-tools",
 			"SQL generators assemble ON CONFLICT as text fragments, not statements")
 	}
 
 	for file, tables := range want {
-		assert.Equal(t, tables, byFile[file], "upserts in %s", file)
+		assert.Equal(t, tables, byFile[file],
+			"upserts in %s no longer match this map. If you deliberately added, moved or "+
+				"removed an INSERT ... ON CONFLICT there, update the map -- it is the "+
+				"diff-visible record of what the guard covers. If you did not touch that "+
+				"file, the extractor regressed: it stopped seeing a literal it used to see.",
+			file)
 	}
-	assert.GreaterOrEqual(t, len(got), 9, "production upserts found: %v", byFile)
+	assert.GreaterOrEqual(t, len(got), minUpserts, "production upserts found: %v", byFile)
 }
 
 func TestUnit_RepoRoot_FindsModuleRoot(t *testing.T) {

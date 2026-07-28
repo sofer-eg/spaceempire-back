@@ -74,9 +74,18 @@ See `docs/tasks/phase7-06-testcontainers-ryuk.md` for the full rationale.
 
 `internal/pkg/database/schemaguard` extracts every `INSERT ... ON CONFLICT`
 literal from the sources (`go/ast`) and plans each one against the migrated
-schema with `EXPLAIN (GENERIC_PLAN, COSTS OFF)`, which needs PostgreSQL 16+ and
-writes nothing. It fails when an `ON CONFLICT` target no longer matches any
-UNIQUE/PK key (42P10) or names a missing column/table, naming the literal's
-`file:line` and listing the table's actual keys. A migration that changes a
-UNIQUE/PRIMARY KEY must be paired with a grep of `ON CONFLICT` for that table —
-see the root `CLAUDE.md`, "Миграции и ON CONFLICT".
+schema with `EXPLAIN (GENERIC_PLAN, COSTS OFF)`, which needs PostgreSQL 16+.
+Planning executes nothing as long as the literal is a *single* statement:
+`EXPLAIN` covers only the first statement of a string and the rest would run, so
+literals carrying an inner `;` are rejected rather than planned, and the whole
+check runs inside a rolled-back transaction.
+
+It fails when an `ON CONFLICT` target no longer matches any UNIQUE/PK key
+(42P10), when a target names a constraint the table no longer has (42704, the
+`ON CONFLICT ON CONSTRAINT` form), or when the literal names a missing
+column/table — naming the literal's `file:line` and listing the table's actual
+keys. A literal that cannot be planned at all fails the test as well: an
+unchecked target is exactly the hole the guard exists to close, so it is never a
+silent skip. A migration that changes a UNIQUE/PRIMARY KEY must be paired with a
+grep of `ON CONFLICT` for that table — see the root `CLAUDE.md`,
+"Миграции и ON CONFLICT".

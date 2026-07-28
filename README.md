@@ -69,3 +69,14 @@ Alternatively, mirror `testcontainers/ryuk:0.13.0` into an internal registry
 and point testcontainers at it with `TESTCONTAINERS_RYUK_CONTAINER_IMAGE`.
 
 See `docs/tasks/phase7-06-testcontainers-ryuk.md` for the full rationale.
+
+### Upsert schema guard
+
+`internal/pkg/database/schemaguard` extracts every `INSERT ... ON CONFLICT`
+literal from the sources (`go/ast`) and plans each one against the migrated
+schema with `EXPLAIN (GENERIC_PLAN, COSTS OFF)`, which needs PostgreSQL 16+ and
+writes nothing. It fails when an `ON CONFLICT` target no longer matches any
+UNIQUE/PK key (42P10) or names a missing column/table, naming the literal's
+`file:line` and listing the table's actual keys. A migration that changes a
+UNIQUE/PRIMARY KEY must be paired with a grep of `ON CONFLICT` for that table —
+see the root `CLAUDE.md`, "Миграции и ON CONFLICT".

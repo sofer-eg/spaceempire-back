@@ -115,11 +115,15 @@ single `TxManager` transaction:
   `DELETE FROM ships WHERE id = victim`. A ship with no surviving drops
   still deletes cleanly and returns zero containers — that is the
   "ship without cargo → no container" acceptance case.
-- **`Pickup(ctx, container, ship)`**: list the container's cargo,
-  capacity-check the **ship** (`Capacity`/`UsedSpace`), `Add` every stack
-  to the ship, then delete the container's cargo + the container. All or
-  nothing — if the ship cannot fit the whole container, `ErrNoSpace` and
-  nothing moves. Loot lands in the hold **unowned** (`cargo.goods_owner_id
+- **`Pickup(ctx, container, ship)`**: capacity-check the **ship** — the
+  space the container's stacks need against `ships.cargobay` minus the space
+  the ship's own cargo already uses — then move the cargo with a single
+  `INSERT … SELECT … ON CONFLICT DO UPDATE` upsert and delete the
+  container's cargo + the container. The repo runs its own space SQL here
+  rather than the `cargo` repo's `Capacity`/`UsedSpace`/`Add`, so the whole
+  pickup stays one transaction of six statements. All or nothing — if the
+  ship cannot fit the whole container, `ErrNoSpace` and nothing moves.
+  Loot lands in the hold **unowned** (`cargo.goods_owner_id
   = 0`, phase 10.22): a ship hold is never split per depositor, so a pickup
   merges into the ship's existing unowned stack of that goods type instead
   of opening a second row. The move's `ON CONFLICT` target must therefore

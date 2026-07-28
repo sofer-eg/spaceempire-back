@@ -223,6 +223,15 @@ FROM ships s WHERE s.id = $1
 	// cargo_owner_goods_uniq (migration 0050) — Postgres rejects a narrower
 	// target at plan time with 42P10, i.e. on every pickup rather than only on
 	// an actual conflict.
+	//
+	// Flattening the depositor is safe only because the source yields at most
+	// one row per goods type: container cargo is written solely by
+	// insertCargoSQL (which leaves the column at DEFAULT 0), and
+	// cargo_owner_goods_uniq forbids a second (container, goods_type, 0) row.
+	// A writer that ever deposits *owned* goods into a container would make two
+	// source rows collapse onto one conflict target (21000, "cannot affect row
+	// a second time") and has to aggregate here: SUM(quantity) … GROUP BY
+	// goods_type_id.
 	moveCargoSQL = `
 INSERT INTO cargo (owner_kind, owner_id, goods_type_id, quantity, goods_owner_id)
 SELECT $1, $2, goods_type_id, quantity, 0

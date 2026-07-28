@@ -107,6 +107,10 @@ func TestIntegration_Torpedos_CreateLoadAll(t *testing.T) {
 // row would flip to the payload's value, so the assertion that the ORIGINAL
 // statics survive is what catches that — a tautological payload (same statics)
 // would pass even with a buggy UPDATE.
+//
+// The mutable side is asserted the symmetric way (TASK-114 AC-3): every batched
+// column — Pos, Vel, Direction, LastTargetPos, HP and expires_at — carries a
+// value distinct from the stored row, and the NEW value must come back.
 func TestIntegration_Torpedos_BatchUpdate(t *testing.T) {
 	t.Parallel()
 	pool := testdb.Setup(t)
@@ -114,15 +118,22 @@ func TestIntegration_Torpedos_BatchUpdate(t *testing.T) {
 	ship := seedShip(t, pool, pid, 10)
 	repo := torpedos.New(pool)
 
-	id, err := repo.Create(context.Background(), sampleTorpedo(pid, ship, 10))
+	stored := sampleTorpedo(pid, ship, 10)
+	id, err := repo.Create(context.Background(), stored)
 	require.NoError(t, err)
+
+	// A new TTL two hours out — far enough from the stored one (a minute out)
+	// that no rounding could make a stale value pass the round-trip assertion.
+	newExpiry := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Microsecond)
 
 	updated := sampleTorpedo(pid, ship, 10)
 	updated.ID = id
 	updated.Pos = domain.Vec2{X: 99, Y: 88}
 	updated.Vel = domain.Vec2{X: -1, Y: -2}
+	updated.Direction = domain.Vec2{X: 0, Y: -1} // steered away from the stored {1,0}
 	updated.LastTargetPos = domain.Vec2{X: 77, Y: 66}
 	updated.HP = 7
+	updated.ExpiresAt = newExpiry
 	// Static profile in the payload differs from the stored row — BatchUpdate
 	// must ignore these and keep the originals.
 	updated.Class = 2
@@ -138,6 +149,12 @@ func TestIntegration_Torpedos_BatchUpdate(t *testing.T) {
 	require.Equal(t, domain.Vec2{X: -1, Y: -2}, got[0].Vel)
 	require.Equal(t, domain.Vec2{X: 77, Y: 66}, got[0].LastTargetPos)
 	require.Equal(t, 7, got[0].HP)
+	// Mutable columns that the homing integrator rewrites every tick: the new
+	// heading and the TTL must land in the row, not just be accepted silently.
+	require.NotEqual(t, stored.Direction, got[0].Direction, "the payload really changed the heading")
+	require.Equal(t, domain.Vec2{X: 0, Y: -1}, got[0].Direction, "BatchUpdate writes the mutable direction columns")
+	require.WithinDuration(t, newExpiry, got[0].ExpiresAt, time.Millisecond,
+		"BatchUpdate writes the mutable expires_at column")
 	// Static profile is not batched: the ORIGINAL stored values must survive
 	// even though the payload tried to overwrite them.
 	require.Equal(t, 3, got[0].Class, "BatchUpdate must not write the static class column")

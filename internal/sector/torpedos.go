@@ -2,6 +2,7 @@ package sector
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"spaceempire/back/internal/combat"
@@ -136,6 +137,22 @@ func (w *Worker) tickTorpedos(ctx context.Context, s *sectorState, dt float64, n
 			})
 		}
 	}
+}
+
+// snapshotTorpedos returns a sorted-by-ID slice of value-type torpedoes for the
+// full per-sector Snapshot (/debug/world and any other non-delta consumer).
+// Torpedo has no slice/map/pointer fields, so a plain value copy satisfies the
+// worker→subscriber isolation contract. Mirrors snapshotDrones.
+func snapshotTorpedos(src map[domain.TorpedoID]*domain.Torpedo) []domain.Torpedo {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]domain.Torpedo, 0, len(src))
+	for _, t := range src {
+		out = append(out, *t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 // torpedosInRadius returns the subset of live torpedoes whose Pos lies within

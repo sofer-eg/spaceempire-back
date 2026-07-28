@@ -391,6 +391,119 @@ func TestUnit_Torpedo_EndToEnd_LaunchHomingSplashFriendlyFire(t *testing.T) {
 	require.Equal(t, 200, own.HP, "the firing ship sat outside the blast radius — unharmed")
 }
 
+// TestUnit_Torpedo_SplashHitsTheLaunchingShip: the blast is indiscriminate about
+// the FIRING SHIP itself — a launcher that detonates its torpedo inside its own
+// SplashRadius eats its own splash (ЧТЗ AC-6, R-02). The sector-level cousin
+// (TestUnit_Torpedo_EndToEnd_LaunchHomingSplashFriendlyFire) covers "another ship
+// of the same player"; the launcher itself was covered only at the primitive level
+// (combat.ApplyDamageInRadius_FriendlyFireHitsOwnShips). This closes it through
+// the full launch→tick→detonate pipeline (TASK-114 AC-2).
+func TestUnit_Torpedo_SplashHitsTheLaunchingShip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newFakeTorpedoRepo()
+
+	// The launcher: tough enough to survive its own class-3 blast (600 dmg) so
+	// the self-inflicted damage is readable rather than a kill.
+	owner := torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})
+	owner.HP, owner.MaxHP = 5000, 5000
+
+	// Point-blank target: 40 units out, so the detonation (within HitRadius 16 of
+	// the target, i.e. at most 56 from the launcher) lands well inside the class-3
+	// SplashRadius of 70 measured from the launcher itself.
+	target := torpedoShip(2, 200, domain.Vec2{X: 40, Y: 0})
+	target.HP, target.MaxHP = 5000, 5000
+
+	w := newTorpedoWorker(t, sector.Config{TickInterval: time.Second, AOIRadius: 100000},
+		clock.NewRealClock(), repo, []domain.Ship{owner, target})
+
+	res := sendTorpedo(t, w, sector.LaunchTorpedoCommand{
+		PlayerID: 100, ShipID: 1, Class: 3,
+		Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+	})
+	require.NoError(t, res.Err)
+
+	for i := 0; i < 15 && repo.liveCount() > 0; i++ {
+		w.Tick(ctx)
+	}
+	require.Zero(t, repo.liveCount(), "the point-blank torpedo detonated")
+
+	snap := w.Snapshot(testSector)
+	shipByID := func(id domain.ShipID) (domain.Ship, bool) {
+		for _, s := range snap.Ships {
+			if s.ID == id {
+				return s, true
+			}
+		}
+		return domain.Ship{}, false
+	}
+
+	own, ok := shipByID(1)
+	require.True(t, ok, "the launcher survives its own blast (5000 HP)")
+	require.Less(t, own.HP, 5000, "the LAUNCHING ship took its own splash — no self-exclusion, AC-6")
+	require.Zero(t, own.Shield, "the launcher's own shield absorbed the blast first")
+
+	// The blast still did its job on the mark it was aimed at.
+	tgt, ok := shipByID(2)
+	require.True(t, ok, "the target survives the blast")
+	require.Less(t, tgt.HP, 5000, "the aimed-at target took splash damage too")
+
+	// The detonation is a Hit (not a shoot-down / expiry) fired by ship 1.
+	require.Len(t, snap.TorpedoImpacts, 1)
+	require.True(t, snap.TorpedoImpacts[0].Hit, "the torpedo detonated rather than expiring")
+	require.Equal(t, domain.ShipID(1), snap.TorpedoImpacts[0].OwnerShipID)
+}
+
+// TestUnit_Torpedo_SnapshotCarriesFlightAndImpacts: the full per-sector Snapshot
+// — what /debug/world dumps, not the per-subscriber AOI delta the player renders
+// from — carries the torpedoes in flight and this tick's torpedo impacts, exactly
+// as it already carries drones/missiles (TASK-114 AC-1). Without it a torpedo in
+// flight is invisible to every non-delta consumer.
+func TestUnit_Torpedo_SnapshotCarriesFlightAndImpacts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newFakeTorpedoRepo()
+
+	owner := torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})
+	target := torpedoShip(2, 200, domain.Vec2{X: 400, Y: 0})
+	target.HP, target.MaxHP = 5000, 5000 // survives, so the torpedo dies by detonation
+	w := newTorpedoWorker(t, sector.Config{TickInterval: time.Second, AOIRadius: 100000},
+		clock.NewRealClock(), repo, []domain.Ship{owner, target})
+
+	res := sendTorpedo(t, w, sector.LaunchTorpedoCommand{
+		PlayerID: 100, ShipID: 1, Class: 3,
+		Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+	})
+	require.NoError(t, res.Err)
+
+	snap := w.Snapshot(testSector)
+	require.Len(t, snap.Torpedos, 1, "the in-flight torpedo is in the full snapshot")
+	require.Equal(t, res.TorpedoID, snap.Torpedos[0].ID)
+	require.Equal(t, domain.PlayerID(100), snap.Torpedos[0].PlayerID, "the snapshot carries the firing player")
+	require.Equal(t, domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}, snap.Torpedos[0].Target)
+	require.Equal(t, float64(70), snap.Torpedos[0].SplashRadius, "the class-3 profile round-trips into the dump")
+	require.Empty(t, snap.TorpedoImpacts, "nothing has detonated yet")
+
+	for i := 0; i < 30 && repo.liveCount() > 0; i++ {
+		w.Tick(ctx)
+	}
+	require.Zero(t, repo.liveCount(), "the torpedo reached its target and detonated")
+
+	snap = w.Snapshot(testSector)
+	require.Empty(t, snap.Torpedos, "the spent torpedo left the live set")
+	require.Len(t, snap.TorpedoImpacts, 1, "the detonation is in the full snapshot for exactly one tick")
+	require.Equal(t, res.TorpedoID, snap.TorpedoImpacts[0].TorpedoID)
+	require.True(t, snap.TorpedoImpacts[0].Hit)
+	require.Equal(t, float64(70), snap.TorpedoImpacts[0].SplashRadius, "the blast radius the renderer needs")
+
+	// The impact slice is a copy: the next tick clears the worker's own buffer
+	// without blanking a snapshot a consumer is still holding.
+	held := snap
+	w.Tick(ctx)
+	require.Len(t, held.TorpedoImpacts, 1, "the published snapshot is isolated from the worker's per-tick buffer")
+	require.Empty(t, w.Snapshot(testSector).TorpedoImpacts, "impacts are one-frame")
+}
+
 // TestUnit_LaunchTorpedo_DeadOrMissingTargetGate: a launch at a dead or
 // non-existent target is rejected BEFORE any energy or ammunition is spent
 // (carry-over from the .3 review). No torpedo is created.

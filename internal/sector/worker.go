@@ -1192,6 +1192,11 @@ func publishSnapshotFor(s *sectorState, elapsed time.Duration) {
 		dImpacts = make([]DroneImpact, len(s.droneImpacts))
 		copy(dImpacts, s.droneImpacts)
 	}
+	var tImpacts []TorpedoImpact
+	if len(s.torpedoImpacts) > 0 {
+		tImpacts = make([]TorpedoImpact, len(s.torpedoImpacts))
+		copy(tImpacts, s.torpedoImpacts)
+	}
 	snap := &Snapshot{
 		SectorID:         s.sectorID,
 		Tick:             s.tick,
@@ -1206,6 +1211,8 @@ func publishSnapshotFor(s *sectorState, elapsed time.Duration) {
 		MissileImpacts:   impacts,
 		Drones:           snapshotDrones(s.drones),
 		DroneImpacts:     dImpacts,
+		Torpedos:         snapshotTorpedos(s.torpedos),
+		TorpedoImpacts:   tImpacts,
 		Containers:       snapshotContainers(s.containers),
 		Asteroids:        s.snapshotAsteroids(),
 		Destructibles:    s.snapshotDestructibles(),

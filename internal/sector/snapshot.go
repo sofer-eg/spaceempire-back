@@ -50,6 +50,16 @@ type Snapshot struct {
 	// expire) that fired in this tick. Empty between ticks.
 	DroneImpacts []DroneImpact
 
+	// Torpedos is the live torpedo set at the end of this tick, the same shape
+	// as Drones. Players render torpedoes from the per-subscriber delta
+	// (TorpedosAdded/Updated/Removed); this full set is what the non-delta
+	// consumers — /debug/world above all — read. Phase 10.3.5.
+	Torpedos []domain.Torpedo
+
+	// TorpedoImpacts holds the one-frame torpedo events (detonation / shot-down
+	// / expire) that fired in this tick. Empty between ticks.
+	TorpedoImpacts []TorpedoImpact
+
 	// Containers is the live loot-container set at the end of this tick.
 	// Patches deliver an added/removed delta against the previous tick's
 	// set (containers are immutable, so no "updated"). Phase 4.6.

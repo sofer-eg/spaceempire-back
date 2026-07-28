@@ -23,8 +23,8 @@ const (
 	// The previous hard 2 s failed every single run under -race (TASK-150).
 	// Cold start loads six balance YAMLs, opens the pool, then loads every
 	// sector's statics and spawns their NPCs — and -race multiplies all of it,
-	// while the sibling integration tests in this package each hold their own
-	// Postgres testcontainer in parallel. The budget is deliberately far above
+	// while the sibling integration tests in this package run in parallel
+	// against the same Postgres container. The budget is deliberately far above
 	// the observed cold start, yet far below the package's `-timeout 180s`, so
 	// a genuine hang still fails here with a readable message instead of a
 	// whole-binary timeout panic.

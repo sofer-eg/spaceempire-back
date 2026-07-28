@@ -53,10 +53,22 @@ const (
 	LabelKey   = "spaceempire.test"
 	LabelValue = "true"
 
-	// maxConns raises the server-side connection ceiling above the default 100:
-	// a package may run up to GOMAXPROCS tests in parallel, each holding its own
-	// pgxpool (default max is NumCPU), plus the pools an app-level test opens.
-	maxConns = "200"
+	// RunIDEnv carries a per-invocation id from the Makefile; RunLabelKey is the
+	// label it is stamped as. It scopes the automatic cleanup to the containers
+	// of the run that is finishing, so two runs sharing a docker host do not
+	// tear down each other's databases. Empty when tests are run directly, in
+	// which case the containers carry only the project label.
+	RunIDEnv    = "SE_TEST_RUN_ID"
+	RunLabelKey = "spaceempire.test.run"
+
+	// serverMaxConns raises the server-side ceiling above the default 100, and
+	// poolMaxConns pins what each pool may take from it — pgxpool would
+	// otherwise default to max(4, NumCPU) and make the budget depend on the
+	// machine. A package runs at most -parallel (GOMAXPROCS) tests at once, so
+	// the worst case is GOMAXPROCS*4 + 4: within 200 up to a 48-core runner.
+	serverMaxConns = "200"
+	poolMaxConns   = 4
+	adminMaxConns  = 4
 )
 
 // shared is the per-process container and its admin pool.
@@ -74,7 +86,22 @@ var (
 	instance *shared
 	initErr  error
 	dbSeq    atomic.Int64
+	// mainCalled records that the package wired testdb.Main as its TestMain.
+	// Without it nothing would ever terminate the container, and the omission
+	// is invisible: the tests still pass. Setup refuses to run instead.
+	mainCalled atomic.Bool
 )
+
+// missingTestMain is what a package sees when it calls Setup without wiring
+// Main. Spelled out because the fix is one file the author has no reason to
+// know about — integration tests are usually written by copying a neighbour.
+const missingTestMain = `testdb.Setup requires this package to declare a TestMain:
+
+    func TestMain(m *testing.M) { testdb.Main(m) }
+
+Add it as testmain_test.go (copy one from a neighbouring package). Without it
+the package's Postgres container is never terminated and leaks past the run.
+See back/README.md, "Integration tests".`
 
 // Setup returns a pgxpool connected to a private, fully migrated database.
 // The database is cloned from the package-wide template; it and the pool are
@@ -82,6 +109,10 @@ var (
 func Setup(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
+
+	if !mainCalled.Load() {
+		t.Fatal(missingTestMain)
+	}
 
 	s, err := start(ctx)
 	require.NoError(t, err, "start shared postgres container")
@@ -100,8 +131,9 @@ func Setup(t *testing.T) *pgxpool.Pool {
 
 	// The DSN is rewritten as a string rather than by mutating a parsed config:
 	// pgxpool.Config.ConnString() returns whatever was parsed, and callers
-	// (internal/app) hand that string to the application config.
-	pool, err := pgxpool.New(ctx, dsn)
+	// (internal/app) hand that string to the application config. Overriding
+	// MaxConns is safe in the same respect — it leaves ConnString untouched.
+	pool, err := open(ctx, dsn, poolMaxConns)
 	require.NoError(t, err, "pgxpool connect")
 	t.Cleanup(pool.Close)
 
@@ -113,6 +145,7 @@ func Setup(t *testing.T) *pgxpool.Pool {
 // Main runs a package's tests and terminates the shared container afterwards.
 // Packages that call Setup wire it as their TestMain.
 func Main(m *testing.M) {
+	mainCalled.Store(true)
 	code := m.Run()
 	shutdown()
 	os.Exit(code)
@@ -129,8 +162,8 @@ func launch(ctx context.Context) (*shared, error) {
 		postgres.WithDatabase(templateDB),
 		postgres.WithUsername(dbUser),
 		postgres.WithPassword(dbPassword),
-		testcontainers.WithLabels(map[string]string{LabelKey: LabelValue}),
-		testcontainers.WithCmdArgs("-c", "max_connections="+maxConns),
+		testcontainers.WithLabels(labels()),
+		testcontainers.WithCmdArgs("-c", "max_connections="+serverMaxConns),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
@@ -138,6 +171,13 @@ func launch(ctx context.Context) (*shared, error) {
 		),
 	)
 	if err != nil {
+		// postgres.Run returns a usable handle alongside the error whenever the
+		// container was created — a startup-timeout under load is exactly that
+		// case. Dropping it here would leak a running Postgres that nothing
+		// afterwards knows about: shutdown only sees a successful instance.
+		if container != nil {
+			_ = container.Terminate(context.Background())
+		}
 		return nil, fmt.Errorf("start postgres container: %w", err)
 	}
 
@@ -165,7 +205,7 @@ func prepare(ctx context.Context, container *postgres.PostgresContainer) (*share
 	if err != nil {
 		return nil, err
 	}
-	admin, err := pgxpool.New(ctx, adminDSN)
+	admin, err := open(ctx, adminDSN, adminMaxConns)
 	if err != nil {
 		return nil, fmt.Errorf("connect admin pool: %w", err)
 	}
@@ -186,11 +226,37 @@ func shutdown() {
 	instance = nil
 }
 
+// labels are stamped on the container: the project label always, the run label
+// when the Makefile supplied a run id.
+func labels() map[string]string {
+	l := map[string]string{LabelKey: LabelValue}
+	if id := os.Getenv(RunIDEnv); id != "" {
+		l[RunLabelKey] = id
+	}
+	return l
+}
+
+// open connects a pool with an explicit MaxConns, leaving ConnString intact.
+func open(ctx context.Context, dsn string, conns int32) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse pool dsn: %w", err)
+	}
+	cfg.MaxConns = conns
+	return pgxpool.NewWithConfig(ctx, cfg)
+}
+
 // dsnForDB re-points a Postgres URL at another database on the same server.
+// Only the URL form is accepted: url.Parse takes a keyword/value DSN
+// ("host=localhost dbname=x") without complaint and parks the whole string in
+// Path, which would yield a silently corrupt result rather than an error.
 func dsnForDB(dsn, name string) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return "", fmt.Errorf("parse dsn: %w", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("dsn %q is not a postgres URL", dsn)
 	}
 	u.Path = "/" + name
 	return u.String(), nil

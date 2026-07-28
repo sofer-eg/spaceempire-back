@@ -1,4 +1,4 @@
-.PHONY: run test test-unit test-integration test-clean bench lint tidy build release \
+.PHONY: run test test-unit test-integration test-clean test-clean-run bench lint tidy build release \
 	db-up db-down db-psql migrate-up migrate-down migrate-status \
 	tools
 
@@ -26,6 +26,10 @@ RYUK_DISABLED ?= true
 # starts its own Postgres container under -race, and the contention made whole
 # packages miss their container-start deadline (TASK-153). Override on a bigger
 # CI runner with `make test-integration TEST_P=8`.
+#
+# test-unit is capped deliberately too, and not because of containers: 53
+# packages under -race on the default -p is itself more load than this box is
+# meant to carry while someone works on it. Do not "optimise" it back off.
 TEST_P ?= 2
 
 # TEST_TIMEOUT is the per-package budget. With one container per package plus
@@ -34,9 +38,20 @@ TEST_P ?= 2
 TEST_TIMEOUT ?= 180s
 
 # TEST_LABEL is stamped on every container started by internal/pkg/database/testdb
-# (see testdb.LabelKey/LabelValue). test-clean filters strictly by it, so
-# unrelated local databases are never in scope.
-TEST_LABEL ?= spaceempire.test=true
+# (testdb.LabelKey/LabelValue). Deliberately := and not ?=: the label on the
+# containers comes from a Go constant, so overriding this would only ever change
+# what gets *deleted* — `make test-clean TEST_LABEL=org.testcontainers=true`
+# would wipe every project's testcontainers on the host.
+#
+# TEST_RUN_ID is unique per make invocation and reaches the tests as
+# SE_TEST_RUN_ID (testdb.RunIDEnv), which stamps it as a second label. The
+# automatic cleanup after a run matches on that one, so two runs sharing a
+# docker host cannot tear down each other's containers.
+# TestUnit_TestDB_MakefileFiltersMatchLabels fails if these strings drift from
+# the Go constants.
+TEST_LABEL     := spaceempire.test=true
+TEST_RUN_LABEL := spaceempire.test.run
+TEST_RUN_ID    := $(shell date +%s%N)
 
 run:
 	go run ./cmd/starwind
@@ -59,26 +74,38 @@ release:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o $(RELEASE_BINARY) ./cmd/starwind
 	@echo "built $(RELEASE_BINARY) (frontend embedded)"
 
-# test / test-integration always run test-clean afterwards, keeping the exit
-# code of the test run itself: a binary killed by -timeout panics and skips
-# every t.Cleanup and TestMain, which is how containers used to pile up.
+# test and test-integration both run TestIntegration_ tests, so both carry the
+# same three properties: -count=1 (a cached ok says nothing about whether the
+# docker daemon still works — the suite once reported green in 21 s having run
+# nothing), a per-package -timeout, and a cleanup pass afterwards that keeps the
+# exit code of the test run itself. That last one matters because a binary
+# killed by -timeout panics and skips every t.Cleanup and TestMain, which is how
+# containers used to pile up.
 test:
-	@TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) go test -race -p $(TEST_P) ./...; \
-		status=$$?; $(MAKE) --no-print-directory test-clean; exit $$status
+	@SE_TEST_RUN_ID=$(TEST_RUN_ID) TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) \
+		go test -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
+		status=$$?; $(MAKE) --no-print-directory test-clean-run; exit $$status
 
 test-unit:
 	go test -run '^TestUnit_' -race -p $(TEST_P) ./...
 
-# -count=1 disables the build cache: these tests depend on state Go does not
-# key on (docker daemon, image cache, container startup), so a cached PASS can
-# report green for an environment that no longer works.
 test-integration:
-	@TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) go test -run '^TestIntegration_' -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
-		status=$$?; $(MAKE) --no-print-directory test-clean; exit $$status
+	@SE_TEST_RUN_ID=$(TEST_RUN_ID) TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) \
+		go test -run '^TestIntegration_' -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
+		status=$$?; $(MAKE) --no-print-directory test-clean-run; exit $$status
 
-# test-clean removes containers left behind by a run that was killed before its
-# cleanup could execute. Matched strictly by TEST_LABEL — never by image name,
-# so local developer databases are out of scope by construction.
+# test-clean-run reaps only this invocation's containers. It runs automatically
+# after test / test-integration, where a blanket sweep would kill a concurrent
+# run's live databases and bury it under connection errors.
+test-clean-run:
+	@ids=$$(docker ps -aq --filter "label=$(TEST_RUN_LABEL)=$(TEST_RUN_ID)"); \
+	if [ -n "$$ids" ]; then echo "removing leaked test containers (run $(TEST_RUN_ID)):"; docker rm -f $$ids; fi
+
+# test-clean sweeps every container this project's tests ever started, including
+# those from runs that were killed outright, and from `go test` invoked directly
+# (no run id). Manual by design — it is not safe to fire while another run is in
+# flight. Matched strictly by TEST_LABEL, never by image name, so local developer
+# databases are out of scope by construction.
 test-clean:
 	@ids=$$(docker ps -aq --filter "label=$(TEST_LABEL)"); \
 	if [ -n "$$ids" ]; then echo "removing leaked test containers:"; docker rm -f $$ids; fi

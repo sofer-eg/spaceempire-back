@@ -21,7 +21,7 @@ make build               # build bin/starwind
 make lint                # golangci-lint
 make test-unit           # unit tests (-race), TestUnit_*
 make test-integration    # integration tests (-race), TestIntegration_*
-make test-clean          # reap test containers left by a killed run
+make test-clean          # reap every test container this project left behind
 make migrate-up          # apply migrations to PG_DSN
 make migrate-status      # show migration state
 ```
@@ -57,6 +57,10 @@ Packages that call `testdb.Setup` must wire the shared container's teardown:
 func TestMain(m *testing.M) { testdb.Main(m) }
 ```
 
+`Setup` fails the test with that snippet if the package has not declared it —
+otherwise the omission would be invisible (the tests still pass) and the package
+would leak its container on every run.
+
 `make test-integration` also caps how many package binaries run at once
 (`TEST_P`, default 2). The core-count default saturated an 8-core box — every
 integration package racing to start its own Postgres under `-race`, with whole
@@ -77,16 +81,32 @@ green for an environment that no longer works.
 
 A binary killed by `go test -timeout` panics and skips every `t.Cleanup` **and**
 `TestMain`, so its container survives the run. `make test` and
-`make test-integration` therefore always finish by running `make test-clean`,
-keeping the test run's own exit code. It can also be run on its own:
+`make test-integration` therefore always finish with a cleanup pass, keeping the
+test run's own exit code.
+
+That pass (`test-clean-run`) removes **only the containers of the invocation
+that is finishing**. Each `make` invocation generates a `TEST_RUN_ID` and passes
+it to the tests as `SE_TEST_RUN_ID` (`testdb.RunIDEnv`), which `testdb` stamps as
+a second label. Without that scoping, two runs sharing a docker host would
+destroy each other: the first to finish would `docker rm -f` the other's live
+databases.
+
+For a total sweep — containers from runs that were killed outright, or from
+`go test` invoked directly, which carry no run id — there is a manual target:
 
 ```bash
 make test-clean
 ```
 
-Cleanup matches strictly on the `spaceempire.test=true` label that `testdb`
-stamps on the containers it starts (`testdb.LabelKey`/`LabelValue`) — never on
-the image name, so unrelated local databases are out of scope by construction.
+It is manual by design: it is not safe to fire while another run is in flight.
+
+Both match strictly on labels `testdb` stamps on the containers it starts
+(`testdb.LabelKey`/`LabelValue`, `testdb.RunLabelKey`) — never on the image name,
+so unrelated local databases are out of scope by construction. The Makefile's
+filter strings are checked against those Go constants by
+`TestUnit_TestDB_MakefileFiltersMatchLabels`, because drift here does not fail
+anything: the filters would simply stop matching and the leaks would come back
+silently.
 
 ### Why Ryuk is disabled
 

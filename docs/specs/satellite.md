@@ -48,8 +48,9 @@ There is no seed. A player deploys a satellite from a ship's cargo:
    catalog.
 2. Wait for ack (`AckTimeout`) and map the outcome: `ErrShipNotFound` → 404,
    `ErrForbidden` → 403, `ErrShipDocked` → 400, `cargo.ErrInsufficientQuantity`
-   → 400 "no satellite in cargo", `cargo.ErrGoodsTypeNotFound` → 500, ack
-   timeout → 504 with **no compensation** (see atomicity below).
+   → 400 "no satellite in cargo", `cargo.ErrGoodsTypeNotFound` → 500,
+   `ErrInstallerUnavailable` → 503 "install unavailable: server misconfigured",
+   ack timeout → 504 with **no compensation** (see atomicity below).
 
 `InstallSatelliteCommand.apply` validates ownership and that the ship is not
 docked — a rejected gate never touches the goods. Then `installSatellite` debits
@@ -61,15 +62,15 @@ current position. The new satellite reaches clients on the next tick via the
 10.20 L2 `StaticsAdded` delta (it is in `destructibles`, hence in
 `staticRefsInRadius`, and `collectStaticsByRefs` renders the full object).
 
-With no installer wired the command falls back to a bare `satellitesRepo.Create`
-(or a fallback id counter) and accounts for no goods — that path exists only for
-pure unit tests.
+`StaticInstaller` is the **only** install path: a worker built without one
+refuses the command with `ErrInstallerUnavailable` → 503 rather than deploying a
+free satellite, so `SatelliteRepo` carries only `Delete`.
 
 ### Atomicity of the install (TASK-144)
 
 **Invariant: the goods debit and the satellite INSERT commit in ONE
-transaction.** Either the player paid and the satellite exists, or neither
-happened; nothing enters the sector's RAM unless the transaction committed.
+transaction.** Either the transaction committed (player paid, row exists) or it
+rolled back (neither); nothing enters the sector's RAM unless it committed.
 
 This replaced a `Consume`-before-`Send` / `Refund`-on-failure orchestration in
 the handler: since `AckTimeout` is only `TickInterval + 1s`, a delayed tick made
@@ -80,7 +81,18 @@ same hole (and the same fix) applies to `install-jammer`, where the object costs
 
 A 504 therefore means "outcome unknown", not "nothing happened", and the
 install's DB call is bounded by `Config.RepoTimeout` (default 2 s) so a hung
-Postgres cannot park the tick goroutine indefinitely.
+Postgres cannot park the tick goroutine indefinitely. A whole inbox drain is
+bounded too (`Worker.installBudget` ≈ one `RepoTimeout` of install DB time),
+so a queue of installs cannot chain those stalls; the overflow applies on the
+next wake-up.
+
+`RepoTimeout` leaves one residual window, in a single direction: if the deadline
+fires while `COMMIT` is in flight, Postgres commits while pgx reports
+`DeadlineExceeded`, so the goods are charged and the `satellites` row exists but
+`addSatellite` never ran — the satellite is inert (revealing nothing, invisible
+to clients) until a restart's `LoadAll` reconciles it. Logged at ERROR
+(`"static install outcome in doubt"`, with ship / sector / goods type); the
+player sees 500. Full write-up in `jammer.md`.
 
 Install HP/Shield are package constants (`satelliteHP` etc.) — these are deploy
 defaults, not per-tick knobs, so they stay out of `Config`.

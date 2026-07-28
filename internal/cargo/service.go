@@ -101,6 +101,9 @@ func (s *Service) Inventory(ctx context.Context, owner domain.EntityRef, viewer 
 // of the requested goods type, ErrGoodsTypeNotFound when gtype is not
 // in the catalog, ErrNonPositiveQuantity for qty<=0.
 func (s *Service) Consume(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
+	// Checked here as well as in ConsumeIn on purpose: rejecting a nonsense qty
+	// before opening a transaction costs nothing, and ConsumeIn must keep its own
+	// guard because callers reach it directly with their own tx.
 	if qty <= 0 {
 		return ErrNonPositiveQuantity
 	}

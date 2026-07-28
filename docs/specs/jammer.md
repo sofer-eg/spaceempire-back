@@ -100,8 +100,9 @@ There is no seed. A player deploys a generator from a ship's cargo:
    stays free of the goods catalog.
 2. Wait for ack (`AckTimeout`) and map the outcome: `ErrShipNotFound` → 404,
    `ErrForbidden` → 403, `ErrShipDocked` → 400, `cargo.ErrInsufficientQuantity`
-   → 400 "no jammer in cargo", `cargo.ErrGoodsTypeNotFound` → 500, ack timeout
-   → 504 with **no compensation** (see atomicity below).
+   → 400 "no jammer in cargo", `cargo.ErrGoodsTypeNotFound` → 500,
+   `ErrInstallerUnavailable` → 503 "install unavailable: server misconfigured",
+   ack timeout → 504 with **no compensation** (see atomicity below).
 
 `InstallJammerCommand.apply` validates ownership (`ErrForbidden`) and that the
 ship is not docked (`ErrShipDocked`) — a rejected gate never touches the goods.
@@ -113,15 +114,19 @@ ship's current position. The new generator reaches clients on the next tick via
 the 10.20 L2 `StaticsAdded` delta (it is in `destructibles`, hence in
 `visibleStaticRefs`, and `collectStaticsByRefs` renders the full object).
 
-With no installer wired the command falls back to a bare `jammersRepo.Create`
-(or a fallback id counter) and accounts for no goods — that path exists only for
-pure unit tests.
+`StaticInstaller` is the **only** install path. A worker built without one
+(`WithStaticInstaller` lost in a refactor, a second pool-assembly site) refuses
+the command with `ErrInstallerUnavailable` → 503 instead of creating the object:
+the installer is what makes the player pay, so its absence must break loudly
+rather than deploy ≈1.13M cr generators for free. Consequently `JammerRepo`
+carries only `Delete` — installs never touch it.
 
 ### Atomicity of the install (TASK-144)
 
 **Invariant: the goods debit and the generator INSERT commit in ONE
-transaction.** Either the player paid and the generator exists, or neither
-happened. Nothing is added to the sector's RAM unless the transaction committed.
+transaction.** Either the transaction committed (player paid, row exists) or it
+rolled back (neither). Nothing is added to the sector's RAM unless the
+transaction committed. One residual gap is described below.
 
 This replaced a `Consume`-before-`Send` / `Refund`-on-failure orchestration in
 the handler, which leaked a free generator: `AckTimeout` is only
@@ -134,11 +139,40 @@ Consequences of the new invariant:
   hold and retries only if no generator appeared. A retry on an empty hold is
   refused with 400.
 - The lost ack itself is harmless — `replyInstallJammer` writing into an
-  abandoned `buf=1` channel drops the result, but the world and the hold already
-  agree.
+  abandoned `buf=1` channel drops the result, but goods and generator went the
+  same way.
 - The install's DB call is bounded by `Config.RepoTimeout` (default 2 s) instead
   of an uninterruptible background context, so a hung Postgres stalls the tick
   for at most that long instead of forever.
+- One drain of the worker's inbox spends at most ~`RepoTimeout` of DB time on
+  installs in total (`Worker.installBudget`): `RepoTimeout` bounds a single
+  install, so without a per-drain budget a queue of installs against a hung
+  Postgres would park the Run goroutine — and every sector that worker owns —
+  for `InboxCapacity × RepoTimeout` (256 × 2 s ≈ 8.5 min). Any player can fill
+  that queue, because an install with an empty hold now reaches the worker
+  (nothing is checked in the HTTP goroutine any more). Commands over the budget
+  stay in the inbox and apply on the next tick / wake-up; their ack becomes a
+  504, which is safe under this invariant. The budget only decides whether the
+  drain continues — it never shortens a command's own deadline, so a legal
+  install is never failed by a spurious `DeadlineExceeded`.
+
+#### Residual window: in-doubt commit
+
+`RepoTimeout` bounds the call, so it can also fire while `COMMIT` is already in
+flight. pgx then tears the connection down and returns
+`context.DeadlineExceeded` while Postgres commits anyway. The outcome is
+one-directional: **goods charged + `jammers` row with `built=true`, but no
+generator in RAM** — `addJammer` never ran, so it jams no jumps and no client
+sees it. It is not a free object and not lost goods; it is an object that is paid
+for but inert until the next restart, whose `LoadAll` seeds it into
+`SectorStatics.Jammers` and reconciles the two. The player sees 500.
+
+The window is small (it needs the deadline to land inside the commit) and is
+logged at ERROR — `"static install outcome in doubt"` with ship, player, sector,
+goods type and the error — so it can be reconciled by hand. Before `RepoTimeout`
+existed the window was practically absent (`Create` ran under
+`context.Background()`), but the trade was an unbounded tick stall; the bounded
+stall is worth the narrow in-doubt case.
 
 ## Not a satellite
 

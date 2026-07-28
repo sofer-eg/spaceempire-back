@@ -14,14 +14,7 @@ import (
 )
 
 type fakeSatelliteRepo struct {
-	nextID  domain.SatelliteID
-	created []domain.Satellite
 	deleted []domain.SatelliteID
-}
-
-func (f *fakeSatelliteRepo) Create(_ context.Context, s domain.Satellite) (domain.SatelliteID, error) {
-	f.created = append(f.created, s)
-	return f.nextID, nil
 }
 
 func (f *fakeSatelliteRepo) Delete(_ context.Context, id domain.SatelliteID) error {
@@ -34,36 +27,33 @@ func satRef(id int64) domain.EntityRef {
 }
 
 // TestUnit_Satellite_InstallAddsToLayoutAndCombat: the install command persists
-// a satellite (Create), drops it into the rendered layout at the ship's
-// position, and into the live combat set so lasers can target it.
+// a satellite through the transactional installer (the only install path since
+// TASK-144), drops it into the rendered layout at the ship's position, and into
+// the live combat set so lasers can target it.
 func TestUnit_Satellite_InstallAddsToLayoutAndCombat(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &fakeSatelliteRepo{nextID: 42}
-	ship := domain.Ship{ID: 1, PlayerID: 7, SectorID: testSector, Pos: domain.Vec2{X: 30, Y: -40}, Race: 2}
-	w := sector.NewWorker(0,
+	inst := &fakeStaticInstaller{stock: 1}
+	w := installerWorker(t, inst,
 		sector.Config{TickInterval: time.Second, AOIRadius: 2000},
-		clock.NewRealClock(), nil, nil,
-		map[domain.SectorID][]domain.Ship{testSector: {ship}},
-		sector.WithSatellites(repo),
-	)
+		[]domain.Ship{installerTestShip()})
 
 	reply := make(chan sector.InstallSatelliteResult, 1)
-	require.NoError(t, w.Send(testSector, sector.InstallSatelliteCommand{PlayerID: 7, ShipID: 1, Reply: reply}))
+	require.NoError(t, w.Send(testSector, sector.InstallSatelliteCommand{PlayerID: 7, ShipID: 1, GoodsType: 26, Reply: reply}))
 	w.Tick(ctx)
 
 	res := <-reply
 	require.NoError(t, res.Err)
-	require.Equal(t, domain.SatelliteID(42), res.SatelliteID)
-	require.Len(t, repo.created, 1, "install persisted via Create")
-	require.Equal(t, domain.Vec2{X: 30, Y: -40}, repo.created[0].Pos)
-	require.NotNil(t, repo.created[0].OwnerID)
-	require.Equal(t, domain.PlayerID(7), *repo.created[0].OwnerID)
+	require.NotZero(t, res.SatelliteID)
+	require.Len(t, inst.satellites, 1, "install persisted through the installer")
+	require.Equal(t, domain.Vec2{X: 30, Y: -40}, inst.satellites[0].Pos)
+	require.NotNil(t, inst.satellites[0].OwnerID)
+	require.Equal(t, domain.PlayerID(7), *inst.satellites[0].OwnerID)
 
 	snap := w.Snapshot(testSector)
 	require.Len(t, snap.Statics.Satellites, 1, "satellite in rendered layout")
 	assert.Equal(t, domain.Vec2{X: 30, Y: -40}, snap.Statics.Satellites[0].Pos)
-	_, ok := findDestructible(snap, satRef(42))
+	_, ok := findDestructible(snap, satRef(int64(res.SatelliteID)))
 	assert.True(t, ok, "satellite in live combat set")
 }
 
@@ -72,19 +62,17 @@ func TestUnit_Satellite_InstallAddsToLayoutAndCombat(t *testing.T) {
 func TestUnit_Satellite_InstallForeignShipForbidden(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	ship := domain.Ship{ID: 1, PlayerID: 7, SectorID: testSector, Pos: domain.Vec2{}}
-	w := sector.NewWorker(0,
+	inst := &fakeStaticInstaller{stock: 1}
+	w := installerWorker(t, inst,
 		sector.Config{TickInterval: time.Second, AOIRadius: 2000},
-		clock.NewRealClock(), nil, nil,
-		map[domain.SectorID][]domain.Ship{testSector: {ship}},
-		sector.WithSatellites(&fakeSatelliteRepo{}),
-	)
+		[]domain.Ship{installerTestShip()})
 
 	reply := make(chan sector.InstallSatelliteResult, 1)
-	require.NoError(t, w.Send(testSector, sector.InstallSatelliteCommand{PlayerID: 99, ShipID: 1, Reply: reply}))
+	require.NoError(t, w.Send(testSector, sector.InstallSatelliteCommand{PlayerID: 99, ShipID: 1, GoodsType: 26, Reply: reply}))
 	w.Tick(ctx)
 
 	require.ErrorIs(t, (<-reply).Err, sector.ErrForbidden)
+	assert.Empty(t, inst.satellites, "nothing installed for a foreign ship")
 	assert.Empty(t, w.Snapshot(testSector).Statics.Satellites)
 }
 
@@ -122,10 +110,8 @@ func TestUnit_Satellite_RevealsSector(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	w := newSingleSectorWorker(t,
+	w := installerWorker(t, &fakeStaticInstaller{stock: 1},
 		sector.Config{TickInterval: 5 * time.Millisecond, InboxCapacity: 64},
-		clock.NewRealClock(),
-		nil,
 		[]domain.Ship{
 			{ID: 1, PlayerID: 7, Pos: domain.Vec2{X: 0, Y: 0}, RadarRange: 100, MaxSpeed: 1},
 			{ID: 2, PlayerID: 8, Pos: domain.Vec2{X: 500, Y: 0}, RadarRange: 100, MaxSpeed: 1},

@@ -14,14 +14,7 @@ import (
 )
 
 type fakeJammerRepo struct {
-	nextID  domain.JammerID
-	created []domain.Jammer
 	deleted []domain.JammerID
-}
-
-func (f *fakeJammerRepo) Create(_ context.Context, j domain.Jammer) (domain.JammerID, error) {
-	f.created = append(f.created, j)
-	return f.nextID, nil
 }
 
 func (f *fakeJammerRepo) Delete(_ context.Context, id domain.JammerID) error {
@@ -34,36 +27,33 @@ func jammerRef(id int64) domain.EntityRef {
 }
 
 // TestUnit_Jammer_InstallAddsToLayoutAndCombat: the install command persists a
-// jammer (Create), drops it into the rendered layout at the ship's position,
-// and into the live combat set so lasers can target it.
+// jammer through the transactional installer (the only install path since
+// TASK-144), drops it into the rendered layout at the ship's position, and into
+// the live combat set so lasers can target it.
 func TestUnit_Jammer_InstallAddsToLayoutAndCombat(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &fakeJammerRepo{nextID: 42}
-	ship := domain.Ship{ID: 1, PlayerID: 7, SectorID: testSector, Pos: domain.Vec2{X: 30, Y: -40}, Race: 2}
-	w := sector.NewWorker(0,
+	inst := &fakeStaticInstaller{stock: 1}
+	w := installerWorker(t, inst,
 		sector.Config{TickInterval: time.Second, AOIRadius: 2000},
-		clock.NewRealClock(), nil, nil,
-		map[domain.SectorID][]domain.Ship{testSector: {ship}},
-		sector.WithJammers(repo),
-	)
+		[]domain.Ship{installerTestShip()})
 
 	reply := make(chan sector.InstallJammerResult, 1)
-	require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{PlayerID: 7, ShipID: 1, Reply: reply}))
+	require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{PlayerID: 7, ShipID: 1, GoodsType: 27, Reply: reply}))
 	w.Tick(ctx)
 
 	res := <-reply
 	require.NoError(t, res.Err)
-	require.Equal(t, domain.JammerID(42), res.JammerID)
-	require.Len(t, repo.created, 1, "install persisted via Create")
-	require.Equal(t, domain.Vec2{X: 30, Y: -40}, repo.created[0].Pos)
-	require.NotNil(t, repo.created[0].OwnerID)
-	require.Equal(t, domain.PlayerID(7), *repo.created[0].OwnerID)
+	require.NotZero(t, res.JammerID)
+	require.Len(t, inst.jammers, 1, "install persisted through the installer")
+	require.Equal(t, domain.Vec2{X: 30, Y: -40}, inst.jammers[0].Pos)
+	require.NotNil(t, inst.jammers[0].OwnerID)
+	require.Equal(t, domain.PlayerID(7), *inst.jammers[0].OwnerID)
 
 	snap := w.Snapshot(testSector)
 	require.Len(t, snap.Statics.Jammers, 1, "jammer in rendered layout")
 	assert.Equal(t, domain.Vec2{X: 30, Y: -40}, snap.Statics.Jammers[0].Pos)
-	_, ok := findDestructible(snap, jammerRef(42))
+	_, ok := findDestructible(snap, jammerRef(int64(res.JammerID)))
 	assert.True(t, ok, "jammer in live combat set")
 }
 
@@ -72,19 +62,17 @@ func TestUnit_Jammer_InstallAddsToLayoutAndCombat(t *testing.T) {
 func TestUnit_Jammer_InstallForeignShipForbidden(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	ship := domain.Ship{ID: 1, PlayerID: 7, SectorID: testSector, Pos: domain.Vec2{}}
-	w := sector.NewWorker(0,
+	inst := &fakeStaticInstaller{stock: 1}
+	w := installerWorker(t, inst,
 		sector.Config{TickInterval: time.Second, AOIRadius: 2000},
-		clock.NewRealClock(), nil, nil,
-		map[domain.SectorID][]domain.Ship{testSector: {ship}},
-		sector.WithJammers(&fakeJammerRepo{}),
-	)
+		[]domain.Ship{installerTestShip()})
 
 	reply := make(chan sector.InstallJammerResult, 1)
-	require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{PlayerID: 99, ShipID: 1, Reply: reply}))
+	require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{PlayerID: 99, ShipID: 1, GoodsType: 27, Reply: reply}))
 	w.Tick(ctx)
 
 	require.ErrorIs(t, (<-reply).Err, sector.ErrForbidden)
+	assert.Empty(t, inst.jammers, "nothing installed for a foreign ship")
 	assert.Empty(t, w.Snapshot(testSector).Statics.Jammers)
 }
 
@@ -94,21 +82,20 @@ func TestUnit_Jammer_InstallDockedRejected(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	docked := domain.EntityRef{Kind: domain.EntityKindStation, ID: 3}
-	ship := domain.Ship{ID: 1, PlayerID: 7, SectorID: testSector, Pos: domain.Vec2{}, Docked: &docked}
-	repo := &fakeJammerRepo{}
-	w := sector.NewWorker(0,
+	ship := installerTestShip()
+	ship.Docked = &docked
+	inst := &fakeStaticInstaller{stock: 1}
+	w := installerWorker(t, inst,
 		sector.Config{TickInterval: time.Second, AOIRadius: 2000},
-		clock.NewRealClock(), nil, nil,
-		map[domain.SectorID][]domain.Ship{testSector: {ship}},
-		sector.WithJammers(repo),
-	)
+		[]domain.Ship{ship})
 
 	reply := make(chan sector.InstallJammerResult, 1)
-	require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{PlayerID: 7, ShipID: 1, Reply: reply}))
+	require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{PlayerID: 7, ShipID: 1, GoodsType: 27, Reply: reply}))
 	w.Tick(ctx)
 
 	require.ErrorIs(t, (<-reply).Err, sector.ErrShipDocked)
-	assert.Empty(t, repo.created, "nothing persisted for a docked ship")
+	assert.Empty(t, inst.jammers, "nothing persisted for a docked ship")
+	assert.Equal(t, 0, inst.debits, "and nothing charged")
 	assert.Empty(t, w.Snapshot(testSector).Statics.Jammers)
 }
 

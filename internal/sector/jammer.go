@@ -2,6 +2,7 @@ package sector
 
 import (
 	"context"
+	"time"
 
 	"spaceempire/back/internal/domain"
 )
@@ -60,15 +61,21 @@ func (c InstallJammerCommand) apply(w *Worker, s *sectorState) {
 // on the next tick via the 10.20 L2 big-radar StaticsAdded delta, and starts
 // jamming jumps immediately (jammerActive reads statics.Jammers).
 //
-// With a staticInstaller wired (production) the goods debit and the INSERT
-// commit as one transaction — nothing is added to RAM unless both succeeded.
-// Without one we fall back to the bare repo Create (or a fallback id) and no
-// goods are accounted for; that path exists only for pure unit tests.
+// The staticInstaller commits the goods debit and the INSERT as one transaction,
+// so nothing is added to RAM unless both succeeded — and it is the only install
+// path: with none wired the install is refused (ErrInstallerUnavailable) rather
+// than handing out a free generator.
 //
 // The command apply path carries no context, so the DB call is bounded by
 // cfg.RepoTimeout instead of running under an uninterruptible background
-// context: a hung Postgres stalls the tick for at most that long (AC#3).
+// context: a hung Postgres stalls the tick for at most that long (AC#3). Its
+// real cost is charged to the drain's install budget so a queue full of installs
+// cannot chain those stalls (see Worker.installBudget).
 func (w *Worker) installJammer(s *sectorState, ship *domain.Ship, gtype domain.GoodsTypeID) (domain.JammerID, error) {
+	if w.staticInstaller == nil {
+		return 0, ErrInstallerUnavailable
+	}
+
 	owner := ship.PlayerID
 	jam := domain.Jammer{
 		OwnerID:        &owner,
@@ -85,23 +92,17 @@ func (w *Worker) installJammer(s *sectorState, ship *domain.Ship, gtype domain.G
 	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
 	defer cancel()
 
-	switch {
-	case w.staticInstaller != nil:
-		hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
-		id, err := w.staticInstaller.InstallJammer(ctx, hold, gtype, jam)
-		if err != nil {
-			return 0, err
-		}
-		jam.ID = id
-	case w.jammerRepo != nil:
-		id, err := w.jammerRepo.Create(ctx, jam)
-		if err != nil {
-			return 0, err
-		}
-		jam.ID = id
-	default:
-		jam.ID = s.allocJammerID()
+	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
+	started := time.Now()
+	id, err := w.staticInstaller.InstallJammer(ctx, hold, gtype, jam)
+	// Wall clock on purpose: the budget bounds real time parked on DB I/O, which
+	// the injected (possibly fake) clock does not model.
+	w.spendInstallBudget(time.Since(started))
+	if err != nil {
+		w.logInstallError(err, "jammer", ship, gtype)
+		return 0, err
 	}
+	jam.ID = id
 	s.addJammer(jam)
 	return jam.ID, nil
 }

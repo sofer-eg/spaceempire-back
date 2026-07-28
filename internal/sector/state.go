@@ -122,16 +122,6 @@ type sectorState struct {
 	destructiblesDirty map[domain.EntityRef]bool
 	staticsRemoved     []domain.EntityRef
 
-	// nextSatelliteID is a fallback id allocator for installed navigation
-	// satellites (phase 10.15) used only when no SatelliteRepo is wired (pure
-	// unit tests). With a repo the id is the DB-assigned primary key.
-	nextSatelliteID domain.SatelliteID
-
-	// nextJammerID is the same fallback id allocator for installed
-	// hyper-interference generators (TASK-131), used only when no JammerRepo
-	// is wired (pure unit tests).
-	nextJammerID domain.JammerID
-
 	// controllers maps each AI-driven ship in this sector to its NPC
 	// controller (phase 5.1). Built once at cold-start from the ai_state
 	// rows (buildControllers) and pruned when a controlled ship leaves the
@@ -474,18 +464,11 @@ func (s *sectorState) removeContainer(id domain.ContainerID) {
 	delete(s.containers, id)
 }
 
-// allocSatelliteID returns a fallback monotonic id, used only when no
-// SatelliteRepo is wired (pure unit tests). With a repo the SatelliteID is the
-// DB-assigned primary key returned by Create.
-func (s *sectorState) allocSatelliteID() domain.SatelliteID {
-	s.nextSatelliteID++
-	return s.nextSatelliteID
-}
-
 // addSatellite registers a freshly-installed navigation satellite (phase
 // 10.15) in both the rendered layout and the live combat set. Called from the
-// install command after the repo (when wired) returns the DB-assigned id, so
-// the next L2 big-radar diff ships it to clients and lasers can damage it.
+// install command after the installer's transaction committed and returned the
+// DB-assigned id, so the next L2 big-radar diff ships it to clients and lasers
+// can damage it.
 func (s *sectorState) addSatellite(sat domain.Satellite) {
 	s.statics.Satellites = append(s.statics.Satellites, sat)
 	d := domain.DestructibleStatic{
@@ -500,18 +483,11 @@ func (s *sectorState) addSatellite(sat domain.Satellite) {
 	s.destructibles[d.Ref] = &d
 }
 
-// allocJammerID returns a fallback monotonic id, used only when no JammerRepo
-// is wired (pure unit tests). With a repo the JammerID is the DB-assigned
-// primary key returned by Create.
-func (s *sectorState) allocJammerID() domain.JammerID {
-	s.nextJammerID++
-	return s.nextJammerID
-}
-
 // addJammer registers a freshly-installed hyper-interference generator
 // (TASK-131) in both the rendered layout and the live combat set. Called from
-// the install command after the repo (when wired) returns the DB-assigned id,
-// so the next L2 big-radar diff ships it to clients and lasers can damage it.
+// the install command after the installer's transaction committed and returned
+// the DB-assigned id, so the next L2 big-radar diff ships it to clients and
+// lasers can damage it.
 func (s *sectorState) addJammer(jam domain.Jammer) {
 	s.statics.Jammers = append(s.statics.Jammers, jam)
 	d := domain.DestructibleStatic{

@@ -79,6 +79,9 @@ func (s *Server) handleInstallSatellite(w http.ResponseWriter, r *http.Request) 
 				writeError(w, http.StatusBadRequest, "no satellite in cargo")
 			case errors.Is(res.Err, cargo.ErrGoodsTypeNotFound):
 				writeError(w, http.StatusInternalServerError, "satellite goods type missing")
+			case errors.Is(res.Err, sector.ErrInstallerUnavailable):
+				// Misconfiguration, not a player error — see install_jammer.go.
+				writeError(w, http.StatusServiceUnavailable, "install unavailable: server misconfigured")
 			default:
 				writeError(w, http.StatusInternalServerError, res.Err.Error())
 			}

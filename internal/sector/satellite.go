@@ -2,6 +2,7 @@ package sector
 
 import (
 	"context"
+	"time"
 
 	"spaceempire/back/internal/domain"
 )
@@ -56,15 +57,21 @@ func (c InstallSatelliteCommand) apply(w *Worker, s *sectorState) {
 // sector's rendered layout + live combat set. The new satellite reaches clients
 // on the next tick via the 10.20 L2 big-radar StaticsAdded delta.
 //
-// With a staticInstaller wired (production) the goods debit and the INSERT
-// commit as one transaction — nothing is added to RAM unless both succeeded.
-// Without one we fall back to the bare repo Create (or a fallback id) and no
-// goods are accounted for; that path exists only for pure unit tests.
+// The staticInstaller commits the goods debit and the INSERT as one transaction,
+// so nothing is added to RAM unless both succeeded — and it is the only install
+// path: with none wired the install is refused (ErrInstallerUnavailable) rather
+// than handing out a free satellite.
 //
 // The command apply path carries no context, so the DB call is bounded by
 // cfg.RepoTimeout instead of running under an uninterruptible background
-// context: a hung Postgres stalls the tick for at most that long (AC#3).
+// context: a hung Postgres stalls the tick for at most that long (AC#3). Its
+// real cost is charged to the drain's install budget so a queue full of installs
+// cannot chain those stalls (see Worker.installBudget).
 func (w *Worker) installSatellite(s *sectorState, ship *domain.Ship, gtype domain.GoodsTypeID) (domain.SatelliteID, error) {
+	if w.staticInstaller == nil {
+		return 0, ErrInstallerUnavailable
+	}
+
 	owner := ship.PlayerID
 	sat := domain.Satellite{
 		OwnerID:        &owner,
@@ -81,23 +88,16 @@ func (w *Worker) installSatellite(s *sectorState, ship *domain.Ship, gtype domai
 	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
 	defer cancel()
 
-	switch {
-	case w.staticInstaller != nil:
-		hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
-		id, err := w.staticInstaller.InstallSatellite(ctx, hold, gtype, sat)
-		if err != nil {
-			return 0, err
-		}
-		sat.ID = id
-	case w.satelliteRepo != nil:
-		id, err := w.satelliteRepo.Create(ctx, sat)
-		if err != nil {
-			return 0, err
-		}
-		sat.ID = id
-	default:
-		sat.ID = s.allocSatelliteID()
+	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
+	started := time.Now()
+	id, err := w.staticInstaller.InstallSatellite(ctx, hold, gtype, sat)
+	// Wall clock on purpose — see installJammer.
+	w.spendInstallBudget(time.Since(started))
+	if err != nil {
+		w.logInstallError(err, "satellite", ship, gtype)
+		return 0, err
 	}
+	sat.ID = id
 	s.addSatellite(sat)
 	return sat.ID, nil
 }

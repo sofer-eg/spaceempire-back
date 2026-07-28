@@ -53,6 +53,12 @@ var (
 	// because the ship's Energy is below the action's cost (phase 10.3.1):
 	// launching a missile spends the launcher's energy_usage. HTTP maps it to 422.
 	ErrNotEnoughEnergy = errors.New("sector: not enough energy")
+	// ErrInstallerUnavailable is reported by InstallJammerCommand /
+	// InstallSatelliteCommand when the worker has no StaticInstaller wired
+	// (TASK-144). The installer is the ONLY install path — it is what charges the
+	// goods in the same transaction as the object INSERT — so a missing one is a
+	// wiring fault, not a licence to deploy for free. HTTP maps it to 503.
+	ErrInstallerUnavailable = errors.New("sector: static installer not wired")
 )
 
 // shipEquipmentLevel returns the install level of the first module of the given

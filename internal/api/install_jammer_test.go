@@ -217,6 +217,33 @@ func TestUnit_InstallJammer_SectorRejectsKeepsCargo(t *testing.T) {
 	require.Empty(t, inst.installedGoods(), "installer never reached")
 }
 
+// TestUnit_InstallJammer_NoInstallerWired: the worker has no transactional
+// installer, so it refuses to deploy rather than build a free generator. The
+// handler must surface that as 503 (a misconfiguration the player can only
+// retry), not as a 200 with an object nobody paid for.
+func TestUnit_InstallJammer_NoInstallerWired(t *testing.T) {
+	t.Parallel()
+	w := sector.NewWorker(
+		0,
+		sector.Config{TickInterval: 10 * time.Millisecond, InboxCapacity: 64},
+		clock.NewRealClock(),
+		nil,
+		nil,
+		map[domain.SectorID][]domain.Ship{domain.SectorID(1): {missileTestShip()}},
+	)
+	srv := api.NewServer(workerRouter{w}, api.Config{
+		SnapshotInterval: 10 * time.Millisecond,
+		AckTimeout:       time.Second,
+		SectorID:         1,
+	}, nil)
+	runWorker(t, w)
+
+	rec := postInstallJammer(t, srv, 1)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	assert.Empty(t, w.Snapshot(domain.SectorID(1)).Statics.Jammers, "no free generator")
+}
+
 // TestUnit_InstallJammer_AckTimeoutChargesOnce is the TASK-144 regression test.
 // The command is accepted but the ack does not arrive in time: the handler
 // answers 504 and — crucially — performs NO cargo call of its own (it has no

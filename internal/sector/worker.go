@@ -66,22 +66,21 @@ type TowerRepo interface {
 	Delete(ctx context.Context, id domain.LaserTowerID) error
 }
 
-// SatelliteRepo persists player-deployed navigation satellites (phase 10.15):
-// Create on install (DB-assigned id), Delete on destruction so a restart does
-// not resurrect a killed satellite. Nil makes installs RAM-only (a fallback id
-// counter is used) — handy for pure unit tests. Wired via WithSatellites.
+// SatelliteRepo persists the destruction of player-deployed navigation
+// satellites (phase 10.15): Delete on death so a restart does not resurrect a
+// killed satellite. Nil makes a kill RAM-only — handy for pure unit tests. Wired
+// via WithSatellites. Installs do NOT go through here: they run through
+// StaticInstaller, which creates the row in the same transaction as the goods
+// debit (TASK-144).
 type SatelliteRepo interface {
-	Create(ctx context.Context, s domain.Satellite) (domain.SatelliteID, error)
 	Delete(ctx context.Context, id domain.SatelliteID) error
 }
 
-// JammerRepo persists player-deployed hyper-interference generators
-// (TASK-131): Create on install (DB-assigned id), Delete on destruction so a
-// restart does not resurrect a killed generator. Nil makes installs RAM-only (a
-// fallback id counter is used) — handy for pure unit tests. Wired via
-// WithJammers.
+// JammerRepo persists the destruction of player-deployed hyper-interference
+// generators (TASK-131): Delete on death so a restart does not resurrect a
+// killed generator. Nil makes a kill RAM-only — handy for pure unit tests. Wired
+// via WithJammers. Installs go through StaticInstaller, not here (TASK-144).
 type JammerRepo interface {
-	Create(ctx context.Context, j domain.Jammer) (domain.JammerID, error)
 	Delete(ctx context.Context, id domain.JammerID) error
 }
 
@@ -131,8 +130,13 @@ type MinerLogistics interface {
 // together, so a lost ack can never yield a free jammer/satellite and a failed
 // insert can never eat the goods. owner is the installing ship's cargo hold and
 // gtype the goods id the command carries (the sector package stays free of the
-// goods catalog). Wired via WithStaticInstaller; nil falls back to the plain
-// *Repo.Create path (no goods accounting), which is what pure unit tests use.
+// goods catalog). Wired via WithStaticInstaller.
+//
+// This is the ONLY install path. A worker without one refuses install commands
+// with ErrInstallerUnavailable rather than creating the object for free: the
+// installer is what makes the player pay, so losing it in a refactor must break
+// loudly instead of handing out ≈1.13M cr generators.
+//
 // The real implementation lives in app/ over cargo + the object repositories,
 // keeping the sector package free of cargo dependencies (mirrors
 // MinerLogistics).
@@ -225,21 +229,32 @@ type Worker struct {
 	// (a killed tower is restored on restart). Wired via WithTowerPersistence.
 	towerRepo TowerRepo
 
-	// satelliteRepo persists navigation-satellite install/destruction (phase
-	// 10.15). Nil makes installs RAM-only (fallback id counter). Wired via
-	// WithSatellites.
+	// satelliteRepo persists navigation-satellite destruction (phase 10.15).
+	// Nil makes a kill RAM-only. Wired via WithSatellites.
 	satelliteRepo SatelliteRepo
 
-	// jammerRepo persists hyper-interference-generator install/destruction
-	// (TASK-131). Nil makes installs RAM-only (fallback id counter). Wired via
-	// WithJammers.
+	// jammerRepo persists hyper-interference-generator destruction (TASK-131).
+	// Nil makes a kill RAM-only. Wired via WithJammers.
 	jammerRepo JammerRepo
 
 	// staticInstaller charges the goods and creates the object in one
-	// transaction on the install path (TASK-144). Nil falls back to the plain
-	// satelliteRepo/jammerRepo Create (no goods accounting) — pure unit tests.
-	// Wired via WithStaticInstaller.
+	// transaction — the only install path (TASK-144). Nil makes install
+	// commands fail with ErrInstallerUnavailable. Wired via WithStaticInstaller.
 	staticInstaller StaticInstaller
+
+	// installBudget is the DB time an install command may still spend in the
+	// current inbox drain (TASK-144 review). Config.RepoTimeout bounds ONE
+	// install; without a per-drain budget a full inbox of installs against a
+	// hung Postgres would park the Run goroutine — and with it every sector this
+	// worker owns — for InboxCapacity × RepoTimeout (256 × 2 s ≈ 8.5 min), which
+	// any player can trigger since an install with an empty hold now reaches the
+	// worker. Reset at the start of every drain; charged only by the install
+	// commands' DB calls, so the rest of the hot path pays nothing. It gates
+	// whether the drain continues, never the per-command deadline: clamping that
+	// would fail a legal install with a spurious DeadlineExceeded. Worst case is
+	// therefore ~2 × RepoTimeout for one drain, and the commands left in the
+	// inbox apply on the next wake-up.
+	installBudget time.Duration
 
 	// asteroidRepo persists minable asteroids (phase 5.4). Nil disables
 	// persistence (asteroids still mine down in RAM). Wired via
@@ -455,20 +470,20 @@ func WithTowerPersistence(repo TowerRepo) Option {
 	}
 }
 
-// WithSatellites enables player-deployed navigation satellites (phase 10.15):
-// the install command persists each new satellite (Create) and killStatic
-// deletes a destroyed one. A nil repo keeps installs RAM-only (fallback id
-// counter), used by pure unit tests.
+// WithSatellites persists the destruction of player-deployed navigation
+// satellites (phase 10.15): killStatic deletes the row so a restart does not
+// resurrect it. A nil repo keeps the kill RAM-only, used by pure unit tests.
+// Installs are handled by WithStaticInstaller, not here.
 func WithSatellites(repo SatelliteRepo) Option {
 	return func(w *Worker) {
 		w.satelliteRepo = repo
 	}
 }
 
-// WithJammers enables player-deployed hyper-interference generators
-// (TASK-131): the install command persists each new generator (Create) and
-// killStatic deletes a destroyed one. A nil repo keeps installs RAM-only
-// (fallback id counter), used by pure unit tests.
+// WithJammers persists the destruction of player-deployed hyper-interference
+// generators (TASK-131): killStatic deletes the row so a restart does not
+// resurrect it. A nil repo keeps the kill RAM-only, used by pure unit tests.
+// Installs are handled by WithStaticInstaller, not here.
 func WithJammers(repo JammerRepo) Option {
 	return func(w *Worker) {
 		w.jammerRepo = repo
@@ -477,8 +492,8 @@ func WithJammers(repo JammerRepo) Option {
 
 // WithStaticInstaller injects the transactional installer the install-jammer /
 // install-satellite commands use to charge the goods and create the object
-// together (TASK-144). Nil keeps the plain *Repo.Create path, which does no
-// goods accounting — used by pure unit tests.
+// together (TASK-144). It is the only install path: without it those commands
+// fail with ErrInstallerUnavailable.
 func WithStaticInstaller(i StaticInstaller) Option {
 	return func(w *Worker) {
 		w.staticInstaller = i
@@ -692,8 +707,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			// goroutine (the one-writer-per-sector invariant holds); the change
 			// is published on the next tick's snapshot, exactly as a
 			// start-of-tick drain would have.
-			w.applyEnvelope(env)
-			w.drainInbox()
+			w.applyAndDrain(env)
 		}
 	}
 }
@@ -976,7 +990,34 @@ func (w *Worker) nextSubID() uint64 {
 // the only producer and it validates the sector id beforehand, so the only
 // way to land here is a race with sector ownership changes — not supported
 // yet, but we don't crash).
+//
+// The drain carries an installBudget (see the Worker field): install commands
+// charge their DB time against it and the drain stops once it is spent, leaving
+// the remaining envelopes queued for the next tick / wake-up.
 func (w *Worker) drainInbox() {
+	w.installBudget = w.cfg.RepoTimeout
+	w.drainQueued()
+}
+
+// applyAndDrain runs one envelope that already woke Run up and then drains
+// whatever else is queued, under a single shared installBudget — the woken
+// envelope may itself be an install, so it must be inside the budget rather than
+// ahead of it.
+func (w *Worker) applyAndDrain(env envelope) {
+	w.installBudget = w.cfg.RepoTimeout
+	w.applyEnvelope(env)
+	w.drainQueued()
+}
+
+// drainQueued is the drain loop proper: it applies queued envelopes and stops as
+// soon as the current drain's install budget is spent. A spent budget means the
+// DB is dragging (or hung), so we return to Run instead of paying another
+// RepoTimeout per queued install and stalling every sector this worker owns.
+//
+// The budget is checked AFTER applying, never before: it decides whether to
+// continue, so every drain makes progress on at least one command no matter how
+// small (or zero) RepoTimeout is.
+func (w *Worker) drainQueued() {
 	for {
 		select {
 		case env := <-w.inbox:
@@ -984,7 +1025,42 @@ func (w *Worker) drainInbox() {
 		default:
 			return
 		}
+		if w.installBudget <= 0 {
+			w.logger.Warn("inbox drain stopped on install budget",
+				"queued", len(w.inbox), "repo_timeout", w.cfg.RepoTimeout)
+			return
+		}
 	}
+}
+
+// spendInstallBudget charges the current drain for an install's DB time. Only
+// the install commands call it — every other command does no I/O, so the budget
+// costs the hot path nothing.
+func (w *Worker) spendInstallBudget(d time.Duration) {
+	w.installBudget -= d
+}
+
+// logInstallError records a failed jammer/satellite install (TASK-144). A
+// deadline/cancellation is logged at ERROR with everything needed to reconcile
+// it by hand, because it is the one outcome the atomicity invariant cannot
+// cover: if cfg.RepoTimeout fires while COMMIT is already in flight, pgx tears
+// the connection down and reports DeadlineExceeded while Postgres commits
+// anyway. The goods are then gone and the row exists with built=true, but
+// addJammer/addSatellite never ran — the object is missing from RAM (jamming
+// nothing, invisible to clients) until a restart's LoadAll picks it up. Every
+// other error means the transaction rolled back and nothing happened, so it is
+// logged at WARN.
+func (w *Worker) logInstallError(err error, kind string, ship *domain.Ship, gtype domain.GoodsTypeID) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		w.logger.Error("static install outcome in doubt: goods may be charged for an object missing from RAM until restart",
+			"err", err, "object", kind, "ship", int64(ship.ID), "player", int64(ship.PlayerID),
+			"sector", int64(ship.SectorID), "goods_type", int64(gtype),
+			"repo_timeout", w.cfg.RepoTimeout)
+		return
+	}
+	w.logger.Warn("static install failed",
+		"err", err, "object", kind, "ship", int64(ship.ID), "player", int64(ship.PlayerID),
+		"sector", int64(ship.SectorID), "goods_type", int64(gtype))
 }
 
 // applyEnvelope routes one queued command to its sector. Envelopes for unknown

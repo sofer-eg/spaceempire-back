@@ -82,6 +82,11 @@ func (s *Server) handleInstallJammer(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "no jammer in cargo")
 			case errors.Is(res.Err, cargo.ErrGoodsTypeNotFound):
 				writeError(w, http.StatusInternalServerError, "jammer goods type missing")
+			case errors.Is(res.Err, sector.ErrInstallerUnavailable):
+				// Misconfiguration, not a player error: the worker has no
+				// transactional installer, so it refuses to deploy rather than
+				// build one for free. 503 — retrying may work after a fix.
+				writeError(w, http.StatusServiceUnavailable, "install unavailable: server misconfigured")
 			default:
 				writeError(w, http.StatusInternalServerError, res.Err.Error())
 			}

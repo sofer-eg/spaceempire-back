@@ -3,6 +3,7 @@ package sector_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,6 +20,14 @@ import (
 // transaction back (constraint violation, lost connection, commit error).
 var errInstallTxFailed = errors.New("install tx failed")
 
+// errNoDeadline is reported by the fake when the worker calls it with a context
+// that carries no live deadline. Config.RepoTimeout must bound every install:
+// without a deadline a hung Postgres parks the tick goroutine forever, and with
+// the withDefaults branch deleted RepoTimeout is 0 — the deadline is then already
+// blown before the call even starts. Asserting it inside the fake is what makes
+// removing that default fail the suite instead of silently 500-ing in production.
+var errNoDeadline = errors.New("install ctx carries no live deadline")
+
 // fakeStaticInstaller is an in-memory sector.StaticInstaller (TASK-144): it
 // models the app-side adapter's single transaction — the cargo debit and the
 // object INSERT either both happen or neither does. stock is the installing
@@ -26,8 +35,11 @@ var errInstallTxFailed = errors.New("install tx failed")
 // modes (hung DB, rolled-back tx).
 type fakeStaticInstaller struct {
 	stock int64
-	// debits counts successful cargo debits, jammers/satellites the objects
-	// actually created. Under the atomicity invariant they must stay equal.
+	// calls counts every reached install (including the ones that end up
+	// failing), debits the successful cargo debits, jammers/satellites the
+	// objects actually created. Under the atomicity invariant debits and objects
+	// stay equal.
+	calls      int
 	debits     int
 	jammers    []domain.Jammer
 	satellites []domain.Satellite
@@ -56,6 +68,20 @@ func (f *fakeStaticInstaller) consume(owner domain.EntityRef, gtype domain.Goods
 	return nil
 }
 
+// enter records the call and checks the contract the worker owes the installer:
+// the context must carry a deadline (Config.RepoTimeout) and it must not have
+// expired yet.
+func (f *fakeStaticInstaller) enter(ctx context.Context) error {
+	f.calls++
+	if _, ok := ctx.Deadline(); !ok {
+		return fmt.Errorf("%w: none set", errNoDeadline)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: already expired (%w)", errNoDeadline, err)
+	}
+	return nil
+}
+
 func (f *fakeStaticInstaller) wait(ctx context.Context) error {
 	if !f.blockUntilCancel {
 		return nil
@@ -65,6 +91,9 @@ func (f *fakeStaticInstaller) wait(ctx context.Context) error {
 }
 
 func (f *fakeStaticInstaller) InstallJammer(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, j domain.Jammer) (domain.JammerID, error) {
+	if err := f.enter(ctx); err != nil {
+		return 0, err
+	}
 	if err := f.wait(ctx); err != nil {
 		return 0, err
 	}
@@ -78,6 +107,9 @@ func (f *fakeStaticInstaller) InstallJammer(ctx context.Context, owner domain.En
 }
 
 func (f *fakeStaticInstaller) InstallSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, s domain.Satellite) (domain.SatelliteID, error) {
+	if err := f.enter(ctx); err != nil {
+		return 0, err
+	}
 	if err := f.wait(ctx); err != nil {
 		return 0, err
 	}
@@ -249,6 +281,109 @@ func TestUnit_InstallJammer_HungDBBoundedByRepoTimeout(t *testing.T) {
 
 	require.ErrorIs(t, (<-reply).Err, context.DeadlineExceeded)
 	assert.Empty(t, w.Snapshot(testSector).Statics.Jammers)
+}
+
+// noInstallerWorker builds a worker with NO StaticInstaller wired — the
+// misconfiguration the two tests below pin down.
+func noInstallerWorker(t *testing.T) *sector.Worker {
+	t.Helper()
+	return sector.NewWorker(0,
+		sector.Config{TickInterval: time.Second, AOIRadius: 2000},
+		clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {installerTestShip()}},
+	)
+}
+
+// TestUnit_InstallJammer_WithoutInstallerRefused: a worker built without
+// WithStaticInstaller must refuse the install instead of creating the object for
+// free. The installer is the only thing that charges the player, so a refactor
+// that drops the wiring has to break loudly — before TASK-144's review this path
+// silently ignored GoodsType and deployed a ≈1.13M cr generator for nothing.
+func TestUnit_InstallJammer_WithoutInstallerRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	w := noInstallerWorker(t)
+
+	reply := make(chan sector.InstallJammerResult, 1)
+	require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{
+		PlayerID: 7, ShipID: 1, GoodsType: 27, Reply: reply,
+	}))
+	w.Tick(ctx)
+
+	res := <-reply
+	require.ErrorIs(t, res.Err, sector.ErrInstallerUnavailable)
+	assert.Zero(t, res.JammerID)
+	snap := w.Snapshot(testSector)
+	assert.Empty(t, snap.Statics.Jammers, "no free generator")
+	assert.Empty(t, snap.Destructibles, "nothing in the combat set either")
+}
+
+// TestUnit_InstallSatellite_WithoutInstallerRefused mirrors the jammer case.
+func TestUnit_InstallSatellite_WithoutInstallerRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	w := noInstallerWorker(t)
+
+	reply := make(chan sector.InstallSatelliteResult, 1)
+	require.NoError(t, w.Send(testSector, sector.InstallSatelliteCommand{
+		PlayerID: 7, ShipID: 1, GoodsType: 26, Reply: reply,
+	}))
+	w.Tick(ctx)
+
+	res := <-reply
+	require.ErrorIs(t, res.Err, sector.ErrInstallerUnavailable)
+	assert.Zero(t, res.SatelliteID)
+	snap := w.Snapshot(testSector)
+	assert.Empty(t, snap.Statics.Satellites, "no free satellite")
+	assert.Empty(t, snap.Destructibles, "nothing in the combat set either")
+}
+
+// TestUnit_Install_DrainBudgetBoundsOneDrain: RepoTimeout bounds ONE install, so
+// without a per-drain budget a queue of installs against a hung Postgres would
+// stall the Run goroutine (and every sector this worker owns) for
+// InboxCapacity × RepoTimeout. Any player can fill that queue — an install with
+// an empty hold now reaches the worker.
+//
+// With the budget, one drain spends at most ~RepoTimeout of DB time: the first
+// hung install exhausts it and the rest stay in the inbox for the next tick. The
+// test proves both halves — the drain returns far sooner than N × RepoTimeout,
+// and the queued remainder still applies once the DB answers again.
+func TestUnit_Install_DrainBudgetBoundsOneDrain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const (
+		queued      = 10
+		repoTimeout = 50 * time.Millisecond
+	)
+	inst := &fakeStaticInstaller{stock: queued, blockUntilCancel: true}
+	w := installerWorker(t, inst,
+		sector.Config{
+			TickInterval: time.Second, AOIRadius: 2000,
+			InboxCapacity: 64, RepoTimeout: repoTimeout,
+		},
+		[]domain.Ship{installerTestShip()})
+
+	for i := 0; i < queued; i++ {
+		require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{
+			PlayerID: 7, ShipID: 1, GoodsType: 27, Reply: nil,
+		}))
+	}
+
+	started := time.Now()
+	w.Tick(ctx)
+	elapsed := time.Since(started)
+
+	assert.Less(t, elapsed, queued*repoTimeout/2,
+		"one drain must not chain a RepoTimeout stall per queued install")
+	assert.Equal(t, 1, inst.calls, "the budget stops the drain after the first stall")
+
+	// The DB answers again: the commands the budget left queued apply on the next
+	// tick, so nothing was dropped — only deferred.
+	inst.blockUntilCancel = false
+	w.Tick(ctx)
+	assert.Equal(t, queued, inst.calls, "the remainder was still in the inbox")
+	assert.Len(t, w.Snapshot(testSector).Statics.Jammers, queued-1,
+		"every command but the stalled one deployed")
 }
 
 // TestUnit_InstallJammer_GateRejectionSkipsCargo: a rejected gate (no such ship)

@@ -128,9 +128,17 @@ func buildPatch(prev, curr map[domain.ShipID]domain.Ship, tick uint64) Patch {
 // shipEqual compares the fields the broadcaster considers observable.
 // MaxSpeed/HP/Shield/Vel/Facing/Energy are included so the snapshot
 // still drives the client in later phases (combat, etc.); add fields
-// here as they become visible. Acceleration/TurnRate are class
-// characteristics fixed at Create — never change between ticks in the
-// current model.
+// here as they become visible.
+//
+// Fit-derived stats — Acceleration, TurnRate, MaxShield, MaxEnergy,
+// RadarRange — are deliberately not compared directly: every mutator rewrites
+// them in the same breath as ship.Equipment (UpdateShipEquipmentCommand.apply,
+// equipmentRefitter.Refit), so equipmentEqual below already catches the change
+// transitively. Race is covered the same way via PlayerID — its only mutator,
+// changeShipOwner, writes both. MaxHP has no mutator at all today. (Until
+// TASK-100.3.15/16 this note claimed Acceleration/TurnRate were fixed at Create;
+// the up_engine/up_rudder upgrades made that false, the conclusion holds for a
+// different reason.)
 //
 // Takes pointers: domain.Ship is ~400 B and this runs once per
 // (subscriber × visible ship) per tick, on values the caller already holds.
@@ -250,6 +258,22 @@ func courseEqual(a, b *domain.Course) bool {
 			entityRefPtrEqual(a.Approach, b.Approach)
 	}
 }
+
+// Compile-time guard for courseEqual: converting a Course to this structural
+// twin is legal only while the two have identical fields, so the conversion
+// stops compiling the moment domain.Course gains, drops, renames, retypes or
+// reorders a field. (A positional composite literal would guard the same way
+// but trips go vet's `composites` check on an imported type.)
+//
+// If it broke your build, do not just patch the twin — first decide whether the
+// new field is observable to the SPA and, if it is, compare it in courseEqual
+// above. Otherwise TASK-143 repeats one level deeper: a Course field silently
+// missing from the WS diff, noticed only as a stale «МАРШРУТ» on a live game.
+var _ = struct {
+	Sector   domain.SectorID
+	Pos      domain.Vec2
+	Approach *domain.EntityRef
+}(domain.Course{})
 
 // asteroidIDPtrEqual reports value equality of two *AsteroidID pointers,
 // treating two nils as equal. Used so a mining-state change (phase 10.3.21)

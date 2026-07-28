@@ -196,6 +196,22 @@ func TestUnit_BuildPatch_DetectsFinalTargetChange(t *testing.T) {
 	require.NotNil(t, swapped.Updated[0].FinalTarget.Approach)
 	assert.Equal(t, station6, *swapped.Updated[0].FinalTarget.Approach,
 		"the patch must carry the NEW approach ref")
+
+	// Retarget within the SAME sector: Pos is the only thing that moved. No live
+	// defect today (SetCourseCommand also moves Target/CurrentTargetRef, and the
+	// SPA only renders finalTarget.sectorID), but without this block the Pos term
+	// in courseEqual has no regression gate and can be dropped unnoticed.
+	movedInSector := parked
+	movedInSector.FinalTarget = &domain.Course{Sector: 7, Pos: domain.Vec2{X: 300, Y: 400}}
+	moved := buildPatch(
+		map[domain.ShipID]domain.Ship{1: armedShip},
+		map[domain.ShipID]domain.Ship{1: movedInSector},
+		1,
+	)
+	require.Len(t, moved.Updated, 1, "changing only the course position must surface the ship")
+	require.NotNil(t, moved.Updated[0].FinalTarget)
+	assert.Equal(t, domain.Vec2{X: 300, Y: 400}, moved.Updated[0].FinalTarget.Pos,
+		"the patch must carry the NEW course position")
 }
 
 // TestUnit_BuildPatch_FinalTargetApproachRecreatedIsNoChurn is the anti-churn

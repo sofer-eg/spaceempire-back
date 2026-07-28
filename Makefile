@@ -1,4 +1,4 @@
-.PHONY: run test test-unit test-integration bench lint tidy build release \
+.PHONY: run test test-unit test-integration test-clean bench lint tidy build release \
 	db-up db-down db-psql migrate-up migrate-down migrate-status \
 	tools
 
@@ -21,6 +21,23 @@ MIGRATIONS  := ./migrations
 # "Integration tests" and docs/tasks/phase7-06-testcontainers-ryuk.md.
 RYUK_DISABLED ?= true
 
+# TEST_P caps how many package binaries `go test` runs at once. The default is
+# the core count, which saturates an 8-core dev box: every integration package
+# starts its own Postgres container under -race, and the contention made whole
+# packages miss their container-start deadline (TASK-153). Override on a bigger
+# CI runner with `make test-integration TEST_P=8`.
+TEST_P ?= 2
+
+# TEST_TIMEOUT is the per-package budget. With one container per package plus
+# template cloning the slowest package finishes well inside it; the limit is
+# kept generous so that it only ever fires on a genuine hang.
+TEST_TIMEOUT ?= 180s
+
+# TEST_LABEL is stamped on every container started by internal/pkg/database/testdb
+# (see testdb.LabelKey/LabelValue). test-clean filters strictly by it, so
+# unrelated local databases are never in scope.
+TEST_LABEL ?= spaceempire.test=true
+
 run:
 	go run ./cmd/starwind
 
@@ -42,14 +59,29 @@ release:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o $(RELEASE_BINARY) ./cmd/starwind
 	@echo "built $(RELEASE_BINARY) (frontend embedded)"
 
+# test / test-integration always run test-clean afterwards, keeping the exit
+# code of the test run itself: a binary killed by -timeout panics and skips
+# every t.Cleanup and TestMain, which is how containers used to pile up.
 test:
-	TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) go test -race ./...
+	@TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) go test -race -p $(TEST_P) ./...; \
+		status=$$?; $(MAKE) --no-print-directory test-clean; exit $$status
 
 test-unit:
-	go test -run '^TestUnit_' -race ./...
+	go test -run '^TestUnit_' -race -p $(TEST_P) ./...
 
+# -count=1 disables the build cache: these tests depend on state Go does not
+# key on (docker daemon, image cache, container startup), so a cached PASS can
+# report green for an environment that no longer works.
 test-integration:
-	TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) go test -run '^TestIntegration_' -race -timeout 180s ./...
+	@TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) go test -run '^TestIntegration_' -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
+		status=$$?; $(MAKE) --no-print-directory test-clean; exit $$status
+
+# test-clean removes containers left behind by a run that was killed before its
+# cleanup could execute. Matched strictly by TEST_LABEL — never by image name,
+# so local developer databases are out of scope by construction.
+test-clean:
+	@ids=$$(docker ps -aq --filter "label=$(TEST_LABEL)"); \
+	if [ -n "$$ids" ]; then echo "removing leaked test containers:"; docker rm -f $$ids; fi
 
 bench:
 	go test -run '^$$' -bench=. -benchmem ./...

@@ -21,6 +21,7 @@ make build               # build bin/starwind
 make lint                # golangci-lint
 make test-unit           # unit tests (-race), TestUnit_*
 make test-integration    # integration tests (-race), TestIntegration_*
+make test-clean          # reap test containers left by a killed run
 make migrate-up          # apply migrations to PG_DSN
 make migrate-status      # show migration state
 ```
@@ -39,6 +40,54 @@ disabled**:
 make test-integration            # TESTCONTAINERS_RYUK_DISABLED=true (default)
 ```
 
+### How the fixtures work
+
+`internal/pkg/database/testdb` starts **one container per test binary** (i.e.
+per package), lazily on the first `testdb.Setup` call. The goose migrations run
+once, into a template database; each `Setup` then clones it with
+`CREATE DATABASE ... TEMPLATE`, which Postgres serves as a file copy — tens of
+milliseconds, against ~500ms to replay the migrations and ~2s to start a
+container. Every test still gets its own database, so isolation and
+`t.Parallel()` are unchanged, and `Setup(t) *pgxpool.Pool` is unchanged for
+callers.
+
+Packages that call `testdb.Setup` must wire the shared container's teardown:
+
+```go
+func TestMain(m *testing.M) { testdb.Main(m) }
+```
+
+`make test-integration` also caps how many package binaries run at once
+(`TEST_P`, default 2). The core-count default saturated an 8-core box — every
+integration package racing to start its own Postgres under `-race`, with whole
+packages then missing their container-start deadline. Raise it on a bigger
+runner:
+
+```bash
+make test-integration TEST_P=8
+```
+
+The per-package budget is `TEST_TIMEOUT` (default 180s), comfortably above the
+slowest package, so it only fires on a genuine hang. The target also passes
+`-count=1`: these tests depend on state Go does not key its build cache on (the
+docker daemon, the image cache, container startup), so a cached `ok` can report
+green for an environment that no longer works.
+
+### Leaked containers
+
+A binary killed by `go test -timeout` panics and skips every `t.Cleanup` **and**
+`TestMain`, so its container survives the run. `make test` and
+`make test-integration` therefore always finish by running `make test-clean`,
+keeping the test run's own exit code. It can also be run on its own:
+
+```bash
+make test-clean
+```
+
+Cleanup matches strictly on the `spaceempire.test=true` label that `testdb`
+stamps on the containers it starts (`testdb.LabelKey`/`LabelValue`) — never on
+the image name, so unrelated local databases are out of scope by construction.
+
 ### Why Ryuk is disabled
 
 Testcontainers normally starts a sidecar `testcontainers/ryuk` container that
@@ -53,9 +102,9 @@ Get "https://registry-1.docker.io/v2/": EOF
 
 `postgres:16-alpine` is already cached locally, so the actual test container
 starts fine — only the reaper bootstrap fails. Disabling Ryuk
-(`TESTCONTAINERS_RYUK_DISABLED=true`) skips it. Containers are still torn down
-by the test's own `t.Cleanup`/`Terminate`; Ryuk is only a backstop for crashed
-runs.
+(`TESTCONTAINERS_RYUK_DISABLED=true`) skips it. Containers are torn down by
+`testdb.Main` at the end of each package, with `make test-clean` as the backstop
+for runs that were killed outright (see above); Ryuk is not required either way.
 
 ### CI / hosts with registry access
 

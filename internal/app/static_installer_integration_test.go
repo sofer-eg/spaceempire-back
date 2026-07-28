@@ -51,11 +51,10 @@ const (
 // Called ONCE for the whole group (the cases below are sequential subtests, not
 // top-level tests). testdb.Setup starts a container and runs every migration, so
 // a fixture per case meant four container starts and four goose runs in this
-// package — enough load to starve
-// TestIntegration_App_StartsAndShutsDownGracefully, which allows itself only 2 s
-// to answer /healthz. One shared container keeps that test honest and makes this
-// group ~4x faster; resetInstallerTables gives each subtest the clean slate the
-// absolute row counts need.
+// package — load that also slows the cold start
+// TestIntegration_App_StartsAndShutsDownGracefully waits out (see healthzBudget
+// there). One shared container makes this group ~4x faster; resetInstallerTables
+// gives each subtest the clean slate the absolute row counts need.
 func installerFixture(t *testing.T) (*pgxpool.Pool, staticInstaller, domain.EntityRef, domain.PlayerID) {
 	t.Helper()
 

@@ -496,12 +496,34 @@ func TestUnit_Torpedo_SnapshotCarriesFlightAndImpacts(t *testing.T) {
 	require.True(t, snap.TorpedoImpacts[0].Hit)
 	require.Equal(t, float64(70), snap.TorpedoImpacts[0].SplashRadius, "the blast radius the renderer needs")
 
-	// The impact slice is a copy: the next tick clears the worker's own buffer
-	// without blanking a snapshot a consumer is still holding.
+	// The published impact slice is a COPY, not a window onto the worker's
+	// per-tick buffer. clearTorpedoImpacts() truncates with [:0] and the NEXT
+	// impact appends straight back into the same backing array, so an aliased
+	// snapshot silently mutates under its holder while keeping len()==1 — only
+	// asserting the VALUE a held snapshot still carries catches that.
 	held := snap
 	w.Tick(ctx)
-	require.Len(t, held.TorpedoImpacts, 1, "the published snapshot is isolated from the worker's per-tick buffer")
 	require.Empty(t, w.Snapshot(testSector).TorpedoImpacts, "impacts are one-frame")
+
+	// Second detonation, several ticks later: it must land in the new snapshot
+	// and leave the earlier, still-held one alone.
+	second := sendTorpedo(t, w, sector.LaunchTorpedoCommand{
+		PlayerID: 100, ShipID: 1, Class: 3,
+		Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+	})
+	require.NoError(t, second.Err)
+	require.NotEqual(t, res.TorpedoID, second.TorpedoID, "a second, distinguishable torpedo")
+	for i := 0; i < 30 && repo.liveCount() > 0; i++ {
+		w.Tick(ctx)
+	}
+	fresh := w.Snapshot(testSector)
+	require.Len(t, fresh.TorpedoImpacts, 1)
+	require.Equal(t, second.TorpedoID, fresh.TorpedoImpacts[0].TorpedoID,
+		"the second detonation is the one in the fresh snapshot")
+
+	require.Len(t, held.TorpedoImpacts, 1)
+	require.Equal(t, res.TorpedoID, held.TorpedoImpacts[0].TorpedoID,
+		"the earlier held snapshot must NOT be rewritten by a later tick's impact")
 }
 
 // TestUnit_LaunchTorpedo_DeadOrMissingTargetGate: a launch at a dead or

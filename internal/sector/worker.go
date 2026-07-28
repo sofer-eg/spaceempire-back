@@ -1182,9 +1182,12 @@ func (w *Worker) applyEnvelope(env envelope) {
 // at the end of each per-sector tick. The Snapshot's Ships slice is
 // independent of worker state, so consumers may mutate it freely.
 //
-// LaserEffects are copied (not aliased) so the worker can clear its own
-// slice on the next tick without invalidating subscribers. Missiles and
-// MissileImpacts follow the same isolation contract.
+// Every per-tick effect buffer — LaserEffects, MissileImpacts, DroneImpacts,
+// TorpedoImpacts — is copied, not aliased, so the worker can clear its own
+// slices on the next tick without invalidating subscribers. The clear
+// truncates with [:0] and the next impact appends back into the same backing
+// array, so an aliased snapshot would be silently rewritten under its holder.
+// Missiles, Drones and Torpedos follow the same isolation contract.
 func publishSnapshotFor(s *sectorState, elapsed time.Duration) {
 	out, in := s.handoffCopies()
 	var effects []combat.LaserBeam

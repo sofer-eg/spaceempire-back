@@ -57,6 +57,11 @@ override TEST_RUN_LABEL := spaceempire.test.run
 # %N is a GNU date extension — on BSD/macOS it prints literally and the id
 # degrades to one-per-second. Harmless: colliding ids only take cleanup back to
 # the old behaviour of sweeping a concurrent run.
+#
+# The id is per make *invocation*, not per target, so `make -jN test
+# test-integration` gives both targets the same one and whichever finishes first
+# reaps the other's containers. Running them as separate invocations (the usual
+# way, and what CI does) is unaffected.
 TEST_RUN_ID := $(shell date +%s%N)
 
 # REAP is the cleanup both sweeps go through; it takes a label filter and the
@@ -102,7 +107,7 @@ release:
 test:
 	@SE_TEST_RUN_ID=$(TEST_RUN_ID) TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) \
 		go test -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
-		status=$$?; $(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)" $$status; exit $$status
+		status=$$?; $(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)" $$status || echo "warning: container cleanup did not finish; run 'make test-clean'" >&2; exit $$status
 
 test-unit:
 	go test -run '^TestUnit_' -race -p $(TEST_P) ./...
@@ -110,7 +115,7 @@ test-unit:
 test-integration:
 	@SE_TEST_RUN_ID=$(TEST_RUN_ID) TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) \
 		go test -run '^TestIntegration_' -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
-		status=$$?; $(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)" $$status; exit $$status
+		status=$$?; $(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)" $$status || echo "warning: container cleanup did not finish; run 'make test-clean'" >&2; exit $$status
 
 # test-clean-run reaps one run's containers: the pass that test / test-integration
 # run inline, exposed as a target so a past run can be reaped by hand with

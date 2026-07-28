@@ -106,13 +106,17 @@ make test-clean
 
 It is manual by design: it is not safe to fire while another run is in flight.
 
+A container from a `go test` run that bypassed make carries no run id, so only
+this manual sweep can reap it — by construction there is no invocation for an
+automatic pass to belong to.
+
 Both match strictly on labels `testdb` stamps on the containers it starts
-(`testdb.LabelKey`/`LabelValue`, `testdb.RunLabelKey`) — never on the image name,
-so unrelated local databases are out of scope by construction. The Makefile's
-filter strings are checked against those Go constants by
-`TestUnit_TestDB_MakefileFiltersMatchLabels`, because drift here does not fail
-anything: the filters would simply stop matching and the leaks would come back
-silently.
+(`testdb.LabelKey`/`LabelValue`, `testdb.RunLabelKey`) — never on the image name.
+The script refuses any other filter, so scope is decided where `docker rm -f`
+actually runs rather than by its caller. The Makefile's own wiring is checked
+against those Go constants by `TestUnit_TestDB_MakefileReapsWhatItStamps`,
+because drift here does not fail anything: the filters would simply stop
+matching and the leaks would come back silently.
 
 ### Why Ryuk is disabled
 

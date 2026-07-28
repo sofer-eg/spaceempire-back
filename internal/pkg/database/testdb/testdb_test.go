@@ -99,21 +99,37 @@ func dryRun(t *testing.T, args ...string) string {
 func TestUnit_TestDB_MakefileReapsWhatItStamps(t *testing.T) {
 	t.Parallel()
 
-	t.Run("integration run stamps and reaps the same id", func(t *testing.T) {
-		t.Parallel()
-		// Deliberately no TEST_RUN_ID on the command line: command-line
-		// variables propagate to sub-makes through MAKEFLAGS, so supplying one
-		// would paper over exactly the defect this asserts against — the id
-		// being re-evaluated wherever the cleanup runs. The id has to come from
-		// the Makefile's own `date`, and both places must show that one.
-		out := dryRun(t, "test-integration")
+	// Both targets run TestIntegration_ tests and both must clean up after
+	// themselves; the wiring is duplicated in the Makefile, so check both.
+	for _, target := range []string{"test", "test-integration"} {
+		t.Run(target+" stamps and reaps the same id", func(t *testing.T) {
+			t.Parallel()
+			// Deliberately no TEST_RUN_ID on the command line: command-line
+			// variables propagate to sub-makes through MAKEFLAGS, so supplying
+			// one would paper over exactly the defect this asserts against — the
+			// id being re-evaluated wherever the cleanup runs. The id has to come
+			// from the Makefile's own `date`, and both places must show that one.
+			//
+			// That also makes this subtest a Linux guard: it can only tell two
+			// evaluations apart while they differ, and `date +%N` is a GNU
+			// extension. Where %N is unsupported, two evaluations inside the same
+			// second are identical and the subtest goes blind.
+			out := dryRun(t, target)
 
-		stamped := regexp.MustCompile(RunIDEnv + `=(\S+)`).FindStringSubmatch(out)
-		require.Len(t, stamped, 2, "the test run must receive an id as %s:\n%s", RunIDEnv, out)
+			stamped := regexp.MustCompile(RunIDEnv + `=(\S+)`).FindStringSubmatch(out)
+			require.Len(t, stamped, 2, "the test run must receive an id as %s:\n%s", RunIDEnv, out)
 
-		assert.Contains(t, out, RunLabelKey+"="+stamped[1],
-			"the cleanup must filter on the id the containers were stamped with (%s)", stamped[1])
-	})
+			assert.Contains(t, out, RunLabelKey+"="+stamped[1],
+				"the cleanup must filter on the id the containers were stamped with (%s)", stamped[1])
+
+			// The cleanup must also be told whether the run failed. Without it
+			// the script takes the single-pass branch, and containers a killed
+			// binary was still creating survive the sweep — silently, with every
+			// other assertion here still green.
+			assert.Regexp(t, `reap-test-containers\.sh "`+regexp.QuoteMeta(RunLabelKey+"="+stamped[1])+`" \$status`, out,
+				"the cleanup must receive the test run's exit status")
+		})
+	}
 
 	t.Run("manual sweep filters on the project label", func(t *testing.T) {
 		t.Parallel()

@@ -244,16 +244,25 @@ type Worker struct {
 
 	// installBudget is the DB time an install command may still spend in the
 	// current inbox drain (TASK-144 review). Config.RepoTimeout bounds ONE
-	// install; without a per-drain budget a full inbox of installs against a
-	// hung Postgres would park the Run goroutine — and with it every sector this
-	// worker owns — for InboxCapacity × RepoTimeout (256 × 2 s ≈ 8.5 min), which
-	// any player can trigger since an install with an empty hold now reaches the
-	// worker. Reset at the start of every drain; charged only by the install
-	// commands' DB calls, so the rest of the hot path pays nothing. It gates
-	// whether the drain continues, never the per-command deadline: clamping that
-	// would fail a legal install with a spurious DeadlineExceeded. Worst case is
-	// therefore ~2 × RepoTimeout for one drain, and the commands left in the
-	// inbox apply on the next wake-up.
+	// install; without a per-drain budget a full inbox of installs against a hung
+	// Postgres would park the Run goroutine — and with it every sector this worker
+	// owns — with no tick in between, which any player can trigger since an install
+	// with an empty hold now reaches the worker. Reset at the start of every drain;
+	// charged only by the install commands' DB calls, so the rest of the hot path
+	// pays nothing. It gates whether the drain continues, never the per-command
+	// deadline: clamping that would fail a legal install with a spurious
+	// DeadlineExceeded. ONE drain is therefore bounded by ~2 × RepoTimeout.
+	//
+	// What this does NOT bound is the total: Run resets the budget on every
+	// wake-up (applyAndDrain), and the overflow is still sitting in the inbox, so
+	// the queue is worked through at ~RepoTimeout per install either way. The
+	// degradation window stays InboxCapacity × RepoTimeout (256 × 2 s ≈ 8.5 min)
+	// and a command queued behind it still waits that long for its ack. What the
+	// budget buys is that Run returns to its select between those payments, so the
+	// sectors keep ticking at a reduced rate (measured ~40-80% of nominal, against
+	// a single tick with the budget disabled) instead of the goroutine being parked
+	// outright. Bounding the total — a budget per tick window, or moving installs
+	// off the tick goroutine — is TASK-148.
 	installBudget time.Duration
 
 	// asteroidRepo persists minable asteroids (phase 5.4). Nil disables
@@ -1011,8 +1020,13 @@ func (w *Worker) applyAndDrain(env envelope) {
 
 // drainQueued is the drain loop proper: it applies queued envelopes and stops as
 // soon as the current drain's install budget is spent. A spent budget means the
-// DB is dragging (or hung), so we return to Run instead of paying another
-// RepoTimeout per queued install and stalling every sector this worker owns.
+// DB is dragging (or hung), so we return to Run rather than pay another
+// RepoTimeout for the next queued install without the ticker getting a look in.
+//
+// Returning does not reduce the total stall: Run may take the very next envelope
+// out of the inbox and pay again (applyAndDrain starts a fresh budget). What it
+// buys is that the tick is served between those payments — see the installBudget
+// field for what is and is not bounded, and TASK-148 for bounding the total.
 //
 // The budget is checked AFTER applying, never before: it decides whether to
 // continue, so every drain makes progress on at least one command no matter how
@@ -1026,8 +1040,14 @@ func (w *Worker) drainQueued() {
 			return
 		}
 		if w.installBudget <= 0 {
-			w.logger.Warn("inbox drain stopped on install budget",
-				"queued", len(w.inbox), "repo_timeout", w.cfg.RepoTimeout)
+			// Only worth reporting when something is actually left behind: the
+			// budget can be spent by the last command in the queue, and a
+			// "drain stopped, queued=0" line would claim a backlog that is not
+			// there.
+			if queued := len(w.inbox); queued > 0 {
+				w.logger.Warn("inbox drain stopped on install budget",
+					"queued", queued, "repo_timeout", w.cfg.RepoTimeout)
+			}
 			return
 		}
 	}

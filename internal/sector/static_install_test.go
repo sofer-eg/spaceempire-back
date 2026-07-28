@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -336,6 +338,86 @@ func TestUnit_InstallSatellite_WithoutInstallerRefused(t *testing.T) {
 	snap := w.Snapshot(testSector)
 	assert.Empty(t, snap.Statics.Satellites, "no free satellite")
 	assert.Empty(t, snap.Destructibles, "nothing in the combat set either")
+}
+
+// budgetStopHandler counts the warning drainQueued logs when it abandons a drain
+// with commands still queued. That warning is the whole observable difference the
+// missing applyAndDrain reset makes: the budget gates nothing but whether the
+// drain keeps going, so an early return still applies every command — one Run
+// wake-up later.
+type budgetStopHandler struct {
+	n *atomic.Int64
+}
+
+func (h budgetStopHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h budgetStopHandler) Handle(_ context.Context, r slog.Record) error {
+	if r.Message == "inbox drain stopped on install budget" {
+		h.n.Add(1)
+	}
+	return nil
+}
+func (h budgetStopHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h budgetStopHandler) WithGroup(string) slog.Handler      { return h }
+
+// TestUnit_Install_RunResetsDrainBudgetPerWakeUp covers the reset in
+// applyAndDrain, which TestUnit_Install_DrainBudgetBoundsOneDrain cannot: that
+// test calls w.Tick directly, and the reset it exercises is drainInbox's.
+// Production drains through Run's `case env := <-w.inbox` instead.
+//
+// installBudget is only ever assigned by those two resets, so with
+// applyAndDrain's deleted the Run path drains on whatever the last Tick left —
+// zero on a worker that has not ticked yet, negative after any install. The drain
+// then gives up after two commands and reports a backlog it has no reason to
+// have, on a Postgres that is answering perfectly.
+func TestUnit_Install_RunResetsDrainBudgetPerWakeUp(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const queued = 8
+	var stops atomic.Int64
+	inst := &fakeStaticInstaller{stock: queued}
+	// TickInterval outlives the test on purpose: no Tick runs, so applyAndDrain is
+	// the only thing that can hand this drain a budget.
+	w := sector.NewWorker(0,
+		sector.Config{
+			TickInterval: time.Hour, AOIRadius: 2000,
+			InboxCapacity: 64, RepoTimeout: 2 * time.Second,
+		},
+		clock.NewRealClock(), nil,
+		slog.New(budgetStopHandler{n: &stops}),
+		map[domain.SectorID][]domain.Ship{testSector: {installerTestShip()}},
+		sector.WithStaticInstaller(inst),
+	)
+
+	// Queued before Run starts, so the first wake-up finds the whole backlog in
+	// the inbox rather than racing the sender for it.
+	replies := make([]chan sector.InstallJammerResult, queued)
+	for i := range replies {
+		replies[i] = make(chan sector.InstallJammerResult, 1)
+		require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{
+			PlayerID: 7, ShipID: 1, GoodsType: 27, Reply: replies[i],
+		}))
+	}
+
+	go func() { _ = w.Run(ctx) }()
+
+	for i, reply := range replies {
+		select {
+		case res := <-reply:
+			require.NoError(t, res.Err, "install %d", i)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no ack for install %d", i)
+		}
+	}
+
+	// Every ack is in, so every append the worker made is visible here.
+	// A healthy installer spends microseconds, so a full RepoTimeout budget
+	// carries the whole backlog in a single drain.
+	assert.Zero(t, stops.Load(),
+		"a drain against a healthy DB must not report giving up on the install budget")
+	assert.Equal(t, queued, inst.calls)
+	assert.Len(t, inst.jammers, queued)
 }
 
 // TestUnit_Install_DrainBudgetBoundsOneDrain: RepoTimeout bounds ONE install, so

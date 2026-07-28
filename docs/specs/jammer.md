@@ -144,17 +144,30 @@ Consequences of the new invariant:
 - The install's DB call is bounded by `Config.RepoTimeout` (default 2 s) instead
   of an uninterruptible background context, so a hung Postgres stalls the tick
   for at most that long instead of forever.
-- One drain of the worker's inbox spends at most ~`RepoTimeout` of DB time on
-  installs in total (`Worker.installBudget`): `RepoTimeout` bounds a single
-  install, so without a per-drain budget a queue of installs against a hung
-  Postgres would park the Run goroutine — and every sector that worker owns —
-  for `InboxCapacity × RepoTimeout` (256 × 2 s ≈ 8.5 min). Any player can fill
-  that queue, because an install with an empty hold now reaches the worker
-  (nothing is checked in the HTTP goroutine any more). Commands over the budget
-  stay in the inbox and apply on the next tick / wake-up; their ack becomes a
-  504, which is safe under this invariant. The budget only decides whether the
-  drain continues — it never shortens a command's own deadline, so a legal
-  install is never failed by a spurious `DeadlineExceeded`.
+- ONE drain of the worker's inbox spends at most ~`RepoTimeout` of DB time on
+  installs (`Worker.installBudget`): `RepoTimeout` bounds a single install, so
+  without a per-drain budget a queue of installs against a hung Postgres would
+  park the Run goroutine — and every sector that worker owns — with no tick in
+  between. Any player can fill that queue, because an install with an empty hold
+  now reaches the worker (nothing is checked in the HTTP goroutine any more).
+  Commands over the budget stay in the inbox and apply on the next tick /
+  wake-up; their ack becomes a 504, which is safe under this invariant. The
+  budget only decides whether the drain continues — it never shortens a
+  command's own deadline, so a legal install is never failed by a spurious
+  `DeadlineExceeded`.
+- **What the budget does not do: bound the total.** `Run` resets it on every
+  wake-up (`applyAndDrain`), and the overflow is still in the inbox, so the queue
+  is worked through at ~`RepoTimeout` per install either way: the degradation
+  window stays `InboxCapacity × RepoTimeout` (256 × 2 s ≈ 8.5 min) and a command
+  queued behind it still waits that long for its ack. Measured on a worker with
+  `TickInterval` 100 ms / `RepoTimeout` 50 ms, 20 installs against a hung DB and
+  an `AddShipCommand` last: the add-ship ack still arrives after ~1.005 s
+  (= queued × `RepoTimeout`, as before the fix) and the installer is still called
+  20 times, but the sector ticks 4–8 times in that window (10 nominal) instead of
+  exactly once, which is what the same measurement gives with the budget check
+  disabled. So the win is "sectors keep ticking at a reduced rate" rather than
+  "the stalls cannot chain". Bounding the total — a budget per tick window, or
+  moving the install off the tick goroutine — is **TASK-148**.
 
 #### Residual window: in-doubt commit
 

@@ -126,11 +126,16 @@ func resetInstallerTables(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, err, "reset installer tables")
 }
 
+// installCtx bounds one subtest's DB work. Called per subtest, never once for the
+// group: the deadline is absolute, so a shared context would let the case that
+// spends it fail the ones after it with a stale ctx error instead of their own
+// signal — and would put every case under one budget for no reason.
+//
+// Mirrors the worker's Config.RepoTimeout in spirit: the install always runs under
+// a deadline, and a mutation that needs a second connection hits it instead of
+// hanging the test.
 func installCtx(t *testing.T) context.Context {
 	t.Helper()
-	// Mirrors the worker's Config.RepoTimeout: the install always runs under a
-	// deadline, and a mutation that needs a second connection hits it instead of
-	// hanging the test.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 	return ctx
@@ -138,15 +143,16 @@ func installCtx(t *testing.T) context.Context {
 
 // TestIntegration_StaticInstaller drives the real installer against Postgres.
 // The cases are sequential subtests over ONE container (see installerFixture);
-// each starts by truncating so its absolute row counts mean what they say.
+// each starts by truncating so its absolute row counts mean what they say, and
+// each gets its own deadline (see installCtx).
 func TestIntegration_StaticInstaller(t *testing.T) {
 	pool, inst, hold, owner := installerFixture(t)
-	ctx := installCtx(t)
 
 	// EmptyHold: with nothing in the hold the transaction rolls back — no
 	// jammer/satellite row, no cargo movement, and the caller sees
 	// cargo.ErrInsufficientQuantity so the handler can answer 400.
 	t.Run("EmptyHoldInstallsNothing", func(t *testing.T) {
+		ctx := installCtx(t)
 		resetInstallerTables(t, pool)
 
 		jamID, err := inst.InstallJammer(ctx, hold, jammerGoods, domain.Jammer{
@@ -170,6 +176,7 @@ func TestIntegration_StaticInstaller(t *testing.T) {
 	// One unit in the hold yields exactly one row and an empty stack, both
 	// committed together.
 	t.Run("JammerChargesExactlyOne", func(t *testing.T) {
+		ctx := installCtx(t)
 		resetInstallerTables(t, pool)
 		stockHold(t, pool, hold, jammerGoods, 1)
 
@@ -207,6 +214,7 @@ func TestIntegration_StaticInstaller(t *testing.T) {
 	// Mirrors the jammer case for install-satellite (same code path, same
 	// invariant).
 	t.Run("SatelliteChargesExactlyOne", func(t *testing.T) {
+		ctx := installCtx(t)
 		resetInstallerTables(t, pool)
 		stockHold(t, pool, hold, satelliteGoods, 1)
 
@@ -241,6 +249,7 @@ func TestIntegration_StaticInstaller(t *testing.T) {
 	// ran inside the same transaction. The rollback must give the goods back — the
 	// ≈1.13M cr generator must never be swallowed by a failed insert.
 	t.Run("FailedInsertKeepsGoods", func(t *testing.T) {
+		ctx := installCtx(t)
 		resetInstallerTables(t, pool)
 		stockHold(t, pool, hold, jammerGoods, 1)
 		stockHold(t, pool, hold, satelliteGoods, 1)

@@ -60,9 +60,13 @@ maps, mirroring `install-jammer`:
    `ErrOrdnanceUnavailable` → 503, ack timeout → 504 with **no
    compensation** (see §2.1).
 
-Recall is the one drone operation the HTTP layer still owns cargo for:
-the worker removes the drones and replies with the recalled count, and
-the handler `Refund`s that many units (`api.DroneCargo`, Refund-only).
+**Since TASK-152 the recall handler owns no cargo either.** It routes
+`RecallDronesCommand{PlayerID, ShipID, GoodsType: 51}` and maps the
+outcome (`ErrShipNotFound` → 404, `ErrForbidden` → 403,
+`ErrOrdnanceUnavailable` → 503, ack timeout → 504 with no compensation);
+the credit happens inside the worker, see §2.2. `api.DroneCargo` and the
+handler's `refundDrones` are gone with it — the HTTP layer now owns no
+drone cargo operation at all.
 
 ### 2.1 Atomicity of the salvo (TASK-147)
 
@@ -101,6 +105,44 @@ Consequences of the new invariant:
   now 2 launch and exactly 2 are charged.
 - Too little ammunition for the **clamped** salvo rejects the whole
   launch (400): nothing charged, nothing spawned.
+
+### 2.2 Atomicity of the recall (TASK-152)
+
+**Invariant: the drone DELETEs and the cargo credit commit in ONE
+transaction.** `RecallDronesCommand.apply` collects the ids of the live
+drones owned by the ship, hands them to `sector.Ordnance.RecallDrones`
+(same app-side adapter, `dronesRepo.WithExecutor(tx).Delete` per id +
+`cargo.RefundIn`), and only then removes them from the sector's RAM.
+
+`Ordnance` is the **only** recall path: a worker built without one
+refuses with `ErrOrdnanceUnavailable` → 503 rather than deleting drones
+with nobody to credit the player (the nil-implementation doctrine of
+TASK-144, read backwards). A recall that finds no live drones is a no-op
+and never opens a transaction.
+
+This replaced a worker-deletes / handler-`Refund`s-after-the-ack
+orchestration with the mirror image of the launch hole: `AckTimeout` is
+only `TickInterval + 1s`, so a delayed tick made the handler answer 504
+and walk away while the command applied a moment later — drones deleted,
+nothing credited, the consumable simply lost.
+
+Consequences:
+- A 504 means "outcome unknown": drones and hold agree either way.
+- **The rows deleted, not the RAM entries, are what gets credited.** A
+  drone whose row is already gone (`ErrDroneNotFound`) deletes as a
+  no-op inside the transaction, is worth **nothing**, and is still
+  cleared from RAM. Any other delete error rolls the whole transaction
+  back: nothing deleted, nothing credited, the drones keep flying.
+- **RAM changes only after the commit.** The tick goroutine is the sole
+  writer and is parked in the call for its duration, so the collected
+  ids cannot go stale. A `RepoTimeout` deadline (COMMIT possibly in
+  flight) is therefore treated as a failure: the drones keep flying,
+  logged at ERROR. That residue is self-correcting — a retried recall
+  finds the rows gone, clears RAM and credits nothing, so the player is
+  never paid twice. The opposite choice would resurrect paid-for drones
+  from their surviving rows at the next cold start.
+- The DB time is bounded by `Config.RepoTimeout` and charged to the
+  drain's DB budget, exactly like a launch.
 
 ## 3. Persistence (immediate, unlike missiles)
 

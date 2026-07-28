@@ -159,9 +159,17 @@ type StaticInstaller interface {
 // prepared salvo and is all-or-nothing: it returns one id per drone, in order, or
 // an error and nothing charged. That is what makes a partial spawn impossible.
 //
-// This is the ONLY launch path. A worker without one refuses every launch with
-// ErrOrdnanceUnavailable rather than firing for free: the ordnance is what makes
-// the player pay, so losing it in a refactor must break loudly.
+// RecallDrones runs the same transaction backwards (TASK-152): it deletes the
+// drone rows and credits the units in one commit, so a lost ack cannot delete a
+// player's drones and pay nothing back. It returns how many units were credited
+// — one per row it actually deleted, which can be fewer than len(ids) when a row
+// is already gone (see recallDrones).
+//
+// This is the ONLY launch path, and the only recall path. A worker without one
+// refuses every launch with ErrOrdnanceUnavailable rather than firing for free,
+// and every recall rather than deleting drones uncredited: the ordnance is what
+// makes the player pay and what pays the player back, so losing it in a refactor
+// must break loudly.
 //
 // The real implementation lives in app/ over cargo + the projectile repositories,
 // keeping the sector package free of cargo dependencies (mirrors StaticInstaller).
@@ -169,6 +177,7 @@ type Ordnance interface {
 	SpendMissile(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID) error
 	LaunchTorpedo(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, t domain.Torpedo) (domain.TorpedoID, error)
 	LaunchDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error)
+	RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error)
 }
 
 // Relations is the worker's hostility oracle (phase 6.2a): ship-vs-ship

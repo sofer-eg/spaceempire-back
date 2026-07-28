@@ -366,8 +366,12 @@ func ConsumeIn(ctx context.Context, repo Repo, owner EntityRef, gtype GoodsTypeI
 // открывает свою, поэтому здесь не подходит).
 
 func (s *Service) Refund(ctx context.Context, owner EntityRef, gtype GoodsTypeID, qty int64) error
-// = tx.Add (без capacity check). На пути запуска больше не используется --
-// остался у recall-drones (drones.md §2).
+// = tx.Add (без capacity check). На пути запуска не используется.
+
+func RefundIn(ctx context.Context, repo Repo, owner EntityRef, gtype GoodsTypeID, qty int64) error
+// зеркало ConsumeIn: начисление внутри УЖЕ открытой транзакции вызывающего.
+// Им recall-drones возвращает дронов в трюм одной транзакцией с DELETE строк
+// (TASK-152, drones.md §2.2).
 ```
 
 ## 6. HTTP

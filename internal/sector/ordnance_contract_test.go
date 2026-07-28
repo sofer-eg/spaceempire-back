@@ -32,6 +32,10 @@ func (o miscountingOrdnance) LaunchDrones(context.Context, domain.EntityRef, dom
 	return o.ids, nil
 }
 
+func (o miscountingOrdnance) RecallDrones(_ context.Context, _ domain.EntityRef, _ domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
+	return len(ids), nil
+}
+
 // TestUnit_LaunchDrones_IDCountContract is a white-box test of the guard in
 // launchDrones (review round 2). LaunchDroneCommand.apply pairs ids[i] with
 // ds[i], so a miscounting Ordnance would either index past the salvo — panicking

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -93,4 +94,46 @@ func (o ordnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtyp
 		return nil, err
 	}
 	return ids, nil
+}
+
+// RecallDrones is LaunchDrones read backwards (TASK-152): it deletes the rows
+// and credits one unit per row actually deleted, in one transaction. Before it,
+// the worker deleted the drones and the HTTP handler credited the cargo after the
+// ack — so a lost ack (AckTimeout is only TickInterval + 1s) deleted the drones
+// and paid nothing back.
+//
+// A row that is already gone (ErrDroneNotFound) is NOT an error and is NOT
+// credited. That is the residue of an ambiguous COMMIT-in-flight deadline: the
+// deletes and the credit landed, the worker treated the timeout as a failure and
+// kept the drones in RAM. The retry then finds no rows — crediting them again
+// would pay twice for the same drones, and failing outright would leave the ship
+// permanently unable to recall. Every other delete error rolls the whole
+// transaction back: nothing deleted, nothing credited.
+//
+// cargo.RefundIn (not Service.Refund) because the transaction is ours and the
+// DELETEs must ride along in it; Refund semantics — no capacity check — are what
+// the pre-TASK-152 handler used, and are right here: the units fitted in this
+// hold a moment ago.
+func (o ordnance) RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
+	var credited int
+	err := o.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		repo := o.drones.WithExecutor(tx)
+		for _, id := range ids {
+			switch err := repo.Delete(ctx, id); {
+			case err == nil:
+				credited++
+			case errors.Is(err, dronesrepo.ErrDroneNotFound):
+			default:
+				return fmt.Errorf("delete drone: %w", err)
+			}
+		}
+		if credited == 0 {
+			return nil
+		}
+		return cargo.RefundIn(ctx, o.cargo.WithExecutor(tx), owner, gtype, int64(credited))
+	})
+	if err != nil {
+		return 0, err
+	}
+	return credited, nil
 }

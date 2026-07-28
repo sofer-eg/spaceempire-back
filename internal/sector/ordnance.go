@@ -108,6 +108,44 @@ func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []
 	return ids, nil
 }
 
+// recallDrones deletes the given drone rows and credits one cargo unit per row
+// actually deleted, in ONE transaction (TASK-152). It returns the credited
+// count, which is what the player is told was recalled.
+//
+// Same shape as the launch helpers, and the same nil-Ordnance doctrine read
+// backwards: without an ordnance the recall is refused rather than deleting the
+// drones with nobody to pay the player back.
+//
+// The credited count can be lower than len(ids) — the DB, not RAM, is the ledger
+// here. A drone whose row is already gone deletes as a no-op inside the
+// transaction and is worth nothing: its unit was paid out once already (see
+// logRecallError for how that residue arises). Crediting it again would mint
+// consumables out of a stale RAM entry.
+//
+// Ordering, and why it is this way: the caller collects the ids WITHOUT touching
+// RAM, and only removes them once this call has returned successfully. The tick
+// goroutine is the sole writer of sectorState and it is parked here for the
+// duration, so nothing can change s.drones underneath — which makes
+// "commit first, then mutate RAM" free of races and, unlike the previous
+// delete-then-write order, unable to leave the drones deleted in RAM after a
+// rolled-back transaction.
+func (w *Worker) recallDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
+	if w.ordnance == nil {
+		return 0, ErrOrdnanceUnavailable
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
+	defer cancel()
+
+	started := time.Now()
+	credited, err := w.ordnance.RecallDrones(ctx, shipHold(ship), gtype, ids)
+	w.spendDBBudget(time.Since(started))
+	if err != nil {
+		w.logRecallError(err, ship, gtype, len(ids))
+		return 0, err
+	}
+	return credited, nil
+}
+
 // shipHold is the cargo owner a launch debits: the launching ship itself.
 func shipHold(ship *domain.Ship) domain.EntityRef {
 	return domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
@@ -133,6 +171,32 @@ func (w *Worker) logOrdnanceError(err error, kind string, ship *domain.Ship, gty
 	}
 	w.logger.Warn("launch failed",
 		"err", err, "projectile", kind, "qty", qty, "ship", int64(ship.ID),
+		"player", int64(ship.PlayerID), "sector", int64(ship.SectorID),
+		"goods_type", int64(gtype))
+}
+
+// logRecallError is logOrdnanceError's mirror for the recall (TASK-152). The
+// reasoning inverts with the operation: here the deadline case means the rows may
+// be DELETED and the units CREDITED while the drones are still in RAM, because
+// the caller only clears RAM on a confirmed success. That residue is bounded and
+// self-correcting — the drones fly on until their TTL or the next restart, and a
+// retried recall clears them while crediting nothing (their rows are gone, so
+// there is nothing left to pay for). The opposite choice — clearing RAM on an
+// ambiguous outcome — is worse: if the transaction actually rolled back, the
+// drones vanish from the sector with their rows intact and come back from the
+// dead at the next cold start, having been paid for once. ERROR carries the
+// counts for hand reconciliation; every other error rolled the transaction back
+// and left both sides untouched, so it is a WARN.
+func (w *Worker) logRecallError(err error, ship *domain.Ship, gtype domain.GoodsTypeID, qty int) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		w.logger.Error("recall outcome in doubt: drones may be deleted and credited while still flying in RAM",
+			"err", err, "qty", qty, "ship", int64(ship.ID),
+			"player", int64(ship.PlayerID), "sector", int64(ship.SectorID),
+			"goods_type", int64(gtype), "repo_timeout", w.cfg.RepoTimeout)
+		return
+	}
+	w.logger.Warn("recall failed",
+		"err", err, "qty", qty, "ship", int64(ship.ID),
 		"player", int64(ship.PlayerID), "sector", int64(ship.SectorID),
 		"goods_type", int64(gtype))
 }

@@ -150,11 +150,26 @@ func (s *Service) Refund(ctx context.Context, owner domain.EntityRef, gtype doma
 		return ErrNonPositiveQuantity
 	}
 	return s.tx.Do(ctx, func(ctx context.Context, txRepo Repo) error {
-		if err := txRepo.Add(ctx, owner, gtype, qty, unownedGoods); err != nil {
-			return fmt.Errorf("refund add: %w", err)
-		}
-		return nil
+		return RefundIn(ctx, txRepo, owner, gtype, qty)
 	})
+}
+
+// RefundIn is Refund's body over a caller-supplied repo, the mirror of
+// ConsumeIn: an operation that must commit together with the credit runs both
+// inside ONE transaction of its own. Used by the recall-drones path (TASK-152),
+// where the drone rows are deleted and the units credited together — a
+// two-call orchestration would let a lost ack delete the drones and pay nothing.
+//
+// repo must already be bound to that transaction (persistence/cargo
+// Repository.WithExecutor(tx)). Error semantics are identical to Refund.
+func RefundIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
+	if qty <= 0 {
+		return ErrNonPositiveQuantity
+	}
+	if err := repo.Add(ctx, owner, gtype, qty, unownedGoods); err != nil {
+		return fmt.Errorf("refund add: %w", err)
+	}
+	return nil
 }
 
 // Add inserts (or grows) qty units of gtype into the owner's stack, with a

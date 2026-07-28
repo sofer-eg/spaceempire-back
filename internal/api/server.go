@@ -84,11 +84,6 @@ type Config struct {
 	// trade completed) are published for the quest engine (phase 8.17). nil
 	// disables publishing — quests just won't see those discrete signals.
 	EventBus bus.Publisher
-	// DroneCargo backs POST /api/cmd/recall-drones, which credits recalled
-	// drones back to the hold. nil disables that endpoint with 503. The launch
-	// endpoints need no cargo at all: their debits happen inside the sector
-	// worker's Ordnance (TASK-147).
-	DroneCargo DroneCargo
 	// NpcPlayerID is the reserved system-player's DB id. Ships owned by this
 	// player are NPC (traders, miners, passengers) and the SPA uses IsNPC to
 	// colour them amber instead of red. Zero means "no NPC player loaded" and
@@ -147,7 +142,6 @@ type Server struct {
 	captureEnergyCost int
 	handoffBus        bus.Subscriber
 	eventBus          bus.Publisher
-	droneCargo        DroneCargo
 	activeShips       ActiveShipReader
 	activeShipWriter  ActiveShipWriter
 	handoffPublisher  bus.Publisher
@@ -183,7 +177,6 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 		equipment:         cfg.Equipment,
 		handoffBus:        cfg.HandoffBus,
 		eventBus:          cfg.EventBus,
-		droneCargo:        cfg.DroneCargo,
 		activeShips:       cfg.ActiveShips,
 		activeShipWriter:  cfg.ActiveShipWriter,
 		handoffPublisher:  cfg.HandoffPublisher,

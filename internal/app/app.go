@@ -551,15 +551,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Equipment:         equipment,
 		HandoffBus:        jumpBus,
 		EventBus:          jumpBus,
-		// DroneCargo credits recalled drones back to the hold. The launch debits
-		// (missile / drone / torpedo) live in the worker's Ordnance since TASK-147,
-		// so the HTTP layer owns no launch-side cargo at all.
-		DroneCargo:       cargoSvc,
-		NpcPlayerID:      npcPlayerID,
-		ActiveShips:      playersRepoPersistence,
-		ActiveShipWriter: playersRepoPersistence,
-		HandoffPublisher: jumpBus,
-		Fleet:            sectorPool,
+		NpcPlayerID:       npcPlayerID,
+		ActiveShips:       playersRepoPersistence,
+		ActiveShipWriter:  playersRepoPersistence,
+		HandoffPublisher:  jumpBus,
+		Fleet:             sectorPool,
 	}, logger)
 	authSrv.RegisterRoutes(srv.Mux())
 	authSrv.RegisterPlayersList(srv.Mux())

@@ -14,13 +14,14 @@ import (
 	"spaceempire/back/internal/api"
 	"spaceempire/back/internal/api/dto"
 	"spaceempire/back/internal/domain"
+	"spaceempire/back/internal/pkg/clock"
 	"spaceempire/back/internal/sector"
 )
 
 // newDroneTestServer wires the drone endpoints over a real Worker whose launch
-// runs through a fakeOrdnance. The same fake is also the server's DroneCargo, so
-// a launch (debited inside the worker) and a recall (credited by the handler)
-// move one shared stock and the round trip is assertable.
+// AND recall run through a fakeOrdnance, so both move one shared stock and the
+// round trip is assertable. Since TASK-152 the server itself owns no cargo at
+// all — the credit happens inside the worker, like the debit.
 func newDroneTestServer(t *testing.T, initial []domain.Ship, stock int64) (*api.Server, *sector.Worker, *fakeOrdnance) {
 	t.Helper()
 	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{api.DroneGoodsType: stock})
@@ -29,7 +30,6 @@ func newDroneTestServer(t *testing.T, initial []domain.Ship, stock int64) (*api.
 		SnapshotInterval: 10 * time.Millisecond,
 		AckTimeout:       time.Second,
 		SectorID:         1,
-		DroneCargo:       ord,
 	}, nil)
 	return srv, w, ord
 }
@@ -131,30 +131,99 @@ func TestUnit_RecallDrones_OK(t *testing.T) {
 	require.True(t, resp.OK)
 	require.Equal(t, 2, resp.Recalled)
 
-	// The launch debit runs in the worker, the recall credit in the handler —
-	// against the same stock, so the round trip nets out.
+	// Debit and credit both run in the worker against the same stock, so the
+	// round trip nets out.
 	require.EqualValues(t, 5, ord.left(api.DroneGoodsType),
-		"recall refunds both launched drones (3 left + 2 back)")
+		"recall credits both launched drones (3 left + 2 back)")
 	require.Equal(t, 1, ord.snapshot().refunds)
 }
 
-// TestUnit_RecallDrones_NoCargoService_503: recall is the one drone endpoint that
-// still needs cargo (to credit the returned drones), so a nil DroneCargo disables
-// it. The launch endpoint has no such dependency any more.
-func TestUnit_RecallDrones_NoCargoService_503(t *testing.T) {
+// TestUnit_RecallDrones_NoOrdnanceWired: with no transactional ordnance the
+// worker refuses the recall instead of deleting the drones with nobody to credit
+// the player, and the handler surfaces 503 (TASK-152). Before it, the same
+// misconfiguration was a nil DroneCargo on the HTTP layer.
+func TestUnit_RecallDrones_NoOrdnanceWired(t *testing.T) {
 	t.Parallel()
-	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{api.DroneGoodsType: 5})
-	w := ordnanceTestWorker(ord, []domain.Ship{missileTestShip()})
+	target := missileTestShip()
+	target.ID = 2
+	target.PlayerID = 999
+	target.Pos = domain.Vec2{X: 100, Y: 0}
+
+	live := []domain.Drone{{
+		ID: 7, SectorID: 1, OwnerShipID: 1, PlayerID: missileTestShip().PlayerID,
+		HP: 20, ExpiresAt: time.Now().Add(time.Hour),
+		Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+	}}
+	w := sector.NewWorker(
+		0,
+		sector.Config{TickInterval: 10 * time.Millisecond, InboxCapacity: 64},
+		clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{domain.SectorID(1): {missileTestShip(), target}},
+		sector.WithDrones(nil, map[domain.SectorID][]domain.Drone{domain.SectorID(1): live}),
+	)
 	srv := api.NewServer(workerRouter{w}, api.Config{
 		SnapshotInterval: 10 * time.Millisecond, AckTimeout: time.Second, SectorID: 1,
-		// DroneCargo intentionally nil
 	}, nil)
+	runWorker(t, w)
 
 	body, _ := json.Marshal(dto.RecallDronesRequest{ShipID: 1})
 	req := httptest.NewRequest(http.MethodPost, "/api/cmd/recall-drones", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	assert.Len(t, w.Snapshot(domain.SectorID(1)).Drones, 1, "the drone is not deleted uncredited")
+}
+
+// TestUnit_RecallDrones_AckTimeoutCreditsCargo is the TASK-152 regression test at
+// the HTTP boundary, the mirror of TestUnit_LaunchDrone_AckTimeoutChargesOnce:
+// the handler gives up with a 504 and the deferred command still applies — and
+// because the credit rides inside it, the player gets the units back. Before the
+// fix the departed handler was the only thing that would have credited them, so
+// the drones were deleted and the consumable lost.
+func TestUnit_RecallDrones_AckTimeoutCreditsCargo(t *testing.T) {
+	t.Parallel()
+	target := missileTestShip()
+	target.ID = 2
+	target.PlayerID = 999
+	target.Pos = domain.Vec2{X: 100, Y: 0}
+
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{api.DroneGoodsType: 2})
+	w := ordnanceTestWorker(ord, []domain.Ship{missileTestShip(), target})
+	// A router that holds every command back past AckTimeout: the handler 504s and
+	// walks away, then release() applies the command exactly as a delayed tick
+	// would. The worker is driven by release() alone, never by a Run loop.
+	router := &deferredRouter{workerRouter: workerRouter{w}}
+	srv := api.NewServer(router, api.Config{
+		SnapshotInterval: 10 * time.Millisecond,
+		AckTimeout:       20 * time.Millisecond,
+		SectorID:         1,
+	}, nil)
+
+	lrec := postLaunchDrone(t, srv, dto.LaunchDroneRequest{
+		ShipID:    1,
+		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+		Count:     2,
+	})
+	require.Equal(t, http.StatusGatewayTimeout, lrec.Code, lrec.Body.String())
+	router.release(t)
+	require.EqualValues(t, 0, ord.left(api.DroneGoodsType), "the salvo emptied the hold")
+	require.Len(t, w.Snapshot(domain.SectorID(1)).Drones, 2)
+
+	body, _ := json.Marshal(dto.RecallDronesRequest{ShipID: 1})
+	req := httptest.NewRequest(http.MethodPost, "/api/cmd/recall-drones", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code, rec.Body.String())
+	require.EqualValues(t, 0, ord.left(api.DroneGoodsType), "504 alone credits nothing")
+	require.Equal(t, 0, ord.snapshot().refunds, "the HTTP layer makes no cargo call at all")
+
+	router.release(t)
+
+	assert.EqualValues(t, 2, ord.left(api.DroneGoodsType),
+		"the abandoned recall still credited the units")
+	assert.Equal(t, 1, ord.snapshot().refunds)
+	assert.Empty(t, w.Snapshot(domain.SectorID(1)).Drones, "the drones were recalled")
 }
 
 // TestUnit_LaunchDrone_NoOrdnanceWired: with no transactional ordnance the worker
@@ -199,7 +268,6 @@ func TestUnit_LaunchDrone_AckTimeoutChargesOnce(t *testing.T) {
 		SnapshotInterval: 10 * time.Millisecond,
 		AckTimeout:       20 * time.Millisecond,
 		SectorID:         1,
-		DroneCargo:       ord,
 	}, nil)
 
 	rec := postLaunchDrone(t, srv, dto.LaunchDroneRequest{

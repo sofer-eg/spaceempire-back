@@ -221,6 +221,45 @@ func TestIntegration_Ordnance(t *testing.T) {
 		assert.Equal(t, ids, []domain.DroneID{got[0].ID, got[1].ID}, "the returned ids are the committed rows")
 	})
 
+	// The recall is the launch run backwards (TASK-152): the DELETEs and the credit
+	// commit together, and the credit counts rows actually deleted. An id whose row
+	// is already gone is a no-op worth nothing — that is what stops a retry after an
+	// ambiguous COMMIT-in-flight deadline from paying the player twice.
+	t.Run("RecallCreditsDeletedRowsOnly", func(t *testing.T) {
+		ctx := installCtx(t)
+		resetOrdnanceTables(t, pool)
+		stockHold(t, pool, hold, droneGoods, 2)
+
+		ids, err := ord.LaunchDrones(ctx, hold, droneGoods, testDrones(2, ship, player, ordnanceSectorID))
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+		require.Zero(t, heldQty(t, pool, hold, droneGoods))
+
+		credited, err := ord.RecallDrones(ctx, hold, droneGoods, ids)
+		require.NoError(t, err)
+		assert.Equal(t, 2, credited, "one unit per deleted row")
+		assert.Equal(t, 0, rowCount(t, pool, "drones"), "both rows deleted")
+		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods), "both units credited")
+
+		// The same recall again: the rows are gone, so it credits nothing and does
+		// not fail — the ship would otherwise be permanently unable to recall.
+		credited, err = ord.RecallDrones(ctx, hold, droneGoods, ids)
+		require.NoError(t, err)
+		assert.Zero(t, credited)
+		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods), "no double credit")
+
+		// Mixed: one live row among stale ids credits exactly one.
+		live, err := ord.LaunchDrones(ctx, hold, droneGoods, testDrones(1, ship, player, ordnanceSectorID))
+		require.NoError(t, err)
+		require.EqualValues(t, 1, heldQty(t, pool, hold, droneGoods))
+
+		credited, err = ord.RecallDrones(ctx, hold, droneGoods, append(ids, live...))
+		require.NoError(t, err)
+		assert.Equal(t, 1, credited)
+		assert.Equal(t, 0, rowCount(t, pool, "drones"))
+		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods))
+	})
+
 	// The INSERT is rejected (owner_ship_id violates the foreign key) *after* the
 	// debit ran inside the same transaction. The rollback must give the ammunition
 	// back — a failed insert must never swallow it.

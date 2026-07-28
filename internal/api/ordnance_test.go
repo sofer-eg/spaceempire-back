@@ -17,13 +17,13 @@ import (
 // transaction (TASK-147). Both halves succeed or neither does, which is exactly
 // the invariant the launch handlers now rely on.
 //
-// Note there is no api-side launch cargo dependency any more: api.Config carries
-// no MissileCargo/TorpedoCargo and DroneCargo is Refund-only, so the HTTP layer
-// cannot debit ammunition even in principle. Every charge these tests observe was
-// made inside the worker.
+// Note there is no api-side cargo dependency for any of this any more:
+// api.Config carries no MissileCargo/TorpedoCargo and, since TASK-152, no
+// DroneCargo either, so the HTTP layer cannot move ammunition even in principle.
+// Every charge and every credit these tests observe was made inside the worker.
 //
-// Refund makes the same object serve as api.DroneCargo for recall-drones, so a
-// launch and a recall move the same stock and the tests can assert the round trip.
+// RecallDrones moves the same stock a launch debits, so the tests can assert the
+// round trip.
 type fakeOrdnance struct {
 	mu       sync.Mutex
 	stock    map[domain.GoodsTypeID]int64
@@ -97,14 +97,15 @@ func (f *fakeOrdnance) LaunchDrones(_ context.Context, _ domain.EntityRef, gtype
 	return ids, nil
 }
 
-// Refund satisfies api.DroneCargo: recall-drones credits recalled drones back to
-// the hold, the one cargo operation the HTTP layer still owns.
-func (f *fakeOrdnance) Refund(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
+// RecallDrones is the launch's mirror (TASK-152): the DELETEs and the credit
+// commit together inside the worker, so the recalled units land in the same stock
+// a launch debits.
+func (f *fakeOrdnance) RecallDrones(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refunds++
-	f.stock[gtype] += qty
-	return nil
+	f.stock[gtype] += int64(len(ids))
+	return len(ids), nil
 }
 
 // ordnanceState is a consistent read of the counters, so tests do not race the

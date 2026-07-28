@@ -805,21 +805,41 @@ func replyLaunchDrone(reply chan<- LaunchDroneResult, res LaunchDroneResult) {
 	}
 }
 
-// RecallDronesResult reports how many still-alive drones were recalled.
-// The HTTP handler refunds that many cargo units.
+// RecallDronesResult reports how many cargo units the recall credited: one per
+// drone row it actually deleted (see RecallDronesCommand).
 type RecallDronesResult struct {
 	Err      error
 	Recalled int
 }
 
-// RecallDronesCommand removes every live drone owned by ShipID (returning
-// them to cargo, handled by the handler). Ownership is enforced.
+// RecallDronesCommand removes every live drone owned by ShipID and returns them
+// to the ship's hold. Ownership is enforced.
 type RecallDronesCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
-	Reply    chan<- RecallDronesResult
+	// GoodsType is the goods id one recalled drone is worth (51), the same
+	// constant LaunchDroneCommand carries; the handler owns it so the sector
+	// package stays free of the goods catalog.
+	GoodsType domain.GoodsTypeID
+	Reply     chan<- RecallDronesResult
 }
 
+// apply deletes the rows and credits the units in ONE transaction through
+// sector.Ordnance (TASK-152), then — and only then — drops the drones from RAM.
+//
+// Before TASK-152 the worker deleted the drones and the HTTP handler credited the
+// cargo after the ack. AckTimeout is only TickInterval + 1s, so a delayed tick
+// made the handler answer 504 and walk away while the command applied a moment
+// later: drones gone, nothing paid back, the consumable simply lost. Same defect
+// as the launch side (TASK-147), running the other way.
+//
+// RAM is mutated only after the transaction commits. The tick goroutine is the
+// sole writer of sectorState and stays parked in recallDrones for the duration,
+// so the collected ids cannot go stale in between — and a rolled-back transaction
+// leaves the drones flying instead of deleting them in RAM alone. What the credit
+// counts is rows deleted, not RAM entries: a drone whose row is already gone is
+// cleared from RAM but worth nothing (its unit was paid out once already). See
+// recallDrones and logRecallError for the deadline case behind that.
 func (c RecallDronesCommand) apply(w *Worker, s *sectorState) {
 	var res RecallDronesResult
 
@@ -841,19 +861,26 @@ func (c RecallDronesCommand) apply(w *Worker, s *sectorState) {
 			ids = append(ids, id)
 		}
 	}
+	if len(ids) == 0 {
+		// Nothing to delete and nothing to credit: a no-op needs no transaction
+		// (and no ordnance).
+		replyRecallDrones(c.Reply, res)
+		return
+	}
+
+	credited, err := w.recallDrones(ship, c.GoodsType, ids)
+	if err != nil {
+		res.Err = err
+		replyRecallDrones(c.Reply, res)
+		return
+	}
 	for _, id := range ids {
 		// A recalled drone just vanishes — the DronesRemoved diff tells the
 		// SPA; no explosion impact (unlike TTL/owner-loss self-destruct).
 		delete(s.drones, id)
 		delete(s.dronesDirty, id)
-		if w.droneRepo != nil {
-			if err := w.droneRepo.Delete(context.Background(), id); err != nil {
-				w.logger.Error("drone recall delete failed",
-					"err", err, "drone", int64(id), "sector", int64(s.sectorID))
-			}
-		}
-		res.Recalled++
 	}
+	res.Recalled = credited
 	replyRecallDrones(c.Reply, res)
 }
 

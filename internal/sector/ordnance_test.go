@@ -60,6 +60,16 @@ type fakeOrdnance struct {
 	owners     []domain.EntityRef
 	goodsTypes []domain.GoodsTypeID
 
+	// recalls counts the reached recalls, credited the units given back per goods
+	// type and recalledIDs every id the worker handed over (TASK-152). missingRows
+	// marks drone ids whose row is already gone in the DB: those delete as
+	// no-ops and must not be credited — the residue a COMMIT-in-flight deadline
+	// leaves behind.
+	recalls     int
+	credited    map[domain.GoodsTypeID]int64
+	recalledIDs []domain.DroneID
+	missingRows map[domain.DroneID]bool
+
 	// torpedoRepo, when set, creates every torpedo through the same fake repo
 	// the persistence tests count Create calls on — standing in for the real
 	// adapter's torpedosRepo.WithExecutor(tx).Create inside the transaction.
@@ -74,7 +84,12 @@ func newFakeOrdnance(stock map[domain.GoodsTypeID]int64) *fakeOrdnance {
 	if stock == nil {
 		stock = map[domain.GoodsTypeID]int64{}
 	}
-	return &fakeOrdnance{stock: stock, charged: map[domain.GoodsTypeID]int64{}}
+	return &fakeOrdnance{
+		stock:       stock,
+		charged:     map[domain.GoodsTypeID]int64{},
+		credited:    map[domain.GoodsTypeID]int64{},
+		missingRows: map[domain.DroneID]bool{},
+	}
 }
 
 // unlimitedOrdnance is the default for tests that exercise launch mechanics
@@ -167,6 +182,38 @@ func (f *fakeOrdnance) LaunchDrones(ctx context.Context, owner domain.EntityRef,
 		ids = append(ids, domain.DroneID(f.nextID))
 	}
 	return ids, nil
+}
+
+// RecallDrones is the launch's mirror image (TASK-152): it deletes the rows and
+// credits one unit per row it actually deleted, in one transaction. failWith
+// rolls the whole thing back (nothing deleted, nothing credited);
+// blockUntilCancel models the hung DB.
+func (f *fakeOrdnance) RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
+	if err := f.enter(ctx); err != nil {
+		return 0, err
+	}
+	if err := f.wait(ctx); err != nil {
+		return 0, err
+	}
+	f.owners = append(f.owners, owner)
+	f.goodsTypes = append(f.goodsTypes, gtype)
+	f.recalledIDs = append(f.recalledIDs, ids...)
+	if f.failWith != nil {
+		return 0, f.failWith
+	}
+	n := 0
+	for _, id := range ids {
+		if f.missingRows[id] {
+			continue
+		}
+		n++
+	}
+	f.recalls++
+	f.credited[gtype] += int64(n)
+	if !f.unlimited {
+		f.stock[gtype] += int64(n)
+	}
+	return n, nil
 }
 
 func (f *fakeOrdnance) left(gtype domain.GoodsTypeID) int64 { return f.stock[gtype] }
@@ -658,4 +705,246 @@ func TestUnit_Launch_GateRejectionSkipsCharge(t *testing.T) {
 	require.ErrorIs(t, (<-reply).Err, sector.ErrShipNotFound)
 	assert.Equal(t, 0, ord.calls, "ordnance never called for a rejected gate")
 	assert.EqualValues(t, 1, ord.left(testMissileGoods))
+}
+
+// launchSalvo launches count drones from ship 1 and returns their live ids.
+func launchSalvo(t *testing.T, w *sector.Worker, count int) []domain.DroneID {
+	t.Helper()
+	reply := make(chan sector.LaunchDroneResult, 1)
+	require.NoError(t, w.Send(testSector, sector.LaunchDroneCommand{
+		PlayerID: 100, ShipID: 1, Target: shipTarget(2), Count: count,
+		GoodsType: testDroneGoods, Reply: reply,
+	}))
+	w.Tick(context.Background())
+	res := <-reply
+	require.NoError(t, res.Err)
+	require.Equal(t, count, res.Spawned)
+	return liveDroneIDs(w)
+}
+
+func liveDroneIDs(w *sector.Worker) []domain.DroneID {
+	var ids []domain.DroneID
+	for _, d := range w.Snapshot(testSector).Drones {
+		ids = append(ids, d.ID)
+	}
+	return ids
+}
+
+// sendRecall queues a recall for ship 1 and ticks. reply may be nil — that is the
+// lost-ack case (the handler already answered 504 and went away).
+func sendRecall(t *testing.T, w *sector.Worker, reply chan sector.RecallDronesResult) {
+	t.Helper()
+	var out chan<- sector.RecallDronesResult
+	if reply != nil {
+		out = reply
+	}
+	require.NoError(t, w.Send(testSector, sector.RecallDronesCommand{
+		PlayerID: 100, ShipID: 1, GoodsType: testDroneGoods, Reply: out,
+	}))
+	w.Tick(context.Background())
+}
+
+// TestUnit_RecallDrones_LostAckCreditsCargo is the TASK-152 hole, the mirror of
+// the launch lost-ack tests above: the handler timed out and is gone (Reply ==
+// nil), yet the queued recall still applies. With the credit inside apply the
+// units come back with the drones — before the fix the worker deleted them and
+// only the (departed) handler would have paid the player back, so the
+// consumable simply vanished.
+func TestUnit_RecallDrones_LostAckCreditsCargo(t *testing.T) {
+	t.Parallel()
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
+	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+
+	ids := launchSalvo(t, w, 2)
+	require.EqualValues(t, 0, ord.left(testDroneGoods), "the salvo emptied the hold")
+
+	sendRecall(t, w, nil)
+
+	assert.Equal(t, 1, ord.recalls, "one all-or-nothing recall transaction")
+	assert.EqualValues(t, 2, ord.credited[testDroneGoods], "both drones credited")
+	assert.EqualValues(t, 2, ord.left(testDroneGoods), "the units are back in the hold")
+	assert.ElementsMatch(t, ids, ord.recalledIDs, "exactly the live drones were deleted")
+	assert.Empty(t, w.Snapshot(testSector).Drones, "nothing left flying")
+	assert.Equal(t, []domain.EntityRef{{Kind: domain.EntityKindShip, ID: 1},
+		{Kind: domain.EntityKindShip, ID: 1}}, ord.owners,
+		"the credit lands in the recalling ship's hold")
+
+	// The player retries after the 504: there is nothing left to recall, so the
+	// ordnance is not called again and no second credit appears.
+	reply := make(chan sector.RecallDronesResult, 1)
+	sendRecall(t, w, reply)
+	res := <-reply
+	require.NoError(t, res.Err)
+	assert.Zero(t, res.Recalled)
+	assert.Equal(t, 1, ord.recalls, "an empty recall never reaches the ordnance")
+	assert.EqualValues(t, 2, ord.left(testDroneGoods), "no double credit")
+}
+
+// TestUnit_RecallDrones_CreditsOnlyDeletedRows pins the partial recall: the
+// credit follows the rows the transaction actually deleted, not the RAM count.
+// A drone whose row is already gone deletes as a no-op and is worth nothing —
+// that row was accounted for once already (the residue of a COMMIT-in-flight
+// deadline, see TestUnit_RecallDrones_HungDBKeepsDronesFlying). It is still
+// cleared from RAM: with no row behind it, it must not keep flying.
+func TestUnit_RecallDrones_CreditsOnlyDeletedRows(t *testing.T) {
+	t.Parallel()
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
+	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+
+	// Two is the up_drone_control cap of launcherShip, so the salvo is the whole
+	// live set; one of the two rows is already gone in the DB.
+	ids := launchSalvo(t, w, 2)
+	ord.missingRows[ids[0]] = true
+
+	reply := make(chan sector.RecallDronesResult, 1)
+	sendRecall(t, w, reply)
+
+	res := <-reply
+	require.NoError(t, res.Err)
+	assert.Equal(t, 1, res.Recalled, "credited for the one row actually deleted")
+	assert.EqualValues(t, 1, ord.credited[testDroneGoods])
+	assert.EqualValues(t, 1, ord.left(testDroneGoods))
+	assert.Empty(t, w.Snapshot(testSector).Drones, "both stop flying")
+}
+
+// TestUnit_RecallDrones_AllRowsGoneCreditsNothing is the self-healing half of the
+// same rule: after an ambiguous deadline committed the deletes, a retry finds no
+// rows at all. It credits nothing (the units were already paid out) and still
+// clears the drones RAM was holding on to.
+func TestUnit_RecallDrones_AllRowsGoneCreditsNothing(t *testing.T) {
+	t.Parallel()
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
+	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+
+	for _, id := range launchSalvo(t, w, 2) {
+		ord.missingRows[id] = true
+	}
+
+	reply := make(chan sector.RecallDronesResult, 1)
+	sendRecall(t, w, reply)
+
+	res := <-reply
+	require.NoError(t, res.Err)
+	assert.Zero(t, res.Recalled, "no row, no credit")
+	assert.EqualValues(t, 0, ord.left(testDroneGoods), "the hold is untouched")
+	assert.Empty(t, w.Snapshot(testSector).Drones, "the stale drones are cleared")
+}
+
+// TestUnit_RecallDrones_TxFailureKeepsDronesFlying: the transaction rolled back,
+// so nothing was deleted and nothing credited — RAM must agree and keep the
+// drones. Deleting them here would be the same lost consumable the task fixes,
+// only with the DB row left behind as well.
+func TestUnit_RecallDrones_TxFailureKeepsDronesFlying(t *testing.T) {
+	t.Parallel()
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
+	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+
+	launchSalvo(t, w, 2)
+	ord.failWith = errOrdnanceTxFailed
+
+	reply := make(chan sector.RecallDronesResult, 1)
+	sendRecall(t, w, reply)
+
+	res := <-reply
+	require.ErrorIs(t, res.Err, errOrdnanceTxFailed)
+	assert.Zero(t, res.Recalled)
+	assert.EqualValues(t, 0, ord.left(testDroneGoods), "nothing credited")
+	assert.Len(t, w.Snapshot(testSector).Drones, 2, "the drones keep flying")
+}
+
+// TestUnit_RecallDrones_HungDBKeepsDronesFlying: RepoTimeout bounds the recall
+// exactly as it bounds a launch, so a hung Postgres cannot park the tick
+// goroutine. The outcome is ambiguous (COMMIT may have landed anyway), and the
+// worker resolves it the same way the launch path does — RAM is only changed on
+// a confirmed success, so the drones keep flying and a retry sorts it out
+// without paying twice.
+func TestUnit_RecallDrones_HungDBKeepsDronesFlying(t *testing.T) {
+	t.Parallel()
+	cfg := ordnanceCfg()
+	cfg.RepoTimeout = 20 * time.Millisecond
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
+	w := ordnanceWorker(t, ord, cfg, launchPair())
+
+	launchSalvo(t, w, 2)
+	ord.blockUntilCancel = true
+
+	reply := make(chan sector.RecallDronesResult, 1)
+	require.NoError(t, w.Send(testSector, sector.RecallDronesCommand{
+		PlayerID: 100, ShipID: 1, GoodsType: testDroneGoods, Reply: reply,
+	}))
+	done := make(chan struct{})
+	go func() {
+		w.Tick(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tick blocked on a hung recall")
+	}
+
+	res := <-reply
+	require.ErrorIs(t, res.Err, context.DeadlineExceeded)
+	assert.Zero(t, res.Recalled)
+	assert.Len(t, w.Snapshot(testSector).Drones, 2, "RAM changes only on success")
+}
+
+// TestUnit_RecallDrones_WithoutOrdnanceRefused: a worker built without
+// WithOrdnance must refuse the recall instead of deleting the drones with
+// nobody to credit the player. Same doctrine as the launch side (TASK-144):
+// losing the wiring in a refactor breaks loudly rather than eating a
+// consumable. The drones are seeded through WithDrones because a worker with no
+// ordnance cannot launch any.
+func TestUnit_RecallDrones_WithoutOrdnanceRefused(t *testing.T) {
+	t.Parallel()
+	live := []domain.Drone{
+		{ID: 7, SectorID: testSector, OwnerShipID: 1, PlayerID: 100, HP: 20,
+			Target: shipTarget(2), ExpiresAt: time.Now().Add(time.Hour)},
+	}
+	w := sector.NewWorker(0, ordnanceCfg(), clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: launchPair()},
+		sector.WithDrones(nil, map[domain.SectorID][]domain.Drone{testSector: live}))
+
+	reply := make(chan sector.RecallDronesResult, 1)
+	sendRecall(t, w, reply)
+
+	res := <-reply
+	require.ErrorIs(t, res.Err, sector.ErrOrdnanceUnavailable)
+	assert.Zero(t, res.Recalled)
+	assert.Len(t, w.Snapshot(testSector).Drones, 1, "the drone is not deleted uncredited")
+}
+
+// TestUnit_RecallDrones_ChargesDrainBudget: the recall writes to the DB inside
+// the tick like the launches do, so it must charge the same per-drain budget —
+// otherwise a queue of recalls against a hung Postgres chains a RepoTimeout each
+// and parks Run (and every sector this worker owns) with no tick in between.
+func TestUnit_RecallDrones_ChargesDrainBudget(t *testing.T) {
+	t.Parallel()
+	const (
+		queued      = 10
+		repoTimeout = 50 * time.Millisecond
+	)
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
+	cfg := ordnanceCfg()
+	cfg.InboxCapacity = 64
+	cfg.RepoTimeout = repoTimeout
+	w := ordnanceWorker(t, ord, cfg, launchPair())
+
+	launchSalvo(t, w, 2)
+	ord.blockUntilCancel = true
+	baseCalls := ord.calls
+
+	for i := 0; i < queued; i++ {
+		require.NoError(t, w.Send(testSector, sector.RecallDronesCommand{
+			PlayerID: 100, ShipID: 1, GoodsType: testDroneGoods,
+		}))
+	}
+
+	started := time.Now()
+	w.Tick(context.Background())
+	elapsed := time.Since(started)
+
+	assert.Less(t, elapsed, queued*repoTimeout/2,
+		"one drain must not chain a RepoTimeout stall per queued recall")
+	assert.Equal(t, baseCalls+1, ord.calls, "the budget stops the drain after the first stall")
 }

@@ -97,9 +97,7 @@ func (w *Worker) installJammer(s *sectorState, ship *domain.Ship, gtype domain.G
 	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
 	started := time.Now()
 	id, err := w.staticInstaller.InstallJammer(ctx, hold, gtype, jam)
-	// Wall clock on purpose: the budget bounds real time parked on DB I/O, which
-	// the injected (possibly fake) clock does not model.
-	w.spendDBBudget(time.Since(started))
+	w.spendDBBudget(started)
 	if err != nil {
 		w.logInstallError(err, "jammer", ship, gtype)
 		return 0, err

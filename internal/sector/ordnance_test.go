@@ -226,6 +226,20 @@ func ordnanceWorker(t *testing.T, ord sector.Ordnance, cfg sector.Config, ships 
 		map[domain.SectorID][]domain.Ship{testSector: ships}, opts...)
 }
 
+// modelledOrdnanceCost is the drain-budget tests' stand-in for time.Since, the
+// launch-side twin of modelledDBCost: a call the fake stalls until its deadline
+// cost a full RepoTimeout, a call it answers cost nothing worth charging. Stating
+// the cost instead of measuring it is what keeps those tests off the wall clock
+// (TASK-154).
+func modelledOrdnanceCost(ord *fakeOrdnance, repoTimeout time.Duration) func(time.Time) time.Duration {
+	return func(time.Time) time.Duration {
+		if ord.blockUntilCancel {
+			return repoTimeout
+		}
+		return 0
+	}
+}
+
 // torpedoOrdnanceWorker is ordnanceWorker plus torpedo persistence, wired so the
 // ordnance creates through the same fake repo the worker deletes/batches through.
 // Snapshot carries no torpedo set, so repo.liveCount mirrors the live RAM set —
@@ -589,6 +603,10 @@ func TestUnit_Launch_HungDBBoundedByRepoTimeout(t *testing.T) {
 //
 // launch-missile is the cheapest of the three to express: no projectile repo to
 // wire, and the live set is visible straight from the Snapshot.
+//
+// "One stall per drain" is asserted through ord.calls, not through how long
+// w.Tick took — the wall-clock form raced the scheduler under parallel load
+// (TASK-154). See TestUnit_Install_DrainBudgetBoundsOneDrain.
 func TestUnit_Launch_DrainBudgetBoundsOneDrain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -601,7 +619,8 @@ func TestUnit_Launch_DrainBudgetBoundsOneDrain(t *testing.T) {
 	cfg := ordnanceCfg()
 	cfg.InboxCapacity = 64
 	cfg.RepoTimeout = repoTimeout
-	w := ordnanceWorker(t, ord, cfg, launchPair())
+	w := ordnanceWorker(t, ord, cfg, launchPair(),
+		sector.WithDBDurationSource(modelledOrdnanceCost(ord, repoTimeout)))
 
 	for i := 0; i < queued; i++ {
 		require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
@@ -610,13 +629,10 @@ func TestUnit_Launch_DrainBudgetBoundsOneDrain(t *testing.T) {
 		}))
 	}
 
-	started := time.Now()
 	w.Tick(ctx)
-	elapsed := time.Since(started)
 
-	assert.Less(t, elapsed, queued*repoTimeout/2,
-		"one drain must not chain a RepoTimeout stall per queued launch")
-	assert.Equal(t, 1, ord.calls, "the budget stops the drain after the first stall")
+	assert.Equal(t, 1, ord.calls,
+		"the budget stops the drain after the first stall, instead of chaining a RepoTimeout stall per queued launch")
 	assert.Empty(t, w.Snapshot(testSector).Missiles, "the stalled launch fired nothing")
 
 	// The DB answers again: the commands the budget left queued apply on the next
@@ -918,6 +934,9 @@ func TestUnit_RecallDrones_WithoutOrdnanceRefused(t *testing.T) {
 // the tick like the launches do, so it must charge the same per-drain budget —
 // otherwise a queue of recalls against a hung Postgres chains a RepoTimeout each
 // and parks Run (and every sector this worker owns) with no tick in between.
+//
+// Asserted through ord.calls rather than how long w.Tick took, for the reason in
+// TestUnit_Install_DrainBudgetBoundsOneDrain (TASK-154).
 func TestUnit_RecallDrones_ChargesDrainBudget(t *testing.T) {
 	t.Parallel()
 	const (
@@ -928,7 +947,8 @@ func TestUnit_RecallDrones_ChargesDrainBudget(t *testing.T) {
 	cfg := ordnanceCfg()
 	cfg.InboxCapacity = 64
 	cfg.RepoTimeout = repoTimeout
-	w := ordnanceWorker(t, ord, cfg, launchPair())
+	w := ordnanceWorker(t, ord, cfg, launchPair(),
+		sector.WithDBDurationSource(modelledOrdnanceCost(ord, repoTimeout)))
 
 	launchSalvo(t, w, 2)
 	ord.blockUntilCancel = true
@@ -940,11 +960,8 @@ func TestUnit_RecallDrones_ChargesDrainBudget(t *testing.T) {
 		}))
 	}
 
-	started := time.Now()
 	w.Tick(context.Background())
-	elapsed := time.Since(started)
 
-	assert.Less(t, elapsed, queued*repoTimeout/2,
-		"one drain must not chain a RepoTimeout stall per queued recall")
-	assert.Equal(t, baseCalls+1, ord.calls, "the budget stops the drain after the first stall")
+	assert.Equal(t, baseCalls+1, ord.calls,
+		"the budget stops the drain after the first stall, instead of chaining a RepoTimeout stall per queued recall")
 }

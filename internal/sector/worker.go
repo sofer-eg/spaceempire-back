@@ -307,6 +307,14 @@ type Worker struct {
 	// writes off the tick goroutine — is TASK-148.
 	dbBudget time.Duration
 
+	// dbSince measures what one synchronous DB call really cost, and is the only
+	// thing that charges dbBudget (see spendDBBudget). Defaults to time.Since in
+	// NewWorker; tests replace it so the budget arithmetic does not depend on how
+	// long a fake call happens to take under scheduler load (TASK-154). Required,
+	// like logger and rng: a white-box test that hand-builds a Worker and reaches
+	// an install/launch helper has to set it.
+	dbSince func(started time.Time) time.Duration
+
 	// asteroidRepo persists minable asteroids (phase 5.4). Nil disables
 	// persistence (asteroids still mine down in RAM). Wired via
 	// WithAsteroids together with initialAsteroids.
@@ -683,6 +691,9 @@ func NewWorker(
 	}
 	if w.hostile == nil {
 		w.hostile = combat.NoHostility
+	}
+	if w.dbSince == nil {
+		w.dbSince = time.Since
 	}
 
 	now := clk.Now()
@@ -1105,11 +1116,19 @@ func (w *Worker) drainQueued() {
 	}
 }
 
-// spendDBBudget charges the current drain for a synchronous DB call's real time.
-// Only the install (TASK-144) and launch (TASK-147) commands call it — every
-// other command does no I/O, so the budget costs the hot path nothing.
-func (w *Worker) spendDBBudget(d time.Duration) {
-	w.dbBudget -= d
+// spendDBBudget charges the current drain for a synchronous DB call that began
+// at started. Only the install (TASK-144), launch (TASK-147) and recall
+// (TASK-152) commands call it — every other command does no I/O, so the budget
+// costs the hot path nothing.
+//
+// It takes the start instant rather than a duration so that measuring the call
+// is this one function's job: every helper charges through w.dbSince and none
+// can drift onto a clock of its own. Wall clock by default, on purpose — the
+// budget bounds real time parked on DB I/O, which the injected (possibly fake)
+// clock does not model. Tests override w.dbSince to state a call's cost outright
+// instead of racing the scheduler for it (TASK-154).
+func (w *Worker) spendDBBudget(started time.Time) {
+	w.dbBudget -= w.dbSince(started)
 }
 
 // logInstallError records a failed jammer/satellite install (TASK-144). A

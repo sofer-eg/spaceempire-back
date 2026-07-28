@@ -39,9 +39,7 @@ func (w *Worker) spendMissile(ship *domain.Ship, gtype domain.GoodsTypeID) error
 
 	started := time.Now()
 	err := w.ordnance.SpendMissile(ctx, shipHold(ship), gtype)
-	// Wall clock on purpose: the budget bounds real time parked on DB I/O, which
-	// the injected (possibly fake) clock does not model.
-	w.spendDBBudget(time.Since(started))
+	w.spendDBBudget(started)
 	if err != nil {
 		w.logOrdnanceError(err, "missile", ship, gtype, 1)
 		return err
@@ -60,7 +58,7 @@ func (w *Worker) launchTorpedo(ship *domain.Ship, gtype domain.GoodsTypeID, t do
 
 	started := time.Now()
 	id, err := w.ordnance.LaunchTorpedo(ctx, shipHold(ship), gtype, t)
-	w.spendDBBudget(time.Since(started))
+	w.spendDBBudget(started)
 	if err != nil {
 		w.logOrdnanceError(err, "torpedo", ship, gtype, 1)
 		return 0, err
@@ -84,7 +82,7 @@ func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []
 
 	started := time.Now()
 	ids, err := w.ordnance.LaunchDrones(ctx, shipHold(ship), gtype, ds)
-	w.spendDBBudget(time.Since(started))
+	w.spendDBBudget(started)
 	if err != nil {
 		w.logOrdnanceError(err, "drone", ship, gtype, len(ds))
 		return nil, err
@@ -138,7 +136,7 @@ func (w *Worker) recallDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ids [
 
 	started := time.Now()
 	credited, err := w.ordnance.RecallDrones(ctx, shipHold(ship), gtype, ids)
-	w.spendDBBudget(time.Since(started))
+	w.spendDBBudget(started)
 	if err != nil {
 		w.logRecallError(err, ship, gtype, len(ids))
 		return 0, err

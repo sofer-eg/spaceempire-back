@@ -93,8 +93,7 @@ func (w *Worker) installSatellite(s *sectorState, ship *domain.Ship, gtype domai
 	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
 	started := time.Now()
 	id, err := w.staticInstaller.InstallSatellite(ctx, hold, gtype, sat)
-	// Wall clock on purpose — see installJammer.
-	w.spendDBBudget(time.Since(started))
+	w.spendDBBudget(started)
 	if err != nil {
 		w.logInstallError(err, "satellite", ship, gtype)
 		return 0, err

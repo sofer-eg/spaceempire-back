@@ -124,12 +124,26 @@ func (f *fakeStaticInstaller) InstallSatellite(ctx context.Context, owner domain
 	return s.ID, nil
 }
 
-func installerWorker(t *testing.T, inst *fakeStaticInstaller, cfg sector.Config, ships []domain.Ship) *sector.Worker {
+func installerWorker(t *testing.T, inst *fakeStaticInstaller, cfg sector.Config, ships []domain.Ship, opts ...sector.Option) *sector.Worker {
 	t.Helper()
 	return sector.NewWorker(0, cfg, clock.NewRealClock(), nil, nil,
 		map[domain.SectorID][]domain.Ship{testSector: ships},
-		sector.WithStaticInstaller(inst),
+		append([]sector.Option{sector.WithStaticInstaller(inst)}, opts...)...,
 	)
+}
+
+// modelledDBCost is the duration source the drain-budget tests hand the worker
+// in place of time.Since: a call the fake stalls until its deadline cost a full
+// RepoTimeout of real time, a call it answers cost nothing worth charging. That
+// is the same arithmetic the wall clock produced, minus the race with the
+// scheduler that made it flaky (TASK-154).
+func modelledDBCost(inst *fakeStaticInstaller, repoTimeout time.Duration) func(time.Time) time.Duration {
+	return func(time.Time) time.Duration {
+		if inst.blockUntilCancel {
+			return repoTimeout
+		}
+		return 0
+	}
 }
 
 func installerTestShip() domain.Ship {
@@ -388,6 +402,11 @@ func TestUnit_Install_RunResetsDrainBudgetPerWakeUp(t *testing.T) {
 		slog.New(budgetStopHandler{n: &stops}),
 		map[domain.SectorID][]domain.Ship{testSector: {installerTestShip()}},
 		sector.WithStaticInstaller(inst),
+		// A DB that answers costs the budget nothing, stated rather than measured:
+		// the reset is what this test is about, and "eight fake installs fit in
+		// 2 s of wall clock" is an assumption about the scheduler, not about the
+		// reset (TASK-154).
+		sector.WithDBDurationSource(func(time.Time) time.Duration { return 0 }),
 	)
 
 	// Queued before Run starts, so the first wake-up finds the whole backlog in
@@ -412,8 +431,8 @@ func TestUnit_Install_RunResetsDrainBudgetPerWakeUp(t *testing.T) {
 	}
 
 	// Every ack is in, so every append the worker made is visible here.
-	// A healthy installer spends microseconds, so a full RepoTimeout budget
-	// carries the whole backlog in a single drain.
+	// A healthy installer costs nothing, so a full RepoTimeout budget carries the
+	// whole backlog in a single drain.
 	assert.Zero(t, stops.Load(),
 		"a drain against a healthy DB must not report giving up on the DB budget")
 	assert.Equal(t, queued, inst.calls)
@@ -428,8 +447,16 @@ func TestUnit_Install_RunResetsDrainBudgetPerWakeUp(t *testing.T) {
 //
 // With the budget, one drain spends at most ~RepoTimeout of DB time: the first
 // hung install exhausts it and the rest stay in the inbox for the next tick. The
-// test proves both halves — the drain returns far sooner than N × RepoTimeout,
-// and the queued remainder still applies once the DB answers again.
+// test proves both halves — one stall is all a drain pays for, and the queued
+// remainder still applies once the DB answers again.
+//
+// "One stall per drain" is asserted through inst.calls, not through how long
+// w.Tick took: the wall-clock form of this assertion raced the scheduler and
+// flaked under parallel load (TASK-154). The install still really runs into its
+// RepoTimeout deadline here — that is what makes the stalled one deploy nothing —
+// but what the budget is charged is stated by the injected duration source rather
+// than measured. TestUnit_Install_DrainBudgetSpendsProportionally pins the
+// subtraction itself.
 func TestUnit_Install_DrainBudgetBoundsOneDrain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -443,7 +470,8 @@ func TestUnit_Install_DrainBudgetBoundsOneDrain(t *testing.T) {
 			TickInterval: time.Second, AOIRadius: 2000,
 			InboxCapacity: 64, RepoTimeout: repoTimeout,
 		},
-		[]domain.Ship{installerTestShip()})
+		[]domain.Ship{installerTestShip()},
+		sector.WithDBDurationSource(modelledDBCost(inst, repoTimeout)))
 
 	for i := 0; i < queued; i++ {
 		require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{
@@ -451,13 +479,10 @@ func TestUnit_Install_DrainBudgetBoundsOneDrain(t *testing.T) {
 		}))
 	}
 
-	started := time.Now()
 	w.Tick(ctx)
-	elapsed := time.Since(started)
 
-	assert.Less(t, elapsed, queued*repoTimeout/2,
-		"one drain must not chain a RepoTimeout stall per queued install")
-	assert.Equal(t, 1, inst.calls, "the budget stops the drain after the first stall")
+	assert.Equal(t, 1, inst.calls,
+		"the budget stops the drain after the first stall, instead of chaining a RepoTimeout stall per queued install")
 
 	// The DB answers again: the commands the budget left queued apply on the next
 	// tick, so nothing was dropped — only deferred.
@@ -466,6 +491,52 @@ func TestUnit_Install_DrainBudgetBoundsOneDrain(t *testing.T) {
 	assert.Equal(t, queued, inst.calls, "the remainder was still in the inbox")
 	assert.Len(t, w.Snapshot(testSector).Statics.Jammers, queued-1,
 		"every command but the stalled one deployed")
+}
+
+// TestUnit_Install_DrainBudgetSpendsProportionally pins the arithmetic the
+// wall-clock assertion in TestUnit_Install_DrainBudgetBoundsOneDrain could only
+// approximate: the budget is RepoTimeout minus what each synchronous DB call
+// cost, tested after every applied command. A DB answering in a quarter of
+// RepoTimeout therefore carries exactly four installs per drain — not ten (a
+// budget never charged, i.e. spendDBBudget dropped from the install helpers),
+// not one (a budget zeroed by any call rather than debited by its cost), and not
+// four-then-nothing (a budget the next drain forgets to reset).
+//
+// Nothing here waits on real time: the fake answers immediately and the cost is
+// stated, so the assertion holds under any scheduler load (TASK-154).
+func TestUnit_Install_DrainBudgetSpendsProportionally(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const (
+		queued      = 10
+		repoTimeout = 400 * time.Millisecond
+		callCost    = repoTimeout / 4
+		perDrain    = 4
+	)
+	inst := &fakeStaticInstaller{stock: queued}
+	w := installerWorker(t, inst,
+		sector.Config{
+			TickInterval: time.Second, AOIRadius: 2000,
+			InboxCapacity: 64, RepoTimeout: repoTimeout,
+		},
+		[]domain.Ship{installerTestShip()},
+		sector.WithDBDurationSource(func(time.Time) time.Duration { return callCost }))
+
+	for i := 0; i < queued; i++ {
+		require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{
+			PlayerID: 7, ShipID: 1, GoodsType: 27, Reply: nil,
+		}))
+	}
+
+	w.Tick(ctx)
+	assert.Equal(t, perDrain, inst.calls, "one drain spends RepoTimeout at callCost per install")
+
+	w.Tick(ctx)
+	assert.Equal(t, 2*perDrain, inst.calls, "the next drain starts on a fresh budget, not the last one's overdraft")
+
+	w.Tick(ctx)
+	assert.Equal(t, queued, inst.calls, "the remainder applied — deferred, never dropped")
+	assert.Len(t, w.Snapshot(testSector).Statics.Jammers, queued)
 }
 
 // TestUnit_InstallJammer_GateRejectionSkipsCargo: a rejected gate (no such ship)

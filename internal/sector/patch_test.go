@@ -117,6 +117,117 @@ func TestUnit_BuildPatch_DetectsMiningTargetChange(t *testing.T) {
 	require.Len(t, stopped.Updated, 1, "clearing mining must surface the ship")
 }
 
+// TestUnit_BuildPatch_DetectsFinalTargetClear reproduces the NPC-miner path
+// (TASK-143): applyMovement drops Target and zeroes Vel on arrival, that state
+// reaches the subscriber, and only on the NEXT tick applyMine clears
+// FinalTarget on its own — no other observable field moves. Without FinalTarget
+// in shipEqual the client keeps a stale «МАРШРУТ» line until the next welcome
+// snapshot.
+func TestUnit_BuildPatch_DetectsFinalTargetClear(t *testing.T) {
+	t.Parallel()
+
+	course := domain.Course{Sector: 7, Pos: domain.Vec2{X: 100, Y: 200}}
+	arrived := domain.Ship{ID: 1, Pos: domain.Vec2{X: 100, Y: 200}, HP: 100, FinalTarget: &course}
+	mining := arrived
+	mining.FinalTarget = nil
+
+	assert.False(t, shipEqual(&arrived, &mining), "FinalTarget must be an observable field")
+
+	p := buildPatch(
+		map[domain.ShipID]domain.Ship{1: arrived},
+		map[domain.ShipID]domain.Ship{1: mining},
+		1,
+	)
+	require.Len(t, p.Updated, 1, "clearing the autopilot course alone must surface the ship")
+	assert.Nil(t, p.Updated[0].FinalTarget, "the patch must carry the NEW (cleared) course, not the stale one")
+}
+
+// TestUnit_BuildPatch_DetectsFinalTargetChange covers the remaining course
+// transitions the SPA renders as «МАРШРУТ»: arming a course, retargeting it to
+// another sector/position, and swapping the approach static. Each block asserts
+// the VALUE that travels in the patch, not just that something was sent —
+// asserting on len(Updated) alone still passes when the stale copy is shipped.
+func TestUnit_BuildPatch_DetectsFinalTargetChange(t *testing.T) {
+	t.Parallel()
+
+	parked := domain.Ship{ID: 1, Pos: domain.Vec2{X: 1, Y: 1}, HP: 100}
+	toSector7 := domain.Course{Sector: 7, Pos: domain.Vec2{X: 100, Y: 200}}
+	toSector9 := domain.Course{Sector: 9, Pos: domain.Vec2{X: 100, Y: 200}}
+
+	// Arm: nil -> set.
+	armedShip := parked
+	armedShip.FinalTarget = &toSector7
+	armed := buildPatch(
+		map[domain.ShipID]domain.Ship{1: parked},
+		map[domain.ShipID]domain.Ship{1: armedShip},
+		1,
+	)
+	require.Len(t, armed.Updated, 1, "setting a course must surface the ship")
+	require.NotNil(t, armed.Updated[0].FinalTarget)
+	assert.Equal(t, toSector7, *armed.Updated[0].FinalTarget, "the patch must carry the NEW course")
+
+	// Retarget: another destination sector.
+	retargetedShip := parked
+	retargetedShip.FinalTarget = &toSector9
+	retargeted := buildPatch(
+		map[domain.ShipID]domain.Ship{1: armedShip},
+		map[domain.ShipID]domain.Ship{1: retargetedShip},
+		1,
+	)
+	require.Len(t, retargeted.Updated, 1, "changing the destination sector must surface the ship")
+	require.NotNil(t, retargeted.Updated[0].FinalTarget)
+	assert.Equal(t, domain.SectorID(9), retargeted.Updated[0].FinalTarget.Sector,
+		"the patch must carry the NEW destination sector")
+
+	// Swap the approach static: same sector + position, different Approach value.
+	station5 := domain.EntityRef{Kind: domain.EntityKindStation, ID: 5}
+	station6 := domain.EntityRef{Kind: domain.EntityKindStation, ID: 6}
+	approach5 := parked
+	approach5.FinalTarget = &domain.Course{Sector: 9, Pos: toSector9.Pos, Approach: &station5}
+	approach6 := parked
+	approach6.FinalTarget = &domain.Course{Sector: 9, Pos: toSector9.Pos, Approach: &station6}
+	swapped := buildPatch(
+		map[domain.ShipID]domain.Ship{1: approach5},
+		map[domain.ShipID]domain.Ship{1: approach6},
+		1,
+	)
+	require.Len(t, swapped.Updated, 1, "changing the approach static must surface the ship")
+	require.NotNil(t, swapped.Updated[0].FinalTarget)
+	require.NotNil(t, swapped.Updated[0].FinalTarget.Approach)
+	assert.Equal(t, station6, *swapped.Updated[0].FinalTarget.Approach,
+		"the patch must carry the NEW approach ref")
+}
+
+// TestUnit_BuildPatch_FinalTargetApproachRecreatedIsNoChurn is the anti-churn
+// guard for TASK-143: shipsMapSubset deep-copies FinalTarget through
+// cloneCourse, which allocates a fresh Course AND a fresh Approach every tick.
+// A naive `*a.FinalTarget == *b.FinalTarget` compares Approach by pointer
+// identity and would therefore report "changed" every tick for every ship on an
+// approach course — a delta per such ship per subscriber per tick.
+func TestUnit_BuildPatch_FinalTargetApproachRecreatedIsNoChurn(t *testing.T) {
+	t.Parallel()
+
+	approach := domain.EntityRef{Kind: domain.EntityKindStation, ID: 5}
+	live := domain.Ship{
+		ID: 1, Pos: domain.Vec2{X: 1, Y: 1}, HP: 100,
+		FinalTarget: &domain.Course{Sector: 3, Pos: domain.Vec2{X: 10, Y: 10}, Approach: &approach},
+	}
+	src := map[domain.ShipID]*domain.Ship{1: &live}
+	ids := map[domain.ShipID]struct{}{1: {}}
+
+	// Two consecutive AOI snapshots of a ship nothing happened to.
+	prev := shipsMapSubset(src, ids)
+	curr := shipsMapSubset(src, ids)
+
+	require.NotSame(t, prev[1].FinalTarget, curr[1].FinalTarget,
+		"fixture must exercise distinct Course allocations")
+	require.NotSame(t, prev[1].FinalTarget.Approach, curr[1].FinalTarget.Approach,
+		"fixture must exercise distinct Approach allocations")
+
+	p := buildPatch(prev, curr, 1)
+	assert.True(t, p.IsEmpty(), "an unchanged approach course must not emit a delta every tick")
+}
+
 // TestUnit_BuildPatch_DetectsAccessToggle guards the «Вход открыт/закрыт» button
 // (TASK-126): a docked ship whose IsOpen flips — no Pos/Vel/HP change — must
 // still be broadcast, or the SPA keeps the stale isOpen (button text and its
@@ -128,7 +239,7 @@ func TestUnit_BuildPatch_DetectsAccessToggle(t *testing.T) {
 	open := closed
 	open.IsOpen = true
 
-	assert.False(t, shipEqual(closed, open), "IsOpen must be an observable field")
+	assert.False(t, shipEqual(&closed, &open), "IsOpen must be an observable field")
 
 	opened := buildPatch(
 		map[domain.ShipID]domain.Ship{1: closed},
@@ -157,7 +268,7 @@ func TestUnit_BuildPatch_DetectsStealthToggle(t *testing.T) {
 	cloaked := visible
 	cloaked.IsHidden = true
 
-	assert.False(t, shipEqual(visible, cloaked), "IsHidden must be an observable field")
+	assert.False(t, shipEqual(&visible, &cloaked), "IsHidden must be an observable field")
 
 	hidden := buildPatch(
 		map[domain.ShipID]domain.Ship{1: visible},

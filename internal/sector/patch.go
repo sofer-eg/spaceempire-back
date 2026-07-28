@@ -113,7 +113,7 @@ func buildPatch(prev, curr map[domain.ShipID]domain.Ship, tick uint64) Patch {
 			p.Added = append(p.Added, c)
 			continue
 		}
-		if !shipEqual(pv, c) {
+		if !shipEqual(&pv, &c) {
 			p.Updated = append(p.Updated, c)
 		}
 	}
@@ -131,7 +131,10 @@ func buildPatch(prev, curr map[domain.ShipID]domain.Ship, tick uint64) Patch {
 // here as they become visible. Acceleration/TurnRate are class
 // characteristics fixed at Create — never change between ticks in the
 // current model.
-func shipEqual(a, b domain.Ship) bool {
+//
+// Takes pointers: domain.Ship is ~400 B and this runs once per
+// (subscriber × visible ship) per tick, on values the caller already holds.
+func shipEqual(a, b *domain.Ship) bool {
 	if a.ID != b.ID || a.PlayerID != b.PlayerID || a.SectorID != b.SectorID {
 		return false
 	}
@@ -186,6 +189,14 @@ func shipEqual(a, b domain.Ship) bool {
 	if !equipmentEqual(a.Equipment, b.Equipment) {
 		return false
 	}
+	// FinalTarget is the autopilot course; it travels in the Ship DTO as
+	// finalTarget and the SPA renders it as the «МАРШРУТ» line. It can change
+	// on its own, with no other observable field moving: applyMine holds an
+	// arrived miner on station by clearing FinalTarget one tick after
+	// applyMovement already dropped Target and zeroed Vel (TASK-143).
+	if !courseEqual(a.FinalTarget, b.FinalTarget) {
+		return false
+	}
 	switch {
 	case a.Target == nil && b.Target == nil:
 		return true
@@ -220,6 +231,23 @@ func entityRefPtrEqual(a, b *domain.EntityRef) bool {
 		return false
 	default:
 		return *a == *b
+	}
+}
+
+// courseEqual reports value equality of two *Course pointers, treating two
+// nils as equal. The nested Approach is compared BY VALUE: every snapshot runs
+// FinalTarget through cloneCourse, which allocates a fresh Approach, so a
+// pointer-identity comparison would report a change every tick for every ship
+// holding an approach course.
+func courseEqual(a, b *domain.Course) bool {
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return a.Sector == b.Sector && a.Pos == b.Pos &&
+			entityRefPtrEqual(a.Approach, b.Approach)
 	}
 }
 

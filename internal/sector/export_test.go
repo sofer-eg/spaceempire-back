@@ -19,3 +19,14 @@ func WithDBDurationSource(since func(started time.Time) time.Duration) Option {
 		w.dbSince = since
 	}
 }
+
+// DBCallCost exposes the measurement itself, which is what every other budget
+// test replaces and therefore what none of them covers: with
+// WithDBDurationSource in play, a production measurement that returned zero (or
+// read the injected clock) would leave the whole unit suite green while a hung
+// Postgres stopped charging the drain budget — the TASK-144 regress it exists to
+// prevent. TestUnit_Worker_DBBudgetChargesRealElapsedTime is the one test that
+// holds it.
+func (w *Worker) DBCallCost(started time.Time) time.Duration {
+	return w.dbCallCost(started)
+}

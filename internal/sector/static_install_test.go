@@ -134,12 +134,13 @@ func installerWorker(t *testing.T, inst *fakeStaticInstaller, cfg sector.Config,
 
 // modelledDBCost is the duration source the drain-budget tests hand the worker
 // in place of time.Since: a call the fake stalls until its deadline cost a full
-// RepoTimeout of real time, a call it answers cost nothing worth charging. That
-// is the same arithmetic the wall clock produced, minus the race with the
+// RepoTimeout of real time, a call it answers cost nothing worth charging. hung
+// reports which of the two the fake — installer or ordnance — is doing right now.
+// That is the same arithmetic the wall clock produced, minus the race with the
 // scheduler that made it flaky (TASK-154).
-func modelledDBCost(inst *fakeStaticInstaller, repoTimeout time.Duration) func(time.Time) time.Duration {
+func modelledDBCost(hung func() bool, repoTimeout time.Duration) func(time.Time) time.Duration {
 	return func(time.Time) time.Duration {
-		if inst.blockUntilCancel {
+		if hung() {
 			return repoTimeout
 		}
 		return 0
@@ -471,7 +472,7 @@ func TestUnit_Install_DrainBudgetBoundsOneDrain(t *testing.T) {
 			InboxCapacity: 64, RepoTimeout: repoTimeout,
 		},
 		[]domain.Ship{installerTestShip()},
-		sector.WithDBDurationSource(modelledDBCost(inst, repoTimeout)))
+		sector.WithDBDurationSource(modelledDBCost(func() bool { return inst.blockUntilCancel }, repoTimeout)))
 
 	for i := 0; i < queued; i++ {
 		require.NoError(t, w.Send(testSector, sector.InstallJammerCommand{
@@ -537,6 +538,29 @@ func TestUnit_Install_DrainBudgetSpendsProportionally(t *testing.T) {
 	w.Tick(ctx)
 	assert.Equal(t, queued, inst.calls, "the remainder applied — deferred, never dropped")
 	assert.Len(t, w.Snapshot(testSector).Statics.Jammers, queued)
+}
+
+// TestUnit_Worker_DBBudgetChargesRealElapsedTime holds the one thing every other
+// budget test replaces: the production measurement (TASK-154 review). Those tests
+// all inject WithDBDurationSource, so a measurement that returned zero — a
+// dropped default, or the "unify the clocks" refactor this seam exists to
+// forestall (w.dbSince = the injected clock) — would leave the whole unit suite
+// green while a hung Postgres charged the drain nothing, chaining a RepoTimeout
+// per queued install and parking Run with no tick in between. That is the
+// TASK-144 regress, restored in silence.
+//
+// The worker gets a clock frozen in January on purpose: real elapsed time since
+// an instant an hour ago is always at least an hour, while anything derived from
+// the injected clock measures against that frozen January and misses by months.
+// Nothing waits — the start instant is simply in the past.
+func TestUnit_Worker_DBBudgetChargesRealElapsedTime(t *testing.T) {
+	t.Parallel()
+	w := sector.NewWorker(0, sector.Config{TickInterval: time.Second},
+		clock.NewFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+		nil, nil, nil)
+
+	assert.GreaterOrEqual(t, w.DBCallCost(time.Now().Add(-time.Hour)), time.Hour,
+		"the drain budget must be charged a DB call's real elapsed time, not the injected clock's")
 }
 
 // TestUnit_InstallJammer_GateRejectionSkipsCargo: a rejected gate (no such ship)

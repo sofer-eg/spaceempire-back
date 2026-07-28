@@ -273,8 +273,13 @@ func TestUnit_Worker_FakeClock1000Ticks_Instant(t *testing.T) {
 	}
 	wall := time.Since(start)
 
-	if wall > 200*time.Millisecond {
-		t.Fatalf("1000 ticks took %v wall clock, want < 200ms", wall)
+	// The signal is "a tick does not sleep out its TickInterval on the fake
+	// clock": the regress this catches costs 1000 × 1 s, three orders of magnitude
+	// past any threshold worth naming. A few seconds keeps that entirely while
+	// leaving room for -race on a machine running other suites — a tighter bound
+	// measures the scheduler, not the clock (TASK-154 review).
+	if wall > 5*time.Second {
+		t.Fatalf("1000 ticks took %v wall clock, want < 5s", wall)
 	}
 
 	snap := w.Snapshot(testSector)

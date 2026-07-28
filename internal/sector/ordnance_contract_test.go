@@ -61,7 +61,6 @@ func TestUnit_LaunchDrones_IDCountContract(t *testing.T) {
 				logger:   slog.New(slog.DiscardHandler),
 				cfg:      Config{RepoTimeout: time.Second},
 				ordnance: miscountingOrdnance{ids: ids},
-				dbSince:  time.Since,
 			}
 			got, err := w.launchDrones(ship, 51, salvo)
 			require.ErrorIs(t, err, errOrdnanceIDCount)
@@ -76,7 +75,6 @@ func TestUnit_LaunchDrones_IDCountContract(t *testing.T) {
 			logger:   slog.New(slog.DiscardHandler),
 			cfg:      Config{RepoTimeout: time.Second},
 			ordnance: miscountingOrdnance{ids: []domain.DroneID{1, 2}},
-			dbSince:  time.Since,
 		}
 		got, err := w.launchDrones(ship, 51, salvo)
 		require.NoError(t, err)

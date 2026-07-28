@@ -228,29 +228,21 @@ func ordnanceWorker(t *testing.T, ord sector.Ordnance, cfg sector.Config, ships 
 		map[domain.SectorID][]domain.Ship{testSector: ships}, opts...)
 }
 
-// modelledOrdnanceCost is the drain-budget tests' stand-in for time.Since, the
-// launch-side twin of modelledDBCost: a call the fake stalls until its deadline
-// cost a full RepoTimeout, a call it answers cost nothing worth charging. Stating
-// the cost instead of measuring it is what keeps those tests off the wall clock
-// (TASK-154).
-func modelledOrdnanceCost(ord *fakeOrdnance, repoTimeout time.Duration) func(time.Time) time.Duration {
-	return func(time.Time) time.Duration {
-		if ord.blockUntilCancel {
-			return repoTimeout
-		}
-		return 0
-	}
+// ordnanceHung adapts a fake ordnance to modelledDBCost (static_install_test.go),
+// the drain-budget tests' stand-in for time.Since.
+func ordnanceHung(ord *fakeOrdnance) func() bool {
+	return func() bool { return ord.blockUntilCancel }
 }
 
 // torpedoOrdnanceWorker is ordnanceWorker plus torpedo persistence, wired so the
 // ordnance creates through the same fake repo the worker deletes/batches through.
 // Snapshot carries no torpedo set, so repo.liveCount mirrors the live RAM set —
 // the same proxy torpedos_test.go uses.
-func torpedoOrdnanceWorker(t *testing.T, ord *fakeOrdnance, cfg sector.Config, ships []domain.Ship) (*sector.Worker, *fakeTorpedoRepo) {
+func torpedoOrdnanceWorker(t *testing.T, ord *fakeOrdnance, cfg sector.Config, ships []domain.Ship, opts ...sector.Option) (*sector.Worker, *fakeTorpedoRepo) {
 	t.Helper()
 	repo := newFakeTorpedoRepo()
 	ord.torpedoRepo = repo
-	return ordnanceWorker(t, ord, cfg, ships, sector.WithTorpedos(repo, nil)), repo
+	return ordnanceWorker(t, ord, cfg, ships, append([]sector.Option{sector.WithTorpedos(repo, nil)}, opts...)...), repo
 }
 
 func ordnanceCfg() sector.Config {
@@ -603,48 +595,97 @@ func TestUnit_Launch_HungDBBoundedByRepoTimeout(t *testing.T) {
 // reaches the worker. Delete spendDBBudget from the launch helpers and this test
 // is the one that fails.
 //
-// launch-missile is the cheapest of the three to express: no projectile repo to
-// wire, and the live set is visible straight from the Snapshot.
+// All three launch commands are covered, one subtest each, because the charge is
+// per helper: deleting spendDBBudget from launchTorpedo and launchDrones alone
+// used to leave the whole package green, since only the missile path was
+// exercised here (TASK-154 review). launch-missile carries the full story on top
+// — no projectile repo to wire and the live set is visible straight from the
+// Snapshot, so it can also show the remainder applying once the DB answers.
 //
 // "One stall per drain" is asserted through ord.calls, not through how long
 // w.Tick took — the wall-clock form raced the scheduler under parallel load
 // (TASK-154). See TestUnit_Install_DrainBudgetBoundsOneDrain.
 func TestUnit_Launch_DrainBudgetBoundsOneDrain(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
 	const (
 		queued      = 10
 		repoTimeout = 50 * time.Millisecond
 	)
-	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testMissileGoods: queued})
-	ord.blockUntilCancel = true
 	cfg := ordnanceCfg()
 	cfg.InboxCapacity = 64
 	cfg.RepoTimeout = repoTimeout
-	w := ordnanceWorker(t, ord, cfg, launchPair(),
-		sector.WithDBDurationSource(modelledOrdnanceCost(ord, repoTimeout)))
 
-	for i := 0; i < queued; i++ {
-		require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
-			PlayerID: 100, ShipID: 1, Target: shipTarget(2),
-			GoodsType: testMissileGoods, Reply: nil,
-		}))
-	}
+	const stallMsg = "the budget stops the drain after the first stall, instead of chaining a RepoTimeout stall per queued launch"
 
-	w.Tick(ctx)
+	t.Run("missile", func(t *testing.T) {
+		t.Parallel()
+		ctx := context.Background()
+		ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testMissileGoods: queued})
+		ord.blockUntilCancel = true
+		w := ordnanceWorker(t, ord, cfg, launchPair(),
+			sector.WithDBDurationSource(modelledDBCost(ordnanceHung(ord), repoTimeout)))
 
-	assert.Equal(t, 1, ord.calls,
-		"the budget stops the drain after the first stall, instead of chaining a RepoTimeout stall per queued launch")
-	assert.Empty(t, w.Snapshot(testSector).Missiles, "the stalled launch fired nothing")
+		for i := 0; i < queued; i++ {
+			require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
+				PlayerID: 100, ShipID: 1, Target: shipTarget(2),
+				GoodsType: testMissileGoods, Reply: nil,
+			}))
+		}
 
-	// The DB answers again: the commands the budget left queued apply on the next
-	// tick, so nothing was dropped — only deferred. The stalled one never charged
-	// (the fake blocks before the debit), so the magazine covers the rest.
-	ord.blockUntilCancel = false
-	w.Tick(ctx)
-	assert.Equal(t, queued, ord.calls, "the remainder was still in the inbox")
-	assert.Equal(t, queued-1, ord.debits, "every command but the stalled one charged")
-	assert.Len(t, w.Snapshot(testSector).Missiles, queued-1)
+		w.Tick(ctx)
+
+		assert.Equal(t, 1, ord.calls, stallMsg)
+		assert.Empty(t, w.Snapshot(testSector).Missiles, "the stalled launch fired nothing")
+
+		// The DB answers again: the commands the budget left queued apply on the next
+		// tick, so nothing was dropped — only deferred. The stalled one never charged
+		// (the fake blocks before the debit), so the magazine covers the rest.
+		ord.blockUntilCancel = false
+		w.Tick(ctx)
+		assert.Equal(t, queued, ord.calls, "the remainder was still in the inbox")
+		assert.Equal(t, queued-1, ord.debits, "every command but the stalled one charged")
+		assert.Len(t, w.Snapshot(testSector).Missiles, queued-1)
+	})
+
+	t.Run("torpedo", func(t *testing.T) {
+		t.Parallel()
+		ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testTorpedoGoods: queued})
+		ord.blockUntilCancel = true
+		w, repo := torpedoOrdnanceWorker(t, ord, cfg, launchPair(),
+			sector.WithDBDurationSource(modelledDBCost(ordnanceHung(ord), repoTimeout)))
+
+		for i := 0; i < queued; i++ {
+			require.NoError(t, w.Send(testSector, sector.LaunchTorpedoCommand{
+				PlayerID: 100, ShipID: 1, Class: 2, Target: shipTarget(2),
+				GoodsType: testTorpedoGoods, Reply: nil,
+			}))
+		}
+
+		w.Tick(context.Background())
+
+		assert.Equal(t, 1, ord.calls, stallMsg)
+		assert.Zero(t, repo.liveCount(), "the stalled launch created no torpedo")
+	})
+
+	t.Run("drone", func(t *testing.T) {
+		t.Parallel()
+		ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2 * queued})
+		ord.blockUntilCancel = true
+		w := ordnanceWorker(t, ord, cfg, launchPair(),
+			sector.WithDBDurationSource(modelledDBCost(ordnanceHung(ord), repoTimeout)))
+
+		for i := 0; i < queued; i++ {
+			require.NoError(t, w.Send(testSector, sector.LaunchDroneCommand{
+				PlayerID: 100, ShipID: 1, Target: shipTarget(2), Count: 2,
+				GoodsType: testDroneGoods, Reply: nil,
+			}))
+		}
+
+		w.Tick(context.Background())
+
+		assert.Equal(t, 1, ord.calls, stallMsg)
+		assert.Empty(t, w.Snapshot(testSector).Drones, "the stalled launch spawned no drone")
+	})
 }
 
 // TestUnit_Launch_WithoutOrdnanceRefused: a worker built without WithOrdnance
@@ -980,7 +1021,7 @@ func TestUnit_RecallDrones_ChargesDrainBudget(t *testing.T) {
 	cfg.InboxCapacity = 64
 	cfg.RepoTimeout = repoTimeout
 	w := ordnanceWorker(t, ord, cfg, launchPair(),
-		sector.WithDBDurationSource(modelledOrdnanceCost(ord, repoTimeout)))
+		sector.WithDBDurationSource(modelledDBCost(ordnanceHung(ord), repoTimeout)))
 
 	launchSalvo(t, w, 2)
 	ord.blockUntilCancel = true

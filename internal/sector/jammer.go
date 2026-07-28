@@ -69,10 +69,10 @@ func (c InstallJammerCommand) apply(w *Worker, s *sectorState) {
 // The command apply path carries no context, so the DB call is bounded by
 // cfg.RepoTimeout instead of running under an uninterruptible background
 // context: a hung Postgres stalls the tick for at most that long (AC#3). Its
-// real cost is charged to the drain's install budget, which caps ONE drain at
+// real cost is charged to the drain's DB budget, which caps ONE drain at
 // ~2 × RepoTimeout so a queue of installs cannot park Run without a tick in
 // between — it does not shorten the queue's total stall (see
-// Worker.installBudget).
+// Worker.dbBudget).
 func (w *Worker) installJammer(s *sectorState, ship *domain.Ship, gtype domain.GoodsTypeID) (domain.JammerID, error) {
 	if w.staticInstaller == nil {
 		return 0, ErrInstallerUnavailable
@@ -99,7 +99,7 @@ func (w *Worker) installJammer(s *sectorState, ship *domain.Ship, gtype domain.G
 	id, err := w.staticInstaller.InstallJammer(ctx, hold, gtype, jam)
 	// Wall clock on purpose: the budget bounds real time parked on DB I/O, which
 	// the injected (possibly fake) clock does not model.
-	w.spendInstallBudget(time.Since(started))
+	w.spendDBBudget(time.Since(started))
 	if err != nil {
 		w.logInstallError(err, "jammer", ship, gtype)
 		return 0, err

@@ -13,9 +13,14 @@ import (
 
 const testSector = domain.SectorID(1)
 
+// newSingleSectorWorker builds the default test worker. It wires an unlimited
+// fakeOrdnance because launches are the only path that charges ammunition
+// (TASK-147) and a worker without one refuses to fire at all; tests that care
+// about the accounting build their own via ordnanceWorker.
 func newSingleSectorWorker(t *testing.T, cfg sector.Config, clk clock.Clock, repo sector.ShipRepo, initial []domain.Ship) *sector.Worker {
 	t.Helper()
-	return sector.NewWorker(0, cfg, clk, repo, nil, map[domain.SectorID][]domain.Ship{testSector: initial})
+	return sector.NewWorker(0, cfg, clk, repo, nil, map[domain.SectorID][]domain.Ship{testSector: initial},
+		sector.WithOrdnance(unlimitedOrdnance()))
 }
 
 func TestUnit_Worker_MoveCommand_ReachesTarget(t *testing.T) {

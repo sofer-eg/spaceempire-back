@@ -12,6 +12,15 @@ import (
 	"spaceempire/back/internal/sector"
 )
 
+// DroneCargo is the slice of cargo.Service the recall handler needs: crediting
+// recalled drones back to the ship's hold. Declared here per ISP so handler
+// tests can stub it without the full *cargo.Service surface. The launch side owns
+// no cargo — its debit lives in the worker's sector.Ordnance (TASK-147) — so
+// Refund is the only operation left on the HTTP layer.
+type DroneCargo interface {
+	Refund(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error
+}
+
 // handleRecallDrones removes every live drone owned by the player's ship
 // and returns one drone cargo unit per recalled drone. The worker is the
 // source of truth for how many are still alive, so cargo is credited only
@@ -80,5 +89,16 @@ func (s *Server) handleRecallDrones(w http.ResponseWriter, r *http.Request) {
 		})
 	case <-ctx.Done():
 		writeError(w, http.StatusGatewayTimeout, "command timeout")
+	}
+}
+
+// refundDrones credits qty drone units back to the ship's hold. Errors are
+// logged — the HTTP response has already been chosen.
+func (s *Server) refundDrones(ctx context.Context, owner domain.EntityRef, qty int) {
+	if s.droneCargo == nil || qty <= 0 {
+		return
+	}
+	if err := s.droneCargo.Refund(ctx, owner, DroneGoodsType, int64(qty)); err != nil {
+		s.logger.Error("drone refund failed", "err", err, "ship", owner.ID, "qty", qty)
 	}
 }

@@ -59,6 +59,13 @@ var (
 	// goods in the same transaction as the object INSERT — so a missing one is a
 	// wiring fault, not a licence to deploy for free. HTTP maps it to 503.
 	ErrInstallerUnavailable = errors.New("sector: static installer not wired")
+	// ErrOrdnanceUnavailable is reported by LaunchMissileCommand /
+	// LaunchTorpedoCommand / LaunchDroneCommand when the worker has no Ordnance
+	// wired (TASK-147). The ordnance is the ONLY launch path — it is what charges
+	// the ammunition in the same transaction as the projectile INSERTs — so a
+	// missing one is a wiring fault, not a licence to fire for free. HTTP maps it
+	// to 503. Paired with ErrInstallerUnavailable, same doctrine.
+	ErrOrdnanceUnavailable = errors.New("sector: ordnance not wired")
 )
 
 // shipEquipmentLevel returns the install level of the first module of the given
@@ -409,12 +416,15 @@ type LaunchMissileResult struct {
 // must be in the same sector and either a different ship or a destructible
 // static (TASK-113: missileTargetable); other kinds, self-targeting, and a
 // dead/missing target are rejected with ErrInvalidAttackTarget.
-// Cargo accounting (1 missile consumed) happens outside the worker —
-// the HTTP handler debits cargo before Send, refunds on reply.Err.
+// The ammunition debit (1 missile) happens inside apply, through Ordnance
+// (TASK-147), so a lost ack cannot leave the player with a free missile.
 type LaunchMissileCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
 	Target   domain.EntityRef
+	// GoodsType is the goods id one missile costs (50); the handler owns that
+	// constant so the sector package stays free of the goods catalog.
+	GoodsType domain.GoodsTypeID
 	// Now lets tests inject a deterministic clock; production wiring leaves
 	// it zero and the worker substitutes its own clock.Now(). Keeping the
 	// resolved time on the command (instead of reading w.clock inside apply)
@@ -470,17 +480,22 @@ func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
 		return
 	}
 
-	// Phase 10.3.1: a launch is an "action" energy expense. Reject when the
-	// pool cannot cover the launcher's cost; debit it on success so repeated
-	// fire drains the ship until it recharges. Cost 0 disables the gate (tests).
+	// Phase 10.3.1: a launch is an "action" energy expense. Reject when the pool
+	// cannot cover the launcher's cost. Cost 0 disables the gate (tests). The
+	// debit itself waits until the launch has committed (below).
 	if ship.Energy < c.EnergyCost {
 		res.Err = ErrNotEnoughEnergy
 		replyLaunchMissile(c.Reply, res)
 		return
 	}
-	if c.EnergyCost > 0 {
-		ship.Energy -= c.EnergyCost
-		s.markDirty(c.ShipID)
+
+	// Charge the ammunition (TASK-147). Last thing before the missile exists, so
+	// every gate above rejects without touching the hold; and if the charge fails
+	// the energy is still untouched — a refused launch spends nothing.
+	if err := w.spendMissile(ship, c.GoodsType); err != nil {
+		res.Err = err
+		replyLaunchMissile(c.Reply, res)
+		return
 	}
 
 	now := c.Now
@@ -490,6 +505,14 @@ func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
 	id := s.allocMissileID()
 	m := combat.LaunchMissile(id, missileSpec, ship, c.Target, targetPos, now)
 	s.missiles[id] = m
+
+	// Debit the action energy only once the launch has committed, so a rejected or
+	// failed launch spends nothing (mirrors LaunchTorpedoCommand / ЧТЗ AC-3).
+	if c.EnergyCost > 0 {
+		ship.Energy -= c.EnergyCost
+		s.markDirty(c.ShipID)
+	}
+
 	res.MissileID = id
 	if ship.IsHidden {
 		ship.MissileJustFired = true // reveal for this tick's snapshot (phase 10.20a)
@@ -521,22 +544,20 @@ type LaunchTorpedoResult struct {
 // FR-002/004/006). Modelled on LaunchMissileCommand: ownership is enforced, the
 // ship must carry up_torpedo_launcher and be undocked, and a launch spends the
 // launcher's "action" energy. Unlike a missile, a torpedo may also strike a
-// destructible static (IsStaticTargetKind), not just a ship. Cargo accounting
-// (1 unit of the class's goods type) happens in the HTTP handler, which refunds
-// on reply.Err.
-//
-// Spawning the torpedo object (combat.LaunchTorpedo + insert into sectorState +
-// torpedoRepo.Create + the homing tick) is sub-task TASK-100.3.5.4; see the
-// seam at the end of apply.
+// destructible static (IsStaticTargetKind), not just a ship. The ammunition debit
+// (1 unit of GoodsType) happens inside apply, in the same transaction as the
+// torpedo row (TASK-147).
 type LaunchTorpedoCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
 	Target   domain.EntityRef
 	// Class is the ammunition class: 2 (gt23 "Огненная Буря") or 3 (gt24
-	// "Святая Торпеда"). It selects the balance spec when sub-task .4 spawns
-	// the torpedo; the launch gates here do not depend on it (the handler maps
-	// class → goods type for the cargo debit).
+	// "Святая Торпеда"). It selects the balance spec the torpedo spawns with; the
+	// launch gates here do not depend on it (the handler maps class → GoodsType).
 	Class int
+	// GoodsType is the goods id one torpedo of Class costs (gt23 / gt24); the
+	// handler owns that mapping so the sector package stays free of the catalog.
+	GoodsType domain.GoodsTypeID
 	// EnergyCost is the "action" energy a launch spends (phase 10.3.1), sourced
 	// from up_torpedo_launcher.energy_usage by the HTTP handler. The worker
 	// rejects the launch with ErrNotEnoughEnergy when Energy < EnergyCost and
@@ -589,27 +610,20 @@ func (c LaunchTorpedoCommand) apply(w *Worker, s *sectorState) {
 		return
 	}
 
-	// Spawn the torpedo from the class spec. Persist it immediately (the row's
-	// DB id is the authoritative TorpedoID that survives restarts); fall back to
-	// a worker-local id when no repo is wired (pure unit tests).
+	// Spawn the torpedo from the class spec. The ammunition debit and the row
+	// INSERT commit as ONE transaction through Ordnance (TASK-147), so the DB id
+	// that comes back — the authoritative TorpedoID that survives restarts — is
+	// proof the player paid. A failure means neither happened.
 	now := w.clock.Now()
 	spec := combat.DefaultTorpedoSpec(c.Class)
 	t := combat.LaunchTorpedo(0, c.Class, spec, ship, c.Target, targetPos, now)
-	var id domain.TorpedoID
-	if w.torpedoRepo != nil {
-		created, err := w.torpedoRepo.Create(context.Background(), *t)
-		if err != nil {
-			// Persist failed before the launch committed — surface the error so
-			// the HTTP handler refunds the ammunition. No energy was debited yet.
-			w.logger.Error("torpedo create failed",
-				"err", err, "ship", int64(c.ShipID), "sector", int64(s.sectorID))
-			res.Err = err
-			replyLaunchTorpedo(c.Reply, res)
-			return
-		}
-		id = created
-	} else {
-		id = s.allocTorpedoID()
+	id, err := w.launchTorpedo(ship, c.GoodsType, *t)
+	if err != nil {
+		// Nothing committed, and no energy was debited yet — the HTTP handler has
+		// nothing to compensate.
+		res.Err = err
+		replyLaunchTorpedo(c.Reply, res)
+		return
 	}
 	t.ID = id
 	s.torpedos[id] = t
@@ -654,25 +668,30 @@ func replyLaunchTorpedo(reply chan<- LaunchTorpedoResult, res LaunchTorpedoResul
 	}
 }
 
-// LaunchDroneResult reports how many drones were actually spawned. The
-// HTTP handler debits Count units up front and refunds (Count - Spawned)
-// so a partial DB failure does not silently swallow the player's cargo.
+// LaunchDroneResult reports how many drones were actually spawned, which the
+// handler echoes for client-side tracking. Since TASK-147 the whole salvo is
+// charged and INSERTed in one transaction, so Spawned is either the clamped
+// salvo size or (on error) zero — never a fraction the handler has to refund.
 type LaunchDroneResult struct {
 	Err     error
 	Spawned int
 }
 
-// LaunchDroneCommand spawns Count combat drones from ShipID, each launched
-// at Target. Ownership is enforced; the target must be a live ship in the
-// same sector (phase 4.4: explicitly-assigned target only, see
-// drones.md §4). Each drone is INSERTed immediately so it survives a
-// restart; the assigned id is the DB primary key (or a fallback counter
-// when no DroneRepo is wired). Cargo accounting happens in the handler.
+// LaunchDroneCommand spawns up to Count combat drones from ShipID, each launched
+// at Target. Ownership is enforced; the target must be a live ship in the same
+// sector (phase 4.4: explicitly-assigned target only, see drones.md §4). The
+// salvo is clamped to what up_drone_control still allows, then charged and
+// INSERTed as ONE transaction through Ordnance (TASK-147), so each drone survives
+// a restart under its DB primary key and the player pays for exactly the drones
+// that flew.
 type LaunchDroneCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
 	Target   domain.EntityRef
 	Count    int
+	// GoodsType is the goods id one drone costs (51); the handler owns that
+	// constant so the sector package stays free of the goods catalog.
+	GoodsType domain.GoodsTypeID
 	// Now lets tests inject a deterministic clock; zero means the worker
 	// substitutes its own clock.Now(). Same convention as
 	// LaunchMissileCommand.
@@ -714,7 +733,12 @@ func (c LaunchDroneCommand) apply(w *Worker, s *sectorState) {
 	}
 
 	// Phase 10.14b: cap the salvo so live drones never exceed the
-	// up_drone_control level. The handler refunds the unspawned remainder.
+	// up_drone_control level. Since TASK-147 the clamped size — not the requested
+	// Count — is what gets charged: the cap is only known here, in the worker, so
+	// billing the request would make the player pay for drones the cap refuses.
+	// The visible consequence is deliberately milder than before: asking for 5
+	// with a level-2 module and 3 units in the hold used to fail the handler's
+	// Consume(5) outright; now 2 launch and 2 are charged.
 	cap := shipEquipmentLevel(ship, "up_drone_control")
 	live := s.liveDroneCount(c.ShipID)
 	allowed := cap - live
@@ -732,27 +756,30 @@ func (c LaunchDroneCommand) apply(w *Worker, s *sectorState) {
 	if now.IsZero() {
 		now = w.clock.Now()
 	}
-	for i := 0; i < toSpawn; i++ {
+	ds := make([]domain.Drone, toSpawn)
+	for i := range ds {
 		d := combat.LaunchDrone(0, droneSpec, ship, c.Target, now)
 		nudgeDroneSpawn(d, i, toSpawn)
-
-		var id domain.DroneID
-		if w.droneRepo != nil {
-			created, err := w.droneRepo.Create(context.Background(), *d)
-			if err != nil {
-				w.logger.Error("drone create failed",
-					"err", err, "ship", int64(c.ShipID), "sector", int64(s.sectorID))
-				break
-			}
-			id = created
-		} else {
-			id = s.allocDroneID()
-		}
-		d.ID = id
-		s.drones[id] = d
-		s.markDroneDirty(id)
-		res.Spawned++
+		ds[i] = *d
 	}
+
+	// One all-or-nothing transaction: too little ammunition for the clamped salvo
+	// rejects the whole launch, and no INSERT can fail halfway. That is what makes
+	// a partial spawn — and the handler-side remainder refund it used to need —
+	// structurally impossible.
+	ids, err := w.launchDrones(ship, c.GoodsType, ds)
+	if err != nil {
+		res.Err = err
+		replyLaunchDrone(c.Reply, res)
+		return
+	}
+	for i, id := range ids {
+		d := ds[i]
+		d.ID = id
+		s.drones[id] = &d
+		s.markDroneDirty(id)
+	}
+	res.Spawned = len(ids)
 	replyLaunchDrone(c.Reply, res)
 }
 

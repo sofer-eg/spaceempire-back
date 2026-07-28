@@ -19,6 +19,7 @@ func missileStaticWorker(t *testing.T, clk clock.Clock, ships []domain.Ship, sta
 	t.Helper()
 	opts = append([]sector.Option{
 		sector.WithStatics(map[domain.SectorID]domain.SectorStatics{testSector: statics}),
+		sector.WithOrdnance(unlimitedOrdnance()),
 	}, opts...)
 	return sector.NewWorker(0,
 		sector.Config{TickInterval: time.Second, AOIRadius: 100000},

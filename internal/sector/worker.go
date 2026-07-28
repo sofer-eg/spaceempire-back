@@ -36,20 +36,21 @@ type ShipRepo interface {
 
 // DroneRepo is the persistence surface for combat drones (phase 4.4).
 // The real implementation lives in internal/persistence/drones. Wired in
-// via WithDrones; nil disables drone persistence — drones still launch
-// and fly but are not restored after a restart (used by unit tests).
+// via WithDrones; nil disables drone persistence — drones still fly but
+// their updates/deaths are not written (used by unit tests). Launch INSERTs do
+// NOT go through here: they run through Ordnance, which creates the rows in the
+// same transaction as the ammunition debit (TASK-147).
 type DroneRepo interface {
-	Create(ctx context.Context, d domain.Drone) (domain.DroneID, error)
 	BatchUpdate(ctx context.Context, ds []domain.Drone) error
 	Delete(ctx context.Context, id domain.DroneID) error
 }
 
 // TorpedoRepo is the persistence surface for homing torpedoes (TASK-100.3.5).
 // The real implementation lives in internal/persistence/torpedos. Wired via
-// WithTorpedos; nil disables persistence — torpedoes still launch and fly but
-// are not restored after a restart (used by unit tests). Mirrors DroneRepo.
+// WithTorpedos; nil disables persistence (used by unit tests). Mirrors
+// DroneRepo, including that launch INSERTs go through Ordnance instead
+// (TASK-147).
 type TorpedoRepo interface {
-	Create(ctx context.Context, t domain.Torpedo) (domain.TorpedoID, error)
 	BatchUpdate(ctx context.Context, ts []domain.Torpedo) error
 	Delete(ctx context.Context, id domain.TorpedoID) error
 }
@@ -143,6 +144,31 @@ type MinerLogistics interface {
 type StaticInstaller interface {
 	InstallJammer(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, j domain.Jammer) (domain.JammerID, error)
 	InstallSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, s domain.Satellite) (domain.SatelliteID, error)
+}
+
+// Ordnance charges a launch's ammunition and creates its projectile rows in ONE
+// transaction (TASK-147), the same discipline StaticInstaller brought to installs:
+// the cargo debit and the INSERTs commit together, so a lost ack can never yield
+// a free missile/torpedo/drone and a failed insert can never eat the ammunition.
+// owner is the launching ship's cargo hold and gtype the goods id the command
+// carries (the sector package stays free of the goods catalog). Wired via
+// WithOrdnance.
+//
+// SpendMissile has no object to create — a missile is RAM-only, reconstructable
+// state — so its "transaction" is the debit alone. LaunchDrones takes the whole
+// prepared salvo and is all-or-nothing: it returns one id per drone, in order, or
+// an error and nothing charged. That is what makes a partial spawn impossible.
+//
+// This is the ONLY launch path. A worker without one refuses every launch with
+// ErrOrdnanceUnavailable rather than firing for free: the ordnance is what makes
+// the player pay, so losing it in a refactor must break loudly.
+//
+// The real implementation lives in app/ over cargo + the projectile repositories,
+// keeping the sector package free of cargo dependencies (mirrors StaticInstaller).
+type Ordnance interface {
+	SpendMissile(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID) error
+	LaunchTorpedo(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, t domain.Torpedo) (domain.TorpedoID, error)
+	LaunchDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error)
 }
 
 // Relations is the worker's hostility oracle (phase 6.2a): ship-vs-ship
@@ -242,28 +268,35 @@ type Worker struct {
 	// commands fail with ErrInstallerUnavailable. Wired via WithStaticInstaller.
 	staticInstaller StaticInstaller
 
-	// installBudget is the DB time an install command may still spend in the
-	// current inbox drain (TASK-144 review). Config.RepoTimeout bounds ONE
-	// install; without a per-drain budget a full inbox of installs against a hung
-	// Postgres would park the Run goroutine — and with it every sector this worker
-	// owns — with no tick in between, which any player can trigger since an install
-	// with an empty hold now reaches the worker. Reset at the start of every drain;
-	// charged only by the install commands' DB calls, so the rest of the hot path
-	// pays nothing. It gates whether the drain continues, never the per-command
-	// deadline: clamping that would fail a legal install with a spurious
-	// DeadlineExceeded. ONE drain is therefore bounded by ~2 × RepoTimeout.
+	// ordnance charges a launch's ammunition and creates its projectile rows in
+	// one transaction — the only launch path (TASK-147). Nil makes launch-missile
+	// / launch-torpedo / launch-drone fail with ErrOrdnanceUnavailable. Wired via
+	// WithOrdnance.
+	ordnance Ordnance
+
+	// dbBudget is the DB time the commands that write synchronously (installs,
+	// TASK-144; ammunition charges, TASK-147) may still spend in the current inbox
+	// drain. Config.RepoTimeout bounds ONE such call; without a per-drain budget a
+	// full inbox of them against a hung Postgres would park the Run goroutine —
+	// and with it every sector this worker owns — with no tick in between, which
+	// any player can trigger since an install or a launch with an empty hold now
+	// reaches the worker. Reset at the start of every drain; charged only by those
+	// commands' DB calls, so the rest of the hot path pays nothing. It gates
+	// whether the drain continues, never the per-command deadline: clamping that
+	// would fail a legal command with a spurious DeadlineExceeded. ONE drain is
+	// therefore bounded by ~2 × RepoTimeout.
 	//
 	// What this does NOT bound is the total: Run resets the budget on every
 	// wake-up (applyAndDrain), and the overflow is still sitting in the inbox, so
-	// the queue is worked through at ~RepoTimeout per install either way. The
+	// the queue is worked through at ~RepoTimeout per command either way. The
 	// degradation window stays InboxCapacity × RepoTimeout (256 × 2 s ≈ 8.5 min)
 	// and a command queued behind it still waits that long for its ack. What the
 	// budget buys is that Run returns to its select between those payments, so the
 	// sectors keep ticking at a reduced rate (measured ~40-80% of nominal, against
 	// a single tick with the budget disabled) instead of the goroutine being parked
-	// outright. Bounding the total — a budget per tick window, or moving installs
-	// off the tick goroutine — is TASK-148.
-	installBudget time.Duration
+	// outright. Bounding the total — a budget per tick window, or moving these
+	// writes off the tick goroutine — is TASK-148.
+	dbBudget time.Duration
 
 	// asteroidRepo persists minable asteroids (phase 5.4). Nil disables
 	// persistence (asteroids still mine down in RAM). Wired via
@@ -506,6 +539,16 @@ func WithJammers(repo JammerRepo) Option {
 func WithStaticInstaller(i StaticInstaller) Option {
 	return func(w *Worker) {
 		w.staticInstaller = i
+	}
+}
+
+// WithOrdnance injects the transactional ammunition charger the launch-missile /
+// launch-torpedo / launch-drone commands use to debit the hold and create the
+// projectile rows together (TASK-147). It is the only launch path: without it
+// those commands fail with ErrOrdnanceUnavailable.
+func WithOrdnance(o Ordnance) Option {
+	return func(w *Worker) {
+		w.ordnance = o
 	}
 }
 
@@ -1000,32 +1043,32 @@ func (w *Worker) nextSubID() uint64 {
 // way to land here is a race with sector ownership changes — not supported
 // yet, but we don't crash).
 //
-// The drain carries an installBudget (see the Worker field): install commands
-// charge their DB time against it and the drain stops once it is spent, leaving
-// the remaining envelopes queued for the next tick / wake-up.
+// The drain carries a dbBudget (see the Worker field): the commands that write
+// synchronously charge their DB time against it and the drain stops once it is
+// spent, leaving the remaining envelopes queued for the next tick / wake-up.
 func (w *Worker) drainInbox() {
-	w.installBudget = w.cfg.RepoTimeout
+	w.dbBudget = w.cfg.RepoTimeout
 	w.drainQueued()
 }
 
 // applyAndDrain runs one envelope that already woke Run up and then drains
-// whatever else is queued, under a single shared installBudget — the woken
-// envelope may itself be an install, so it must be inside the budget rather than
-// ahead of it.
+// whatever else is queued, under a single shared dbBudget — the woken envelope
+// may itself be one of the writing commands, so it must be inside the budget
+// rather than ahead of it.
 func (w *Worker) applyAndDrain(env envelope) {
-	w.installBudget = w.cfg.RepoTimeout
+	w.dbBudget = w.cfg.RepoTimeout
 	w.applyEnvelope(env)
 	w.drainQueued()
 }
 
 // drainQueued is the drain loop proper: it applies queued envelopes and stops as
-// soon as the current drain's install budget is spent. A spent budget means the
-// DB is dragging (or hung), so we return to Run rather than pay another
-// RepoTimeout for the next queued install without the ticker getting a look in.
+// soon as the current drain's DB budget is spent. A spent budget means the DB is
+// dragging (or hung), so we return to Run rather than pay another RepoTimeout for
+// the next queued writer without the ticker getting a look in.
 //
 // Returning does not reduce the total stall: Run may take the very next envelope
 // out of the inbox and pay again (applyAndDrain starts a fresh budget). What it
-// buys is that the tick is served between those payments — see the installBudget
+// buys is that the tick is served between those payments — see the dbBudget
 // field for what is and is not bounded, and TASK-148 for bounding the total.
 //
 // The budget is checked AFTER applying, never before: it decides whether to
@@ -1039,13 +1082,13 @@ func (w *Worker) drainQueued() {
 		default:
 			return
 		}
-		if w.installBudget <= 0 {
+		if w.dbBudget <= 0 {
 			// Only worth reporting when something is actually left behind: the
 			// budget can be spent by the last command in the queue, and a
 			// "drain stopped, queued=0" line would claim a backlog that is not
 			// there.
 			if queued := len(w.inbox); queued > 0 {
-				w.logger.Warn("inbox drain stopped on install budget",
+				w.logger.Warn("inbox drain stopped on db budget",
 					"queued", queued, "repo_timeout", w.cfg.RepoTimeout)
 			}
 			return
@@ -1053,11 +1096,11 @@ func (w *Worker) drainQueued() {
 	}
 }
 
-// spendInstallBudget charges the current drain for an install's DB time. Only
-// the install commands call it — every other command does no I/O, so the budget
-// costs the hot path nothing.
-func (w *Worker) spendInstallBudget(d time.Duration) {
-	w.installBudget -= d
+// spendDBBudget charges the current drain for a synchronous DB call's real time.
+// Only the install (TASK-144) and launch (TASK-147) commands call it — every
+// other command does no I/O, so the budget costs the hot path nothing.
+func (w *Worker) spendDBBudget(d time.Duration) {
+	w.dbBudget -= d
 }
 
 // logInstallError records a failed jammer/satellite install (TASK-144). A

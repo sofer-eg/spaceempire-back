@@ -34,35 +34,17 @@ func launchActionEnergyCost(cat EquipmentCatalog) int {
 	return 0
 }
 
-// MissileCargo is the slice of cargo.Service the launch handler needs.
-// Declared here per ISP so handler tests can stub it without dragging in
-// the full *cargo.Service surface.
-type MissileCargo interface {
-	Consume(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error
-	Refund(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error
-}
-
-// handleLaunchMissile is the phase 4.3 entry point for firing one
-// missile from the player's ship at a target. The handler is the
-// orchestrator between two non-cooperating substrates: cargo lives in
-// Postgres (so the launch debit is a real DB transaction), and the
-// sector worker lives in RAM (so the actual missile lifecycle is
-// in-memory). To keep them mostly consistent we:
-//  1. parse + validate the request,
-//  2. atomically Consume one missile from the ship's cargo,
-//  3. send LaunchMissileCommand to the sector worker and wait for ack,
-//  4. on worker rejection — Refund the cargo and propagate the error.
+// handleLaunchMissile fires one missile from the player's ship at a target
+// (phase 4.3). The handler is a pure orchestrator — it owns no cargo:
+//  1. parse + validate,
+//  2. send LaunchMissileCommand (carrying the goods id) to the worker,
+//  3. wait for ack and map the outcome.
 //
-// A crash between (2) and (3) leaves the cargo decremented without a
-// missile in flight. That is acceptable for phase 4.3: the player
-// pays the same as the original SP (which had the same race surface in
-// `FireMissileAt`) and the magnitude is one missile.
+// The ammunition debit lives inside the worker's apply, through sector.Ordnance
+// (TASK-147). That is what makes a lost ack safe: before, the handler consumed up
+// front and refunded on timeout while the worker still applied the command — the
+// missile flew and the player got their ammunition back, repeatably.
 func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
-	if s.missileCargo == nil {
-		writeError(w, http.StatusServiceUnavailable, "missiles not available")
-		return
-	}
-
 	var req dto.LaunchMissileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -74,7 +56,7 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 	}
 	// TASK-113 FR-06: a missile may strike a ship (not itself) or any
 	// destructible static (sector.IsStaticTargetKind — the same set the worker
-	// enforces); other kinds are rejected here before touching cargo. The
+	// enforces); other kinds are rejected here, before the command is built. The
 	// self-target guard only applies to ship targets — a static and a ship may
 	// share a numeric id (separate id spaces).
 	targetKind := domain.EntityKind(req.TargetRef.Kind)
@@ -92,26 +74,11 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playerID, _ := auth.PlayerIDFromContext(r.Context())
-	shipRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: req.ShipID}
 	target := domain.EntityRef{Kind: targetKind, ID: req.TargetRef.ID}
 
-	// Step 2: debit one missile up front. If the player has none we stop
-	// here — no need to bother the worker.
-	if err := s.missileCargo.Consume(r.Context(), shipRef, MissileGoodsType, 1); err != nil {
-		switch {
-		case errors.Is(err, cargo.ErrInsufficientQuantity):
-			writeError(w, http.StatusBadRequest, "no missile in cargo")
-		case errors.Is(err, cargo.ErrGoodsTypeNotFound):
-			writeError(w, http.StatusInternalServerError, "missile goods type missing")
-		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-
-	// Step 3: route to the sector that currently owns the ship; fall back
-	// to the configured default sector for callers that bypassed the
-	// router (legacy tests).
+	// Route to the sector that currently owns the ship; fall back to the
+	// configured default sector for callers that bypassed the router (legacy
+	// tests).
 	sectorID := domain.SectorID(s.cfg.SectorID)
 	if sid, ok := s.router.LookupShipSector(domain.ShipID(req.ShipID)); ok {
 		sectorID = sid
@@ -122,11 +89,11 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 		PlayerID:   playerID,
 		ShipID:     domain.ShipID(req.ShipID),
 		Target:     target,
+		GoodsType:  MissileGoodsType,
 		EnergyCost: s.launchEnergyCost,
 		Reply:      reply,
 	})
 	if err != nil {
-		s.refundMissile(r.Context(), shipRef)
 		if errors.Is(err, sector.ErrInboxFull) {
 			writeError(w, http.StatusServiceUnavailable, "sector busy")
 			return
@@ -141,7 +108,6 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 	select {
 	case res := <-reply:
 		if res.Err != nil {
-			s.refundMissile(r.Context(), shipRef)
 			switch {
 			case errors.Is(res.Err, sector.ErrShipNotFound):
 				writeError(w, http.StatusNotFound, "ship not found")
@@ -155,6 +121,15 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusUnprocessableEntity, "not enough energy to launch")
 			case errors.Is(res.Err, sector.ErrInvalidAttackTarget):
 				writeError(w, http.StatusBadRequest, "invalid missile target")
+			case errors.Is(res.Err, cargo.ErrInsufficientQuantity):
+				writeError(w, http.StatusBadRequest, "no missile in cargo")
+			case errors.Is(res.Err, cargo.ErrGoodsTypeNotFound):
+				writeError(w, http.StatusInternalServerError, "missile goods type missing")
+			case errors.Is(res.Err, sector.ErrOrdnanceUnavailable):
+				// Misconfiguration, not a player error: the worker has no
+				// transactional ordnance, so it refuses to fire rather than launch
+				// for free. 503 — retrying may work after a fix.
+				writeError(w, http.StatusServiceUnavailable, "launch unavailable: server misconfigured")
 			default:
 				writeError(w, http.StatusInternalServerError, res.Err.Error())
 			}
@@ -165,23 +140,10 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 			MissileID: int64(res.MissileID),
 		})
 	case <-ctx.Done():
-		// Best-effort refund — the worker may still apply the command
-		// later, but we cannot tell from here. A duplicate refund is
-		// preferable to a silent cargo loss; the player will fire again.
-		s.refundMissile(r.Context(), shipRef)
+		// No compensation to run: the debit happens inside the worker together
+		// with the launch, so whether the command has already applied or is still
+		// queued, ammunition and missile agree. 504 means "outcome unknown" — the
+		// player checks their hold and retries if nothing was fired.
 		writeError(w, http.StatusGatewayTimeout, "command timeout")
-	}
-}
-
-// refundMissile reverses the Consume done at the start of the handler.
-// Errors are logged because there is no caller-level recovery path —
-// the HTTP response has already been chosen.
-func (s *Server) refundMissile(ctx context.Context, owner domain.EntityRef) {
-	if s.missileCargo == nil {
-		return
-	}
-	if err := s.missileCargo.Refund(ctx, owner, MissileGoodsType, 1); err != nil {
-		s.logger.Error("missile refund failed",
-			"err", err, "ship", owner.ID)
 	}
 }

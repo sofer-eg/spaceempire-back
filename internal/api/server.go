@@ -84,16 +84,11 @@ type Config struct {
 	// trade completed) are published for the quest engine (phase 8.17). nil
 	// disables publishing — quests just won't see those discrete signals.
 	EventBus bus.Publisher
-	// MissileCargo backs POST /api/cmd/launch-missile (cargo Consume /
-	// Refund around the sector command). nil disables the endpoint with
-	// 503 — legacy tests that don't load cargo can leave it unset.
-	MissileCargo MissileCargo
-	// DroneCargo backs POST /api/cmd/launch-drone and
-	// /api/cmd/recall-drones. nil disables both with 503.
+	// DroneCargo backs POST /api/cmd/recall-drones, which credits recalled
+	// drones back to the hold. nil disables that endpoint with 503. The launch
+	// endpoints need no cargo at all: their debits happen inside the sector
+	// worker's Ordnance (TASK-147).
 	DroneCargo DroneCargo
-	// TorpedoCargo backs POST /api/cmd/launch-torpedo (cargo Consume / Refund
-	// around the sector command). nil disables the endpoint with 503.
-	TorpedoCargo TorpedoCargo
 	// NpcPlayerID is the reserved system-player's DB id. Ships owned by this
 	// player are NPC (traders, miners, passengers) and the SPA uses IsNPC to
 	// colour them amber instead of red. Zero means "no NPC player loaded" and
@@ -152,9 +147,7 @@ type Server struct {
 	captureEnergyCost int
 	handoffBus        bus.Subscriber
 	eventBus          bus.Publisher
-	missileCargo      MissileCargo
 	droneCargo        DroneCargo
-	torpedoCargo      TorpedoCargo
 	activeShips       ActiveShipReader
 	activeShipWriter  ActiveShipWriter
 	handoffPublisher  bus.Publisher
@@ -190,9 +183,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 		equipment:         cfg.Equipment,
 		handoffBus:        cfg.HandoffBus,
 		eventBus:          cfg.EventBus,
-		missileCargo:      cfg.MissileCargo,
 		droneCargo:        cfg.DroneCargo,
-		torpedoCargo:      cfg.TorpedoCargo,
 		activeShips:       cfg.ActiveShips,
 		activeShipWriter:  cfg.ActiveShipWriter,
 		handoffPublisher:  cfg.HandoffPublisher,

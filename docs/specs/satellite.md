@@ -82,7 +82,8 @@ same hole (and the same fix) applies to `install-jammer`, where the object costs
 A 504 therefore means "outcome unknown", not "nothing happened", and the
 install's DB call is bounded by `Config.RepoTimeout` (default 2 s) so a hung
 Postgres cannot park the tick goroutine indefinitely. One inbox drain is bounded
-too (`Worker.installBudget` ≈ one `RepoTimeout` of install DB time); the overflow
+too (`Worker.dbBudget` ≈ one `RepoTimeout` of synchronous-write DB time, shared
+with the launch commands since TASK-147); the overflow
 applies on the next wake-up. That bounds a single drain, **not** the queue: `Run`
 starts a fresh budget on every wake-up, so a full inbox of installs still
 degrades the worker for `InboxCapacity × RepoTimeout` — what the budget buys is

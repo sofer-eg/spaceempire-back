@@ -148,7 +148,8 @@ func TestUnit_LaunchTorpedo_AcceptsShipTarget(t *testing.T) {
 func TestUnit_LaunchTorpedo_AcceptsStaticTarget(t *testing.T) {
 	t.Parallel()
 	station := stationStatic(5, nil, domain.Vec2{X: 100, Y: 0}, 1000, 0, 0, 0)
-	w := staticCombatWorker(t, []domain.Ship{torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})}, station)
+	w := staticCombatWorker(t, []domain.Ship{torpedoShip(1, 100, domain.Vec2{X: 0, Y: 0})}, station,
+		sector.WithOrdnance(unlimitedOrdnance()))
 
 	res := sendTorpedo(t, w, sector.LaunchTorpedoCommand{
 		PlayerID: 100, ShipID: 1, Class: 2,

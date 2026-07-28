@@ -320,6 +320,7 @@ func TestUnit_Stealth_RevealOnMissileLaunch(t *testing.T) {
 			// Energy>0 keeps the "always" cloak powered so it stays hidden (10.3.1).
 			{ID: 2, PlayerID: 8, Pos: domain.Vec2{X: 1000, Y: 0}, MaxSpeed: 1, Equipment: []domain.InstalledEquipment{{Type: "up_hide", Level: 1}, {Type: "up_launcher", Level: 1}}, HP: 200, MaxHP: 200, Shield: 50, MaxShield: 50, Energy: 100, MaxEnergy: 100},
 		}},
+		sector.WithOrdnance(unlimitedOrdnance()),
 	)
 	go func() { _ = w.Run(ctx) }()
 

@@ -282,28 +282,92 @@ type Patch struct {
 AOI-фильтрация ракет: точка `m.Pos` в радиусе sub.Radius от sub.Center
 → ракета видима. `MissileImpacts`: точка `Pos` в AOI window.
 
-## 5. cargo расход (HTTP-handler уровень)
+## 5. cargo расход (внутри воркера, TASK-147)
 
-Транзакционность между cargo (DB) и sector (RAM) обеспечивается на
-уровне HTTP-handler:
+**Инвариант: боеприпас списывает воркер, в `apply`, а не HTTP-handler.**
+Handler боеприпасом не владеет вообще -- он только маршрутизирует и
+маппит исход (как `install-jammer`):
 
-1. handler принимает запрос.
-2. `cargo.Service.Consume(ctx, ship, missileGoodsType, 1)` — atomic
-   subtract в Postgres tx. Если ErrInsufficientQuantity → 400.
-3. `sector.Send(LaunchMissileCommand)` + ждать reply.
-4. Если sector ответил ошибкой — `cargo.Service.Refund(ctx, ship,
-   missileGoodsType, 1)` (= Add). Логировать refund failures.
-5. OK → 200 с MissileID.
+1. handler принимает запрос, валидирует цель (`missileTargetable`-набор);
+2. `sector.Send(LaunchMissileCommand{..., GoodsType: 50})` -- id товара
+   несёт команда, чтобы sector не знал каталога;
+3. ждёт ack (`AckTimeout`) и маппит: `ErrShipNotFound` → 404,
+   `ErrForbidden` → 403, `ErrShipDocked` → 400, `ErrEquipmentRequired` →
+   422, `ErrNotEnoughEnergy` → 422, `ErrInvalidAttackTarget` → 400,
+   `cargo.ErrInsufficientQuantity` → 400 "no missile in cargo",
+   `cargo.ErrGoodsTypeNotFound` → 500, `ErrOrdnanceUnavailable` → 503,
+   таймаут ack → 504 **без компенсации**;
+4. OK → 200 с MissileID.
 
-### Новые методы cargo.Service
+Списание идёт через `sector.Ordnance.SpendMissile` (app-side адаптер над
+`database.TxManager` + `cargo.ConsumeIn`). У ракеты нет собственной строки
+в БД (reconstructable, §3), поэтому «транзакция» -- одно списание; важно
+именно то, что его делает воркер.
+
+**Порядок в `apply` обязателен** (ЧТЗ-эквивалент AC-3 у торпеды: отказ не
+тратит ничего):
+
+```
+гейты (владение / не в доке / up_launcher / missileTargetable /
+       resolveTargetPos)
+  → проверка энергии БЕЗ списания
+  → списание боеприпаса (Ordnance, DB)
+  → s.missiles[id] = m
+  → списание энергии
+  → reply
+```
+
+До TASK-147 энергия списывалась ДО спавна; теперь -- только после того,
+как запуск состоялся, иначе неудачное списание боеприпаса сожгло бы
+энергию.
+
+`Ordnance` -- **единственный** путь запуска: воркер без него отвечает
+`ErrOrdnanceUnavailable` → 503, а не пускает ракету бесплатно.
+
+### Чем это заменило Consume-before-Send
+
+Раньше handler делал `Consume` до `Send` и `Refund` по `ctx.Done()`.
+`AckTimeout` = `TickInterval + 1s`, поэтому задержавшийся тик давал 504 +
+возврат ракеты, после чего воркер штатно применял команду: ракета летела,
+боеприпас вернулся -- повторяемо (тот же класс дефекта, что TASK-144
+закрыла для install-команд).
+
+Следствия нового инварианта:
+- 504 означает «исход неизвестен», а не «ничего не произошло»: игрок
+  смотрит трюм и повторяет, только если выстрела не было;
+- отказ на гейте до списания вообще не касается трюма -- возвращать
+  нечего;
+- пустой трюм теперь доходит до воркера (осознанная цена, как в
+  TASK-144); DB-время идёт через per-drain бюджет `Worker.dbBudget` под
+  дедлайном `cfg.RepoTimeout`.
+
+### Тот же инвариант у соседей
+
+TASK-147 применила эту дисциплину ко всему семейству launch-команд, так
+что «кто списывает боеприпас» теперь един:
+
+| Команда | Товар | Что в одной транзакции |
+|---|---|---|
+| `launch-missile` | 50 | только списание (объект RAM-only) |
+| `launch-torpedo` | gt23 (кл.2) / gt24 (кл.3) -- маппинг класса живёт в handler'е | списание + `torpedosRepo.WithExecutor(tx).Create` |
+| `launch-drone` | 51 | списание `toSpawn` + `toSpawn` × `dronesRepo...Create`, всё-или-ничего (см. `drones.md` §2.1) |
+
+Из-за этого `TorpedoRepo`/`DroneRepo` в sector несут только
+`BatchUpdate`/`Delete` -- пуск в них не пишет. Формулировка ЧТЗ doc-1
+FR-003 («при отказе воркера -- рефанд») этим отменена: handler боеприпасом
+не владеет, отказ на гейте до списания трюм не касается, а 504 ничего не
+компенсирует.
+
+### Методы cargo, участвующие в пути
 
 ```go
-func (s *Service) Consume(ctx context.Context, owner EntityRef, gtype GoodsTypeID, qty int64) error
-// внутри tx: проверить наличие, Subtract.
-// ErrInsufficientQuantity если нет.
+func ConsumeIn(ctx context.Context, repo Repo, owner EntityRef, gtype GoodsTypeID, qty int64) error
+// списание внутри УЖЕ открытой транзакции вызывающего (Service.Consume
+// открывает свою, поэтому здесь не подходит).
 
 func (s *Service) Refund(ctx context.Context, owner EntityRef, gtype GoodsTypeID, qty int64) error
-// = tx.Add (без capacity check — refund не превышает то, что было).
+// = tx.Add (без capacity check). На пути запуска больше не используется --
+// остался у recall-drones (drones.md §2).
 ```
 
 ## 6. HTTP
@@ -416,11 +480,13 @@ DTO для Missile:
 
 | Тест | Запрос | Ожидание |
 |---|---|---|
-| LaunchMissile_OK | player owns ship, есть missile в cargo, target=ship | 200, cargo Missile -=1 |
-| LaunchMissile_NoCargo | в cargo нет ракет | 400 "missile not in cargo" |
-| LaunchMissile_NonShipTarget | target.kind=station | 400 |
+| LaunchMissile_OK | player owns ship, есть missile в cargo, target=ship | 200, cargo Missile -=1 (списание внутри воркера) |
+| LaunchMissile_NoCargo | в cargo нет ракет | 400 "no missile in cargo" |
+| LaunchMissile_NonTargetableKind | target.kind=container | 400, ordnance не вызван |
 | LaunchMissile_NotOwner | player A → ship B | 403 |
-| LaunchMissile_SectorRejects_RefundsCargo | sector reply Err=ErrInvalidAttackTarget | cargo Missile вернулась (= start) |
+| LaunchMissile_SectorRejectsKeepsCargo | sector reply Err=ErrInvalidAttackTarget | трюм не тронут (гейт до списания), refund не нужен |
+| LaunchMissile_NoOrdnanceWired | воркер без `WithOrdnance` | 503, ракеты нет |
+| LaunchMissile_AckTimeoutChargesOnce | ack потерян (504), команда применяется позже | HTTP не делает ни одного cargo-вызова; списано ровно 1, ракета ровно 1; повтор на пустом трюме -- ничего бесплатно |
 
 ## 10. Критерии приёмки (из задачи 4.3)
 

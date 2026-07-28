@@ -13,14 +13,11 @@ import (
 )
 
 // stubTorpedoRepo is a minimal in-package TorpedoRepo for the white-box shoot-down
-// tests: it only needs to count Delete calls (Create/BatchUpdate are unused on
-// these paths). The package-external fakeTorpedoRepo lives in sector_test and is
-// not visible here.
+// tests: it only needs to count Delete calls (BatchUpdate is unused on these
+// paths). The package-external fakeTorpedoRepo lives in sector_test and is not
+// visible here.
 type stubTorpedoRepo struct{ deletes int }
 
-func (r *stubTorpedoRepo) Create(context.Context, domain.Torpedo) (domain.TorpedoID, error) {
-	return 0, nil
-}
 func (r *stubTorpedoRepo) BatchUpdate(context.Context, []domain.Torpedo) error { return nil }
 func (r *stubTorpedoRepo) Delete(context.Context, domain.TorpedoID) error {
 	r.deletes++

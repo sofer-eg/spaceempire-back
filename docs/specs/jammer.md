@@ -145,7 +145,8 @@ Consequences of the new invariant:
   of an uninterruptible background context, so a hung Postgres stalls the tick
   for at most that long instead of forever.
 - ONE drain of the worker's inbox spends at most ~`RepoTimeout` of DB time on
-  installs (`Worker.installBudget`): `RepoTimeout` bounds a single install, so
+  synchronous writes (`Worker.dbBudget`, shared with the launch commands since
+  TASK-147): `RepoTimeout` bounds a single install, so
   without a per-drain budget a queue of installs against a hung Postgres would
   park the Run goroutine — and every sector that worker owns — with no tick in
   between. Any player can fill that queue, because an install with an empty hold

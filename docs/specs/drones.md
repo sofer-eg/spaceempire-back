@@ -42,21 +42,65 @@ reduced behaviour set:
 
 Each launched drone consumes **one `Combat Drone` cargo unit** (goods
 type id `51`, seeded by migration `0018_drones.sql`, `space=2`, chosen
-above the missile id `50`). `launch-drone {shipID, count}` consumes
-`count` units up front; `recall-drones {shipID}` returns **one unit per
-still-alive drone** owned by that ship to its cargo.
+above the missile id `50`). `recall-drones {shipID}` returns **one unit
+per still-alive drone** owned by that ship to its cargo.
 
-The HTTP handler is the orchestrator between Postgres cargo and the
-in-RAM sector worker, mirroring `launch-missile`:
+**Since TASK-147 the launch handler owns no cargo.** It only routes and
+maps, mirroring `install-jammer`:
 
 1. validate request,
-2. `Consume(shipRef, DroneGoodsType, count)`,
-3. send `LaunchDroneCommand` and wait for ack (which returns the number
-   actually spawned),
-4. on worker rejection — `Refund` the full `count`.
+2. send `LaunchDroneCommand{PlayerID, ShipID, Target, Count, GoodsType: 51}`
+   to the sector worker — the handler owns the goods constant so the
+   sector package stays free of the catalog,
+3. wait for ack (`AckTimeout`) and map the outcome:
+   `ErrShipNotFound` → 404, `ErrForbidden` → 403, `ErrShipDocked` → 400,
+   `ErrEquipmentRequired` → 422, `ErrDroneCapReached` → 422,
+   `ErrInvalidAttackTarget` → 400, `cargo.ErrInsufficientQuantity` → 400
+   "not enough drones in cargo", `cargo.ErrGoodsTypeNotFound` → 500,
+   `ErrOrdnanceUnavailable` → 503, ack timeout → 504 with **no
+   compensation** (see §2.1).
 
-Recall is the reverse: the worker removes the drones and replies with
-the recalled count; the handler `Refund`s that many units.
+Recall is the one drone operation the HTTP layer still owns cargo for:
+the worker removes the drones and replies with the recalled count, and
+the handler `Refund`s that many units (`api.DroneCargo`, Refund-only).
+
+### 2.1 Atomicity of the salvo (TASK-147)
+
+**Invariant: the ammunition debit and every drone INSERT commit in ONE
+transaction.** `LaunchDroneCommand.apply` clamps the salvo to what
+`up_drone_control` still allows (`toSpawn = min(Count, level - live)`),
+builds the drones, and hands the whole slice to `sector.Ordnance`
+(app-side adapter over `database.TxManager` + `cargo.ConsumeIn` +
+`dronesRepo.WithExecutor(tx).Create` per drone). Only on success are they
+inserted into the sector's RAM.
+
+`Ordnance` is the **only** launch path. A worker built without one
+(`WithOrdnance` lost in a refactor) refuses the command with
+`ErrOrdnanceUnavailable` → 503 instead of spawning drones nobody paid
+for. Consequently `DroneRepo` carries only `BatchUpdate`/`Delete` —
+launches never touch it.
+
+This replaced a `Consume(count)`-before-`Send` / `Refund`-on-failure
+orchestration in the handler, which leaked free drones: `AckTimeout` is
+only `TickInterval + 1s`, so a delayed tick made the handler refund and
+answer 504 while the command was still in the inbox and applied normally
+a moment later — ammunition returned, drones flying.
+
+Consequences of the new invariant:
+- A 504 means "outcome unknown", not "nothing happened": the player
+  checks the hold and retries only if no drones appeared.
+- **Partial spawn is gone as a class.** `Spawned` is either `toSpawn` or
+  (on error) zero, so the `Count - Spawned` remainder refund the handler
+  used to do has nothing left to do. The old mid-salvo `break` on a
+  failing INSERT is gone with it.
+- **The cap, not the request, is what gets billed** — a deliberate,
+  strictly milder behaviour change. The cap is known only inside the
+  worker, so billing `Count` would make the player pay for drones the cap
+  refuses. Asking for 5 with a level-2 module and 3 units in the hold
+  used to fail the handler's `Consume(5)` outright (400, zero drones);
+  now 2 launch and exactly 2 are charged.
+- Too little ammunition for the **clamped** salvo rejects the whole
+  launch (400): nothing charged, nothing spawned.
 
 ## 3. Persistence (immediate, unlike missiles)
 
@@ -64,7 +108,8 @@ Drones are **persistent state** (acceptance criterion: "при рестарте
 сервера дроны восстанавливаются"). Unlike missiles (reconstructable, RAM
 only) the drone lifecycle writes to the `drones` table:
 
-- **immediate INSERT** on launch (one row per drone),
+- **immediate INSERT** on launch (one row per drone) — inside the
+  ammunition transaction, see §2.1,
 - **immediate DELETE** on death / expire / recall,
 - **periodic BatchUpdate** of mutable fields (pos, vel, direction, hp,
   target, expires_at) on the worker's dirty-set / snapshot interval,

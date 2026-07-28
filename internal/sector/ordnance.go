@@ -1,0 +1,117 @@
+package sector
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"spaceempire/back/internal/domain"
+)
+
+// The three helpers below are the worker's side of the Ordnance contract
+// (TASK-147). They share one shape, mirroring installJammer/installSatellite:
+//
+//   - a nil Ordnance refuses the launch (ErrOrdnanceUnavailable) rather than
+//     firing for free — the ordnance is what charges the player;
+//   - the command apply path carries no context, so the DB call is bounded by
+//     cfg.RepoTimeout instead of running under an uninterruptible background
+//     context (which is what the pre-TASK-147 torpedo/drone INSERTs did): a hung
+//     Postgres stalls the tick for at most that long;
+//   - the call's real cost is charged to the drain's DB budget, which caps ONE
+//     drain at ~2 × RepoTimeout so a queue of launches cannot park Run without a
+//     tick in between (see Worker.dbBudget; it does not shorten the queue's total
+//     stall — that is TASK-148);
+//   - sentinel errors come back verbatim so the HTTP mapping
+//     (cargo.ErrInsufficientQuantity → 400, cargo.ErrGoodsTypeNotFound → 500)
+//     keeps working.
+
+// spendMissile charges one missile from the ship's hold. A missile has no DB row
+// of its own (RAM-only, reconstructable), so the "transaction" is the debit
+// alone — but it still has to happen inside the tick, or a lost ack refunds
+// ammunition for a missile that flew.
+func (w *Worker) spendMissile(ship *domain.Ship, gtype domain.GoodsTypeID) error {
+	if w.ordnance == nil {
+		return ErrOrdnanceUnavailable
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
+	defer cancel()
+
+	started := time.Now()
+	err := w.ordnance.SpendMissile(ctx, shipHold(ship), gtype)
+	// Wall clock on purpose: the budget bounds real time parked on DB I/O, which
+	// the injected (possibly fake) clock does not model.
+	w.spendDBBudget(time.Since(started))
+	if err != nil {
+		w.logOrdnanceError(err, "missile", ship, gtype, 1)
+		return err
+	}
+	return nil
+}
+
+// launchTorpedo charges one torpedo and creates its row, returning the DB id the
+// live torpedo is keyed by.
+func (w *Worker) launchTorpedo(ship *domain.Ship, gtype domain.GoodsTypeID, t domain.Torpedo) (domain.TorpedoID, error) {
+	if w.ordnance == nil {
+		return 0, ErrOrdnanceUnavailable
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
+	defer cancel()
+
+	started := time.Now()
+	id, err := w.ordnance.LaunchTorpedo(ctx, shipHold(ship), gtype, t)
+	w.spendDBBudget(time.Since(started))
+	if err != nil {
+		w.logOrdnanceError(err, "torpedo", ship, gtype, 1)
+		return 0, err
+	}
+	return id, nil
+}
+
+// launchDrones charges len(ds) drones and creates their rows, returning one id
+// per drone in the same order. All-or-nothing: on error nothing was charged and
+// nothing created.
+func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error) {
+	if w.ordnance == nil {
+		return nil, ErrOrdnanceUnavailable
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
+	defer cancel()
+
+	started := time.Now()
+	ids, err := w.ordnance.LaunchDrones(ctx, shipHold(ship), gtype, ds)
+	w.spendDBBudget(time.Since(started))
+	if err != nil {
+		w.logOrdnanceError(err, "drone", ship, gtype, len(ds))
+		return nil, err
+	}
+	return ids, nil
+}
+
+// shipHold is the cargo owner a launch debits: the launching ship itself.
+func shipHold(ship *domain.Ship) domain.EntityRef {
+	return domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
+}
+
+// logOrdnanceError records a failed ammunition charge (TASK-147). A
+// deadline/cancellation is logged at ERROR with everything needed to reconcile it
+// by hand, because it is the one outcome the atomicity invariant cannot cover: if
+// cfg.RepoTimeout fires while COMMIT is already in flight, pgx tears the
+// connection down and reports DeadlineExceeded while Postgres commits anyway. The
+// ammunition is then gone and — for torpedoes/drones — the row exists, but the
+// projectile was never added to RAM: it flies for nobody until a restart's
+// LoadAll picks it up (a missile, being RAM-only, is simply lost). Every other
+// error means the transaction rolled back and nothing happened, so it is logged
+// at WARN. Mirrors logInstallError.
+func (w *Worker) logOrdnanceError(err error, kind string, ship *domain.Ship, gtype domain.GoodsTypeID, qty int) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		w.logger.Error("launch outcome in doubt: ammunition may be charged for a projectile missing from RAM",
+			"err", err, "projectile", kind, "qty", qty, "ship", int64(ship.ID),
+			"player", int64(ship.PlayerID), "sector", int64(ship.SectorID),
+			"goods_type", int64(gtype), "repo_timeout", w.cfg.RepoTimeout)
+		return
+	}
+	w.logger.Warn("launch failed",
+		"err", err, "projectile", kind, "qty", qty, "ship", int64(ship.ID),
+		"player", int64(ship.PlayerID), "sector", int64(ship.SectorID),
+		"goods_type", int64(gtype))
+}

@@ -351,7 +351,7 @@ type budgetStopHandler struct {
 
 func (h budgetStopHandler) Enabled(context.Context, slog.Level) bool { return true }
 func (h budgetStopHandler) Handle(_ context.Context, r slog.Record) error {
-	if r.Message == "inbox drain stopped on install budget" {
+	if r.Message == "inbox drain stopped on db budget" {
 		h.n.Add(1)
 	}
 	return nil
@@ -364,7 +364,7 @@ func (h budgetStopHandler) WithGroup(string) slog.Handler      { return h }
 // test calls w.Tick directly, and the reset it exercises is drainInbox's.
 // Production drains through Run's `case env := <-w.inbox` instead.
 //
-// installBudget is only ever assigned by those two resets, so with
+// dbBudget is only ever assigned by those two resets, so with
 // applyAndDrain's deleted the Run path drains on whatever the last Tick left —
 // zero on a worker that has not ticked yet, negative after any install. The drain
 // then gives up after two commands and reports a backlog it has no reason to
@@ -415,7 +415,7 @@ func TestUnit_Install_RunResetsDrainBudgetPerWakeUp(t *testing.T) {
 	// A healthy installer spends microseconds, so a full RepoTimeout budget
 	// carries the whole backlog in a single drain.
 	assert.Zero(t, stops.Load(),
-		"a drain against a healthy DB must not report giving up on the install budget")
+		"a drain against a healthy DB must not report giving up on the DB budget")
 	assert.Equal(t, queued, inst.calls)
 	assert.Len(t, inst.jammers, queued)
 }

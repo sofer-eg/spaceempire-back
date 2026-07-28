@@ -66,13 +66,11 @@ type sectorState struct {
 
 	// drones holds the live combat drones for this sector. Unlike
 	// missiles, drones are persistent state (see drones.md §3): launch
-	// INSERTs, death/recall DELETEs, dronesDirty drives the periodic
-	// BatchUpdate. nextDroneID is only used as a fallback id allocator
-	// when no DroneRepo is wired (pure unit tests) — with a repo the id
-	// is the DB-assigned primary key.
+	// INSERTs (through Ordnance, TASK-147), death/recall DELETEs,
+	// dronesDirty drives the periodic BatchUpdate. The id is always the
+	// DB-assigned primary key.
 	drones            map[domain.DroneID]*domain.Drone
 	dronesDirty       map[domain.DroneID]bool
-	nextDroneID       domain.DroneID
 	lastDroneSnapshot time.Time
 	// droneImpacts accumulates one-frame drone events (shot fired /
 	// death / expire) for the current tick. Same lifecycle as
@@ -80,14 +78,12 @@ type sectorState struct {
 	droneImpacts []DroneImpact
 
 	// torpedos holds the live homing torpedoes for this sector (ЧТЗ doc-1
-	// §3 FR-001). Like drones they are persistent state: launch INSERTs,
-	// death/detonation/expire DELETEs, torpedosDirty drives the periodic
-	// BatchUpdate. nextTorpedoID is only used as a fallback id allocator
-	// when no TorpedoRepo is wired (pure unit tests) — with a repo the id
-	// is the DB-assigned primary key.
+	// §3 FR-001). Like drones they are persistent state: launch INSERTs
+	// (through Ordnance, TASK-147), death/detonation/expire DELETEs,
+	// torpedosDirty drives the periodic BatchUpdate. The id is always the
+	// DB-assigned primary key.
 	torpedos            map[domain.TorpedoID]*domain.Torpedo
 	torpedosDirty       map[domain.TorpedoID]bool
-	nextTorpedoID       domain.TorpedoID
 	lastTorpedoSnapshot time.Time
 	// torpedoImpacts accumulates one-frame torpedo events (detonation /
 	// expire / owner-loss) for the current tick. Same one-frame lifecycle
@@ -163,22 +159,14 @@ func newSectorState(id domain.SectorID, initial []domain.Ship, initialDrones []d
 		ships[s.ID] = &s
 	}
 	drones := make(map[domain.DroneID]*domain.Drone, len(initialDrones))
-	var maxDroneID domain.DroneID
 	for i := range initialDrones {
 		d := initialDrones[i]
 		drones[d.ID] = &d
-		if d.ID > maxDroneID {
-			maxDroneID = d.ID
-		}
 	}
 	torpedos := make(map[domain.TorpedoID]*domain.Torpedo, len(initialTorpedos))
-	var maxTorpedoID domain.TorpedoID
 	for i := range initialTorpedos {
 		tp := initialTorpedos[i]
 		torpedos[tp.ID] = &tp
-		if tp.ID > maxTorpedoID {
-			maxTorpedoID = tp.ID
-		}
 	}
 	containers := make(map[domain.ContainerID]*domain.Container, len(initialContainers))
 	for i := range initialContainers {
@@ -207,11 +195,9 @@ func newSectorState(id domain.SectorID, initial []domain.Ship, initialDrones []d
 		missiles:             make(map[domain.MissileID]*domain.Missile),
 		drones:               drones,
 		dronesDirty:          make(map[domain.DroneID]bool),
-		nextDroneID:          maxDroneID,
 		lastDroneSnapshot:    now,
 		torpedos:             torpedos,
 		torpedosDirty:        make(map[domain.TorpedoID]bool),
-		nextTorpedoID:        maxTorpedoID,
 		lastTorpedoSnapshot:  now,
 		containers:           containers,
 		asteroids:            asteroids,
@@ -283,14 +269,6 @@ func (s *sectorState) clearDroneImpacts() {
 	s.droneImpacts = s.droneImpacts[:0]
 }
 
-// allocDroneID returns a fallback monotonic id, used only when no
-// DroneRepo is wired (pure unit tests). With a repo the DroneID is the
-// DB-assigned primary key returned by Create.
-func (s *sectorState) allocDroneID() domain.DroneID {
-	s.nextDroneID++
-	return s.nextDroneID
-}
-
 // collectDirtyDrones returns value copies of every currently-dirty drone.
 // Ids removed since being marked dirty are skipped.
 func (s *sectorState) collectDirtyDrones() []domain.Drone {
@@ -319,14 +297,6 @@ func (s *sectorState) addTorpedoImpact(imp TorpedoImpact) {
 // tick has consumed them.
 func (s *sectorState) clearTorpedoImpacts() {
 	s.torpedoImpacts = s.torpedoImpacts[:0]
-}
-
-// allocTorpedoID returns a fallback monotonic id, used only when no TorpedoRepo
-// is wired (pure unit tests). With a repo the TorpedoID is the DB-assigned
-// primary key returned by Create.
-func (s *sectorState) allocTorpedoID() domain.TorpedoID {
-	s.nextTorpedoID++
-	return s.nextTorpedoID
 }
 
 // collectDirtyTorpedos returns value copies of every currently-dirty torpedo.

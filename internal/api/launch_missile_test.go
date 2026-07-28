@@ -2,59 +2,20 @@ package api_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"spaceempire/back/internal/api"
 	"spaceempire/back/internal/api/dto"
-	"spaceempire/back/internal/cargo"
 	"spaceempire/back/internal/domain"
-	"spaceempire/back/internal/pkg/clock"
 	"spaceempire/back/internal/sector"
 )
-
-// fakeMissileCargo is an in-memory api.MissileCargo. It records every
-// Consume/Refund call so tests can assert the cargo lifecycle around
-// the worker reply.
-type fakeMissileCargo struct {
-	mu      sync.Mutex
-	stock   int64 // missiles currently in cargo (for the test ship)
-	consume int   // call count
-	refund  int   // call count
-}
-
-func (f *fakeMissileCargo) Consume(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.consume++
-	if f.stock < qty {
-		return cargo.ErrInsufficientQuantity
-	}
-	f.stock -= qty
-	return nil
-}
-
-func (f *fakeMissileCargo) Refund(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.refund++
-	f.stock += qty
-	return nil
-}
-
-func (f *fakeMissileCargo) snapshot() (stock int64, consume, refund int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.stock, f.consume, f.refund
-}
 
 func missileTestShip() domain.Ship {
 	return domain.Ship{
@@ -77,27 +38,27 @@ func missileTestShip() domain.Ship {
 	}
 }
 
-// newMissileTestServer wires the launch-missile path: a real Worker, a
-// fakeMissileCargo, and an api.Server with MissileCargo populated. Returns
-// everything the tests need to act and assert.
-func newMissileTestServer(t *testing.T, initial []domain.Ship, missileStock int64) (*api.Server, *sector.Worker, *fakeMissileCargo) {
+// newMissileTestServer wires the launch-missile path: a real Worker whose launch
+// runs through a fakeOrdnance, and an api.Server with no launch cargo at all.
+func newMissileTestServer(t *testing.T, initial []domain.Ship, missileStock int64) (*api.Server, *sector.Worker, *fakeOrdnance) {
 	t.Helper()
-	w := sector.NewWorker(
-		0,
-		sector.Config{TickInterval: 10 * time.Millisecond, InboxCapacity: 64},
-		clock.NewRealClock(),
-		nil,
-		nil,
-		map[domain.SectorID][]domain.Ship{domain.SectorID(1): initial},
-	)
-	cargo := &fakeMissileCargo{stock: missileStock}
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{api.MissileGoodsType: missileStock})
+	w := ordnanceTestWorker(ord, initial)
 	srv := api.NewServer(workerRouter{w}, api.Config{
 		SnapshotInterval: 10 * time.Millisecond,
 		AckTimeout:       time.Second,
 		SectorID:         1,
-		MissileCargo:     cargo,
 	}, nil)
-	return srv, w, cargo
+	return srv, w, ord
+}
+
+func postLaunchMissile(t *testing.T, srv *api.Server, body dto.LaunchMissileRequest) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
 }
 
 func TestUnit_LaunchMissile_OK(t *testing.T) {
@@ -107,16 +68,13 @@ func TestUnit_LaunchMissile_OK(t *testing.T) {
 	target.PlayerID = 999
 	target.Pos = domain.Vec2{X: 100, Y: 0}
 
-	srv, w, fake := newMissileTestServer(t, []domain.Ship{missileTestShip(), target}, 3)
+	srv, w, ord := newMissileTestServer(t, []domain.Ship{missileTestShip(), target}, 3)
 	runWorker(t, w)
 
-	body, _ := json.Marshal(dto.LaunchMissileRequest{
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var resp dto.LaunchMissileResponse
@@ -124,157 +82,202 @@ func TestUnit_LaunchMissile_OK(t *testing.T) {
 	require.True(t, resp.OK)
 	require.NotZero(t, resp.MissileID)
 
-	stock, consume, refund := fake.snapshot()
-	require.EqualValues(t, 2, stock, "cargo decremented by 1")
-	require.Equal(t, 1, consume)
-	require.Equal(t, 0, refund)
+	st := ord.snapshot()
+	require.EqualValues(t, 2, ord.left(api.MissileGoodsType), "magazine decremented by 1")
+	require.Equal(t, 1, st.debits)
+	require.Equal(t, 1, st.missiles)
+	require.Equal(t, 0, st.refunds, "nothing to refund — the debit is inside the launch")
+
+	// Assert the literal id, not api.MissileGoodsType — comparing the handler's
+	// constant against itself would pass even if it pointed at the drone's 51.
+	require.Equal(t, []domain.GoodsTypeID{50}, ord.chargedGoods())
 }
 
+// TestUnit_LaunchMissile_NoCargo: an empty magazine is refused inside the launch
+// transaction and surfaces as 400 — no missile fired.
 func TestUnit_LaunchMissile_NoCargo(t *testing.T) {
 	t.Parallel()
-	srv, w, fake := newMissileTestServer(t,
-		[]domain.Ship{missileTestShip()},
-		0, // empty cargo
-	)
+	srv, w, ord := newMissileTestServer(t, []domain.Ship{missileTestShip()}, 0)
 	runWorker(t, w)
 
-	body, _ := json.Marshal(dto.LaunchMissileRequest{
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	stock, _, refund := fake.snapshot()
-	require.EqualValues(t, 0, stock)
-	require.Equal(t, 0, refund, "no refund when Consume itself failed")
+	st := ord.snapshot()
+	require.EqualValues(t, 0, ord.left(api.MissileGoodsType))
+	require.Equal(t, 0, st.debits)
+	require.Equal(t, 0, st.missiles)
+	require.Equal(t, 0, st.refunds, "no refund — the failed debit rolled back")
 }
 
 // TestUnit_LaunchMissile_NonTargetableKind: a kind that is neither a ship nor a
-// destructible static (e.g. a container) is rejected at the handler boundary
-// before any cargo is touched (TASK-113 FR-06 "прочие → 400").
+// destructible static (e.g. a container) is rejected at the handler boundary,
+// before the command is even built (TASK-113 FR-06 "прочие → 400").
 func TestUnit_LaunchMissile_NonTargetableKind(t *testing.T) {
 	t.Parallel()
-	srv, _, fake := newMissileTestServer(t,
-		[]domain.Ship{missileTestShip()},
-		5,
-	)
-	body, _ := json.Marshal(dto.LaunchMissileRequest{
+	srv, _, ord := newMissileTestServer(t, []domain.Ship{missileTestShip()}, 5)
+
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindContainer), ID: 7},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	stock, consume, _ := fake.snapshot()
-	require.EqualValues(t, 5, stock)
-	require.Equal(t, 0, consume, "request rejected before touching cargo")
+	require.EqualValues(t, 5, ord.left(api.MissileGoodsType))
+	require.Empty(t, ord.chargedGoods(), "request rejected before the ordnance is reached")
 }
 
-// TestUnit_LaunchMissile_StaticTargetForwarded: a destructible-static kind now
-// passes the handler boundary (TASK-113 FR-06) and is forwarded to the worker.
-// With no such static in the sector the worker rejects it (ErrInvalidAttackTarget
-// → 400), so the handler must have debited the ammo and then refunded it — proof
-// it crossed the boundary rather than being rejected at it.
+// TestUnit_LaunchMissile_StaticTargetForwarded: a destructible-static kind passes
+// the handler boundary (TASK-113 FR-06) and is forwarded to the worker. With no
+// such static in the sector the worker rejects it on the target gate (400) — and
+// since TASK-147 that gate runs BEFORE the debit, so the magazine is untouched
+// rather than debited-then-refunded.
 func TestUnit_LaunchMissile_StaticTargetForwarded(t *testing.T) {
 	t.Parallel()
-	srv, w, fake := newMissileTestServer(t,
+	srv, w, ord := newMissileTestServer(t,
 		[]domain.Ship{missileTestShip()}, // no station 7 → worker rejects
 		3,
 	)
 	runWorker(t, w)
 
-	body, _ := json.Marshal(dto.LaunchMissileRequest{
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindStation), ID: 7},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
 
+	// 400 from the worker (not from the handler boundary) is what proves the
+	// static kind crossed it: the handler answers "invalid missile target" only
+	// after the worker's resolve fails.
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	stock, consume, refund := fake.snapshot()
-	require.EqualValues(t, 3, stock, "ammo restored after the worker rejected the phantom static")
-	require.Equal(t, 1, consume, "static kind crossed the boundary and debited ammo")
-	require.Equal(t, 1, refund)
+	require.Contains(t, rec.Body.String(), "invalid missile target")
+	st := ord.snapshot()
+	require.EqualValues(t, 3, ord.left(api.MissileGoodsType), "magazine untouched")
+	require.Equal(t, 0, st.debits)
+	require.Equal(t, 0, st.refunds)
 }
 
 func TestUnit_LaunchMissile_SelfTarget(t *testing.T) {
 	t.Parallel()
-	srv, _, fake := newMissileTestServer(t,
-		[]domain.Ship{missileTestShip()},
-		5,
-	)
-	body, _ := json.Marshal(dto.LaunchMissileRequest{
+	srv, _, ord := newMissileTestServer(t, []domain.Ship{missileTestShip()}, 5)
+
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 1},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	stock, _, _ := fake.snapshot()
-	require.EqualValues(t, 5, stock)
+	require.EqualValues(t, 5, ord.left(api.MissileGoodsType))
 }
 
-// TestUnit_LaunchMissile_SectorRejectsRefundsCargo: the sector worker
-// rejects the launch (target missing) — handler must refund the missile
-// it debited.
-func TestUnit_LaunchMissile_SectorRejectsRefundsCargo(t *testing.T) {
+// TestUnit_LaunchMissile_SectorRejectsKeepsCargo: the worker rejects the launch
+// on a gate (target missing) — the ammunition is never touched, so there is
+// nothing to refund. This replaces the pre-TASK-147 refund test: the handler no
+// longer debits up front, so a rejection cannot leave the magazine short.
+func TestUnit_LaunchMissile_SectorRejectsKeepsCargo(t *testing.T) {
 	t.Parallel()
-	srv, w, fake := newMissileTestServer(t,
-		[]domain.Ship{missileTestShip()}, // no target ship 2 → worker replies ErrInvalidAttackTarget
+	srv, w, ord := newMissileTestServer(t,
+		[]domain.Ship{missileTestShip()}, // no target ship 2 → ErrInvalidAttackTarget
 		3,
 	)
 	runWorker(t, w)
 
-	body, _ := json.Marshal(dto.LaunchMissileRequest{
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	stock, consume, refund := fake.snapshot()
-	require.EqualValues(t, 3, stock, "cargo restored after worker rejection")
-	require.Equal(t, 1, consume)
-	require.Equal(t, 1, refund)
+	st := ord.snapshot()
+	require.EqualValues(t, 3, ord.left(api.MissileGoodsType), "magazine untouched")
+	require.Equal(t, 0, st.debits)
+	require.Equal(t, 0, st.refunds)
 }
 
-// TestUnit_LaunchMissile_NoCargoService_503: when MissileCargo is nil the
-// endpoint returns 503 (legacy bring-up path).
-func TestUnit_LaunchMissile_NoCargoService_503(t *testing.T) {
+// TestUnit_LaunchMissile_NoOrdnanceWired: the worker has no transactional
+// ordnance, so it refuses to fire rather than launch a free missile. The handler
+// must surface that as 503 (a misconfiguration the player can only retry), not as
+// a 200 for a shot nobody paid for.
+func TestUnit_LaunchMissile_NoOrdnanceWired(t *testing.T) {
 	t.Parallel()
-	w := sector.NewWorker(
-		0,
-		sector.Config{TickInterval: 10 * time.Millisecond, InboxCapacity: 64},
-		clock.NewRealClock(),
-		nil,
-		nil,
-		map[domain.SectorID][]domain.Ship{domain.SectorID(1): {missileTestShip()}},
-	)
+	target := missileTestShip()
+	target.ID = 2
+	target.PlayerID = 999
+	target.Pos = domain.Vec2{X: 100, Y: 0}
+
+	w := noOrdnanceWorker(t, []domain.Ship{missileTestShip(), target})
 	srv := api.NewServer(workerRouter{w}, api.Config{
 		SnapshotInterval: 10 * time.Millisecond,
 		AckTimeout:       time.Second,
 		SectorID:         1,
-		// MissileCargo intentionally nil
 	}, nil)
+	runWorker(t, w)
 
-	body, _ := json.Marshal(dto.LaunchMissileRequest{
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/cmd/launch-missile", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	assert.Empty(t, w.Snapshot(domain.SectorID(1)).Missiles, "no free missile")
+}
+
+// TestUnit_LaunchMissile_AckTimeoutChargesOnce is the TASK-147 regression test.
+// The command is accepted but the ack does not arrive in time: the handler
+// answers 504 and — crucially — performs NO cargo call of its own (it has no
+// cargo dependency left). When the worker finally applies the queued command the
+// debit and the launch land together: one missile, one payment. The player's retry
+// then hits an empty magazine and gets nothing for free.
+func TestUnit_LaunchMissile_AckTimeoutChargesOnce(t *testing.T) {
+	t.Parallel()
+	target := missileTestShip()
+	target.ID = 2
+	target.PlayerID = 999
+	target.Pos = domain.Vec2{X: 100, Y: 0}
+
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{api.MissileGoodsType: 1})
+	w := ordnanceTestWorker(ord, []domain.Ship{missileTestShip(), target})
+	router := &deferredRouter{workerRouter: workerRouter{w}}
+	srv := api.NewServer(router, api.Config{
+		SnapshotInterval: 10 * time.Millisecond,
+		AckTimeout:       20 * time.Millisecond,
+		SectorID:         1,
+	}, nil)
+
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
+		ShipID:    1,
+		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+	})
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code, rec.Body.String())
+
+	st := ord.snapshot()
+	require.EqualValues(t, 1, ord.left(api.MissileGoodsType), "504 alone must not move ammunition")
+	require.Equal(t, 0, st.debits, "the HTTP layer makes no cargo call at all")
+	require.Equal(t, 0, st.refunds)
+	require.Equal(t, 0, st.missiles)
+
+	// The worker applies the command it was already holding.
+	router.release(t)
+	st = ord.snapshot()
+	require.EqualValues(t, 0, ord.left(api.MissileGoodsType))
+	require.Equal(t, 1, st.debits, "charged exactly once")
+	require.Equal(t, 1, st.missiles, "exactly one missile launched")
+	require.Len(t, w.Snapshot(domain.SectorID(1)).Missiles, 1)
+
+	// Player retries after the 504: the magazine is empty, so no free duplicate.
+	rec = postLaunchMissile(t, srv, dto.LaunchMissileRequest{
+		ShipID:    1,
+		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+	})
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code, rec.Body.String())
+	router.release(t)
+
+	st = ord.snapshot()
+	assert.Equal(t, 1, st.debits, "no second charge")
+	assert.Equal(t, 1, st.missiles, "no free second missile")
+	assert.Len(t, w.Snapshot(domain.SectorID(1)).Missiles, 1)
 }
 
 // TestUnit_LaunchMissile_InvalidJSON: malformed body → 400.
@@ -286,6 +289,3 @@ func TestUnit_LaunchMissile_InvalidJSON(t *testing.T) {
 	srv.Handler().ServeHTTP(rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
-
-// guard against compiler warnings on errors imported only by handler tests.
-var _ = errors.New

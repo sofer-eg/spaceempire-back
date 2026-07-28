@@ -28,6 +28,13 @@ func New(exec database.Executor) *Repository {
 	return &Repository{exec: exec}
 }
 
+// WithExecutor returns a Repository bound to a different executor. Used by the
+// launch path (TASK-147) to run Create inside the same transaction as the
+// ammunition debit, so a drone can never appear without being paid for.
+func (r *Repository) WithExecutor(exec database.Executor) *Repository {
+	return &Repository{exec: exec}
+}
+
 const loadAllSQL = `
 SELECT id, sector_id, owner_ship_id, player_id,
        pos_x, pos_y, vel_x, vel_y, direction_x, direction_y,

@@ -465,6 +465,17 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			jammers:    jammersRepo,
 			satellites: satellitesRepo,
 		}),
+		// TASK-147: the launch-missile / launch-drone / launch-torpedo commands
+		// charge the ammunition and create the projectile rows in ONE transaction,
+		// closing the same lost-ack hole TASK-144 closed for installs (504 +
+		// refund, then the worker fires anyway). This replaces the handler-side
+		// Consume/Refund pairs.
+		sector.WithOrdnance(ordnance{
+			tx:       txManager,
+			cargo:    cargoRepoPersistence,
+			drones:   droneRepo,
+			torpedos: torpedoRepo,
+		}),
 		// 9.4: police — the main-race navy scans player ships for contraband,
 		// confiscates it (via cargo), drops the player's race standing, and
 		// drops standing again when a player destroys a faction ship.
@@ -540,14 +551,15 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Equipment:         equipment,
 		HandoffBus:        jumpBus,
 		EventBus:          jumpBus,
-		MissileCargo:      cargoSvc,
-		DroneCargo:        cargoSvc,
-		TorpedoCargo:      cargoSvc,
-		NpcPlayerID:       npcPlayerID,
-		ActiveShips:       playersRepoPersistence,
-		ActiveShipWriter:  playersRepoPersistence,
-		HandoffPublisher:  jumpBus,
-		Fleet:             sectorPool,
+		// DroneCargo credits recalled drones back to the hold. The launch debits
+		// (missile / drone / torpedo) live in the worker's Ordnance since TASK-147,
+		// so the HTTP layer owns no launch-side cargo at all.
+		DroneCargo:       cargoSvc,
+		NpcPlayerID:      npcPlayerID,
+		ActiveShips:      playersRepoPersistence,
+		ActiveShipWriter: playersRepoPersistence,
+		HandoffPublisher: jumpBus,
+		Fleet:            sectorPool,
 	}, logger)
 	authSrv.RegisterRoutes(srv.Mux())
 	authSrv.RegisterPlayersList(srv.Mux())

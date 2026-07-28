@@ -57,10 +57,15 @@ func (r *fakeTorpedoRepo) Delete(_ context.Context, id domain.TorpedoID) error {
 func (r *fakeTorpedoRepo) liveCount() int { return len(r.live) }
 
 // newTorpedoWorker builds a single-sector worker with torpedo persistence wired
-// to repo, plus any extra options (e.g. a destructible station).
+// to repo, plus any extra options (e.g. a destructible station). The launch
+// transaction runs through an unlimited fakeOrdnance that creates through the
+// same repo (TASK-147: the row and the ammunition debit are one transaction), so
+// repo.creates still counts exactly the launches.
 func newTorpedoWorker(t *testing.T, cfg sector.Config, clk clock.Clock, repo *fakeTorpedoRepo, ships []domain.Ship, opts ...sector.Option) *sector.Worker {
 	t.Helper()
-	opts = append([]sector.Option{sector.WithTorpedos(repo, nil)}, opts...)
+	ord := unlimitedOrdnance()
+	ord.torpedoRepo = repo
+	opts = append([]sector.Option{sector.WithTorpedos(repo, nil), sector.WithOrdnance(ord)}, opts...)
 	return sector.NewWorker(0, cfg, clk, nil, nil,
 		map[domain.SectorID][]domain.Ship{testSector: ships}, opts...)
 }

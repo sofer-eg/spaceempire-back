@@ -32,9 +32,16 @@ const (
 
 	// shutdownBudget bounds the wait for app.Run to return after ctx cancel.
 	// Run shuts the HTTP server down (Server.ShutdownTimeout below) and then
-	// waits on every worker goroutine, so this must stay comfortably above
-	// ShutdownTimeout for the graceful path to be what is actually observed.
-	shutdownBudget = 30 * time.Second
+	// joins the worker goroutines — measured at ~0.8 s, so this is a 6x margin.
+	//
+	// Deliberately NOT aligned with healthzBudget above: cold start opens the
+	// pool and spawns every sector's NPCs, while shutdown is bounded by
+	// ShutdownTimeout plus a goroutine join. Different quantities, different
+	// budgets. Keeping this one tight is part of what the test asserts — a
+	// regression that made graceful shutdown take 20 s should fail here rather
+	// than pass unnoticed. Raise it only with a measurement showing this budget
+	// is itself what flakes.
+	shutdownBudget = 5 * time.Second
 )
 
 func freePort(t *testing.T) int {
@@ -105,9 +112,11 @@ func TestIntegration_App_StartsAndShutsDownGracefully(t *testing.T) {
 		t.Fatalf("healthz status = %d, want 200", resp.StatusCode)
 	}
 
+	canceledAt := time.Now()
 	cancel()
 	select {
 	case err := <-done:
+		t.Logf("Run returned %s after cancel", time.Since(canceledAt).Round(time.Millisecond))
 		if err != nil {
 			t.Fatalf("Run returned %v, want nil", err)
 		}

@@ -37,21 +37,39 @@ TEST_P ?= 2
 # kept generous so that it only ever fires on a genuine hang.
 TEST_TIMEOUT ?= 180s
 
-# TEST_LABEL is stamped on every container started by internal/pkg/database/testdb
-# (testdb.LabelKey/LabelValue). Deliberately := and not ?=: the label on the
-# containers comes from a Go constant, so overriding this would only ever change
-# what gets *deleted* — `make test-clean TEST_LABEL=org.testcontainers=true`
-# would wipe every project's testcontainers on the host.
-#
+# TEST_LABEL / TEST_RUN_LABEL are the labels internal/pkg/database/testdb stamps
+# on every container it starts (testdb.LabelKey/LabelValue, testdb.RunLabelKey).
+# `override` because they must not be settable from the command line: the labels
+# on the containers come from Go constants, so an override changes nothing about
+# what is created and everything about what is deleted —
+# `make test-clean TEST_LABEL=org.testcontainers=true` would wipe every
+# project's testcontainers on this host. Note that := alone does NOT prevent
+# this; only override does.
+override TEST_LABEL     := spaceempire.test=true
+override TEST_RUN_LABEL := spaceempire.test.run
+
 # TEST_RUN_ID is unique per make invocation and reaches the tests as
-# SE_TEST_RUN_ID (testdb.RunIDEnv), which stamps it as a second label. The
-# automatic cleanup after a run matches on that one, so two runs sharing a
-# docker host cannot tear down each other's containers.
-# TestUnit_TestDB_MakefileFiltersMatchLabels fails if these strings drift from
-# the Go constants.
-TEST_LABEL     := spaceempire.test=true
-TEST_RUN_LABEL := spaceempire.test.run
-TEST_RUN_ID    := $(shell date +%s%N)
+# SE_TEST_RUN_ID (testdb.RunIDEnv), which stamps it as a second label; the
+# cleanup after a run matches on that one, so two runs sharing a docker host
+# cannot tear down each other's containers. Overridable on purpose, to reap a
+# specific past run by hand.
+#
+# %N is a GNU date extension — on BSD/macOS it prints literally and the id
+# degrades to one-per-second. Harmless: colliding ids only take cleanup back to
+# the old behaviour of sweeping a concurrent run.
+TEST_RUN_ID := $(shell date +%s%N)
+
+# REAP is the cleanup both sweeps go through; it takes a label filter and the
+# exit status of the test run (see the script for why the status matters).
+#
+# Called directly rather than through a `$(MAKE) test-clean-run` sub-make: a
+# sub-make re-parses this file and re-evaluates TEST_RUN_ID, so the child
+# filtered on an id nothing had ever been stamped with and quietly matched
+# nothing. Calling the script keeps one id per invocation, and keeps `make -n`
+# from executing the recipe (make runs lines containing $(MAKE) even under -n,
+# `go test ./...` and all), which is what lets
+# TestUnit_TestDB_MakefileReapsWhatItStamps check this wiring.
+REAP := scripts/reap-test-containers.sh
 
 run:
 	go run ./cmd/starwind
@@ -84,7 +102,7 @@ release:
 test:
 	@SE_TEST_RUN_ID=$(TEST_RUN_ID) TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) \
 		go test -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
-		status=$$?; $(MAKE) --no-print-directory test-clean-run; exit $$status
+		status=$$?; $(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)" $$status; exit $$status
 
 test-unit:
 	go test -run '^TestUnit_' -race -p $(TEST_P) ./...
@@ -92,14 +110,14 @@ test-unit:
 test-integration:
 	@SE_TEST_RUN_ID=$(TEST_RUN_ID) TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) \
 		go test -run '^TestIntegration_' -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
-		status=$$?; $(MAKE) --no-print-directory test-clean-run; exit $$status
+		status=$$?; $(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)" $$status; exit $$status
 
-# test-clean-run reaps only this invocation's containers. It runs automatically
-# after test / test-integration, where a blanket sweep would kill a concurrent
-# run's live databases and bury it under connection errors.
+# test-clean-run reaps one run's containers: the pass that test / test-integration
+# run inline, exposed as a target so a past run can be reaped by hand with
+# `make test-clean-run TEST_RUN_ID=<id>`. A blanket sweep here would kill a
+# concurrent run's live databases and bury it under connection errors.
 test-clean-run:
-	@ids=$$(docker ps -aq --filter "label=$(TEST_RUN_LABEL)=$(TEST_RUN_ID)"); \
-	if [ -n "$$ids" ]; then echo "removing leaked test containers (run $(TEST_RUN_ID)):"; docker rm -f $$ids; fi
+	@$(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)"
 
 # test-clean sweeps every container this project's tests ever started, including
 # those from runs that were killed outright, and from `go test` invoked directly
@@ -107,8 +125,7 @@ test-clean-run:
 # flight. Matched strictly by TEST_LABEL, never by image name, so local developer
 # databases are out of scope by construction.
 test-clean:
-	@ids=$$(docker ps -aq --filter "label=$(TEST_LABEL)"); \
-	if [ -n "$$ids" ]; then echo "removing leaked test containers:"; docker rm -f $$ids; fi
+	@$(REAP) "$(TEST_LABEL)"
 
 bench:
 	go test -run '^$$' -bench=. -benchmem ./...

@@ -13,9 +13,13 @@
 //	func TestMain(m *testing.M) { testdb.Main(m) }
 //
 // so the shared container is terminated after the last test. A run killed by
-// `go test -timeout` panics the whole binary and skips every cleanup; the
-// containers started here carry the LabelKey/LabelValue label so that `make
-// test-clean` can reap those leftovers without touching unrelated containers.
+// `go test -timeout` panics the whole binary and skips every cleanup, so the
+// containers started here are labelled for an external sweep: RunLabelKey with
+// the id in RunIDEnv, which `make test` and `make test-integration` reap
+// automatically at the end of the invocation that stamped it, and
+// LabelKey/LabelValue, which `make test-clean` sweeps wholesale by hand
+// (including containers from a `go test` run that carried no id). Neither ever
+// matches on the image name, so unrelated containers stay out of scope.
 package testdb
 
 import (
@@ -47,9 +51,9 @@ const (
 	dbPassword = "test"
 	pgImage    = "postgres:16-alpine"
 
-	// LabelKey/LabelValue mark every container this package starts. `make
-	// test-clean` reaps leaked containers strictly by this label, so unrelated
-	// local databases are never touched.
+	// LabelKey/LabelValue mark every container this package starts — the label
+	// the manual `make test-clean` sweep matches on. See the package doc for how
+	// it and the run label divide the work.
 	LabelKey   = "spaceempire.test"
 	LabelValue = "true"
 
@@ -64,8 +68,10 @@ const (
 	// serverMaxConns raises the server-side ceiling above the default 100, and
 	// poolMaxConns pins what each pool may take from it — pgxpool would
 	// otherwise default to max(4, NumCPU) and make the budget depend on the
-	// machine. A package runs at most -parallel (GOMAXPROCS) tests at once, so
-	// the worst case is GOMAXPROCS*4 + 4: within 200 up to a 48-core runner.
+	// machine. A package runs at most -parallel (GOMAXPROCS) tests at once; the
+	// heaviest of them, internal/app, opens a second pool of its own per test
+	// (config.PostgresConfig.MaxConns, 4 there), so the worst case is
+	// GOMAXPROCS*8 + 4 — within 200 up to a 24-core runner.
 	serverMaxConns = "200"
 	poolMaxConns   = 4
 	adminMaxConns  = 4

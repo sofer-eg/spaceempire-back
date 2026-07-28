@@ -2,9 +2,9 @@ package testdb
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,26 +56,77 @@ func TestUnit_TestDB_DSNForDB(t *testing.T) {
 	}
 }
 
-// TestUnit_TestDB_MakefileFiltersMatchLabels keeps the Makefile's cleanup
-// filters and the labels stamped here from drifting apart. Drift does not fail
-// anything: the filters simply stop matching, and leaked containers return
-// silently — the very failure mode this package exists to prevent.
-func TestUnit_TestDB_MakefileFiltersMatchLabels(t *testing.T) {
+// repoRoot is back/, four levels up from this package. Derived from the working
+// directory (go test runs a package's tests in its own directory) rather than
+// runtime.Caller, whose path is baked in at compile time and is relative under
+// -trimpath.
+const repoRoot = "../../../.."
+
+// dryRun expands a make target without running it. `make -n` prints even
+// @-prefixed recipe lines, so the expansion is fully visible.
+//
+// It does, however, execute any recipe line containing $(MAKE) — including the
+// `go test ./...` sharing that line. The recipes here inline their cleanup so
+// that cannot happen, but a future edit could bring the sub-make back, and this
+// guard must not become a way to launch the whole integration suite. A stub
+// `go` first on PATH keeps that harmless (measured: 156s -> instant).
+func dryRun(t *testing.T, args ...string) string {
+	t.Helper()
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("make not installed")
+	}
+
+	stub := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(stub, "go"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+
+	cmd := exec.Command("make", append([]string{"-C", repoRoot, "-n"}, args...)...)
+	cmd.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "make -n %v: %s", args, out)
+	return string(out)
+}
+
+// TestUnit_TestDB_MakefileReapsWhatItStamps pins the wiring between the labels
+// stamped here and the filters the Makefile cleans up with. Both bugs this
+// guards against are silent: the filter stops matching, the reaper reports
+// success having found nothing, and leaked containers come back.
+//
+// It asserts on the expanded recipe rather than on the file's text, because the
+// defect that actually happened — the run id being re-evaluated in a sub-make,
+// so that containers were stamped with one id and reaped by another — leaves
+// every expected substring present in the file.
+func TestUnit_TestDB_MakefileReapsWhatItStamps(t *testing.T) {
 	t.Parallel()
 
-	_, thisFile, _, ok := runtime.Caller(0)
-	require.True(t, ok, "runtime.Caller")
-	// internal/pkg/database/testdb -> back
-	makefile := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..", "Makefile")
+	t.Run("integration run stamps and reaps the same id", func(t *testing.T) {
+		t.Parallel()
+		// Deliberately no TEST_RUN_ID on the command line: command-line
+		// variables propagate to sub-makes through MAKEFLAGS, so supplying one
+		// would paper over exactly the defect this asserts against — the id
+		// being re-evaluated wherever the cleanup runs. The id has to come from
+		// the Makefile's own `date`, and both places must show that one.
+		out := dryRun(t, "test-integration")
 
-	body, err := os.ReadFile(makefile)
-	require.NoError(t, err, "read Makefile")
-	text := string(body)
+		stamped := regexp.MustCompile(RunIDEnv + `=(\S+)`).FindStringSubmatch(out)
+		require.Len(t, stamped, 2, "the test run must receive an id as %s:\n%s", RunIDEnv, out)
 
-	assert.True(t, strings.Contains(text, LabelKey+"="+LabelValue),
-		"Makefile must filter on the project label %s=%s", LabelKey, LabelValue)
-	assert.True(t, strings.Contains(text, RunLabelKey),
-		"Makefile must filter on the run label %s", RunLabelKey)
-	assert.True(t, strings.Contains(text, RunIDEnv+"="),
-		"Makefile must export the run id as %s", RunIDEnv)
+		assert.Contains(t, out, RunLabelKey+"="+stamped[1],
+			"the cleanup must filter on the id the containers were stamped with (%s)", stamped[1])
+	})
+
+	t.Run("manual sweep filters on the project label", func(t *testing.T) {
+		t.Parallel()
+		out := dryRun(t, "test-clean")
+		assert.Contains(t, out, LabelKey+"="+LabelValue)
+	})
+
+	t.Run("project label cannot be overridden from the command line", func(t *testing.T) {
+		t.Parallel()
+		// Without `override` in the Makefile this sweeps every project's
+		// testcontainers off the host. := does not prevent it.
+		out := dryRun(t, "test-clean", "TEST_LABEL=org.testcontainers=true")
+		assert.Contains(t, out, LabelKey+"="+LabelValue)
+		assert.NotContains(t, out, "org.testcontainers=true")
+	})
 }

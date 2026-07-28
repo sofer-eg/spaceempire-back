@@ -84,12 +84,18 @@ A binary killed by `go test -timeout` panics and skips every `t.Cleanup` **and**
 `make test-integration` therefore always finish with a cleanup pass, keeping the
 test run's own exit code.
 
-That pass (`test-clean-run`) removes **only the containers of the invocation
-that is finishing**. Each `make` invocation generates a `TEST_RUN_ID` and passes
-it to the tests as `SE_TEST_RUN_ID` (`testdb.RunIDEnv`), which `testdb` stamps as
-a second label. Without that scoping, two runs sharing a docker host would
-destroy each other: the first to finish would `docker rm -f` the other's live
-databases.
+That pass removes **only the containers of the invocation that is finishing**.
+Each `make` invocation generates a `TEST_RUN_ID` and passes it to the tests as
+`SE_TEST_RUN_ID` (`testdb.RunIDEnv`), which `testdb` stamps as a second label.
+Without that scoping, two runs sharing a docker host would destroy each other:
+the first to finish would `docker rm -f` the other's live databases. To reap a
+past run by hand: `make test-clean-run TEST_RUN_ID=<id>`.
+
+Both sweeps go through `scripts/reap-test-containers.sh`. When the test run
+failed, it keeps sweeping until two consecutive passes come up empty: a binary
+killed while testcontainers was mid-create leaves the daemon to finish the job,
+so containers keep appearing (in state `created`) for seconds after `go test`
+has returned. A single immediate sweep measured 11 of them left behind.
 
 For a total sweep — containers from runs that were killed outright, or from
 `go test` invoked directly, which carry no run id — there is a manual target:

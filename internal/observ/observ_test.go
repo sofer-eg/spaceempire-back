@@ -162,7 +162,7 @@ func TestUnit_WithRequestID_InjectsIntoHandlerLogs(t *testing.T) {
 
 	logger.ErrorContext(ctx, "handler blew up")
 
-	line := lastLineWith(t, &buf, "handler blew up")
+	line, _ := recordWithMsg(t, buf.String(), "handler blew up")
 	assert.Equal(t, id, line["request_id"],
 		"the handler's own line must carry the id from the response header")
 }
@@ -182,9 +182,35 @@ func TestUnit_WithRequestID_SurvivesLoggerWith(t *testing.T) {
 	derived := logger.With("component", "sector.worker")
 	derived.ErrorContext(ctx, "derived line")
 
-	line := lastLineWith(t, &buf, "derived line")
+	line, _ := recordWithMsg(t, buf.String(), "derived line")
 	assert.Equal(t, id, line["request_id"], "logger.With must not drop the injection")
 	assert.Equal(t, "sector.worker", line["component"], "the derived attrs still apply")
+}
+
+// TestUnit_WithRequestID_SurvivesLoggerWithGroup is the WithGroup half of the
+// same re-wrap contract — without it, deleting the WithGroup override leaves
+// the whole suite green while every grouped logger silently loses the id.
+//
+// It also pins the SHAPE, which is the wart worth knowing about: a record attr
+// added at Handle time lands INSIDE the open group, so the field is
+// `db.request_id`, not top-level `request_id`. Nothing in the app opens a
+// group today; the day something does (a repository logger is the obvious
+// candidate), a log query on top-level request_id would quietly miss exactly
+// those lines — and this test is where that shows up.
+func TestUnit_WithRequestID_SurvivesLoggerWithGroup(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := debugLogger(&buf)
+	ctx, id := captureRequestCtx(t, logger)
+
+	logger.WithGroup("db").ErrorContext(ctx, "query failed", "table", "ships")
+
+	line, _ := recordWithMsg(t, buf.String(), "query failed")
+	group, ok := line["db"].(map[string]any)
+	require.True(t, ok, "the group is still emitted as a nested object")
+	assert.Equal(t, id, group["request_id"], "logger.WithGroup must not drop the injection")
+	assert.Equal(t, "ships", group["table"], "the grouped attrs still apply")
+	assert.NotContains(t, line, "request_id", "documented wart: the id nests inside the open group")
 }
 
 // TestUnit_WithRequestID_AccessLineNotDuplicated: AccessLog attaches the field
@@ -197,9 +223,9 @@ func TestUnit_WithRequestID_AccessLineNotDuplicated(t *testing.T) {
 	var buf bytes.Buffer
 	_, id := captureRequestCtx(t, debugLogger(&buf))
 
-	line := lastLineWith(t, &buf, "http request")
+	line, raw := recordWithMsg(t, buf.String(), "http request")
 	assert.Equal(t, id, line["request_id"])
-	assert.Equal(t, 1, strings.Count(rawLineWith(t, buf.String(), "http request"), `"request_id"`),
+	assert.Equal(t, 1, strings.Count(raw, `"request_id"`),
 		"the access line must carry request_id exactly once")
 }
 
@@ -210,7 +236,7 @@ func TestUnit_WithRequestID_AbsentWithoutRequest(t *testing.T) {
 	var buf bytes.Buffer
 	debugLogger(&buf).Info("tick done")
 
-	line := lastLineWith(t, &buf, "tick done")
+	line, _ := recordWithMsg(t, buf.String(), "tick done")
 	_, present := line["request_id"]
 	assert.False(t, present, "no request context → no request_id attribute")
 }
@@ -221,6 +247,7 @@ func TestUnit_WithRequestID_AbsentWithoutRequest(t *testing.T) {
 // the field entirely. Exercising the production path (LogFile set → rotated
 // JSON) is the only way to assert the wiring itself.
 func TestUnit_NewLogger_WiresRequestID(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "app.log")
 	logger := observ.NewLogger(config.ObservabilityConfig{
 		LogLevel: "debug",
@@ -231,29 +258,29 @@ func TestUnit_NewLogger_WiresRequestID(t *testing.T) {
 
 	out, err := os.ReadFile(path)
 	require.NoError(t, err)
-	line := rawLineWith(t, string(out), "wired through NewLogger")
-	assert.Contains(t, line, `"request_id":"`+id+`"`,
+	_, raw := recordWithMsg(t, string(out), "wired through NewLogger")
+	assert.Contains(t, raw, `"request_id":"`+id+`"`,
 		"the logger NewLogger actually returns must inject the request id")
 }
 
-// rawLineWith returns the raw JSON line whose "msg" contains want.
-func rawLineWith(t *testing.T, out, want string) string {
+// recordWithMsg returns the first log record in out whose "msg" is exactly
+// want, both parsed and raw. Matching the PARSED msg rather than a substring
+// of the raw line matters: a line that merely mentions want inside an
+// attribute value would otherwise be picked up instead, and the assert built
+// on it would quietly stop checking anything.
+func recordWithMsg(t *testing.T, out, want string) (map[string]any, string) {
 	t.Helper()
-	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
-		if strings.Contains(l, want) {
-			return l
+	for _, raw := range strings.Split(strings.TrimSpace(out), "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(raw), &rec) != nil {
+			continue
+		}
+		if rec["msg"] == want {
+			return rec, raw
 		}
 	}
-	t.Fatalf("no log line containing %q in:\n%s", want, out)
-	return ""
-}
-
-// lastLineWith parses the JSON log line whose "msg" contains want.
-func lastLineWith(t *testing.T, buf *bytes.Buffer, want string) map[string]any {
-	t.Helper()
-	var line map[string]any
-	require.NoError(t, json.Unmarshal([]byte(rawLineWith(t, buf.String(), want)), &line))
-	return line
+	t.Fatalf("no log line with msg %q in:\n%s", want, out)
+	return nil, ""
 }
 
 // compile-time check that Metrics satisfies the sector sink shape.

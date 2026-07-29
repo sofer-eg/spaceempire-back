@@ -63,6 +63,13 @@ func (h requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
 	// slog.Default()). Skipping a record that already carries the key keeps
 	// that one line from emitting request_id twice in the same JSON object.
 	if id, ok := RequestIDFromContext(ctx); ok && !hasAttr(r, requestIDAttr) {
+		// Clone before mutating: slog's contract is that copies of a Record
+		// share state and AddAttrs on an un-cloned copy is a bug (it can
+		// scribble over a sibling handler's attrs, and slog's own detector
+		// emits a "!BUG" attribute for it). Nothing fans a record out to two
+		// handlers today, but Clone is just a slices.Clip — free insurance
+		// against the first tee/OTel bridge that does.
+		r = r.Clone()
 		r.AddAttrs(slog.String(requestIDAttr, id))
 	}
 	return h.Handler.Handle(ctx, r)

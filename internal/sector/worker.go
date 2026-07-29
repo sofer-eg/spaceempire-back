@@ -787,6 +787,14 @@ func (w *Worker) Run(ctx context.Context) error {
 // nil, pure unit tests) so callers need no separate guard. Takes the ship by
 // value: handoff saves a relocated copy and the capture saves a prospective
 // one, neither of which is the live RAM ship yet.
+//
+// The parent is always context.Background(), not the tick's context, and that is
+// not an oversight: every caller (immediateSave, the docking/access saves, the
+// handoff, the ownership transfer) is a command-driven write with no context of
+// its own, and the two tick-path callers reach it through immediateSave from the
+// AI action handler. A shutdown therefore does not cut a ship save short — it
+// waits out at most one RepoTimeout, which is the right trade for the write that
+// carries ownership and docking state.
 func (w *Worker) saveShip(ship domain.Ship) error {
 	if w.repo == nil {
 		return nil
@@ -1058,14 +1066,32 @@ func (w *Worker) runProduction(ctx context.Context, s *sectorState, now time.Tim
 	if w.production == nil || len(s.statics.Stations) == 0 {
 		return
 	}
+	// production.Service.Tick is a LOOP of one transaction per station, not one
+	// round trip, so cfg.RepoTimeout bounds the whole cycle. Against a degraded
+	// (not hung) Postgres the cycle is truncated, and with a fixed starting point
+	// it would be truncated at the same place every tick — the tail of the slice
+	// would simply stop producing, deterministically, while the head kept going.
+	// Rotating the entry point by the tick counter spreads the truncation evenly:
+	// the two calls share one deadline (so the bound is unchanged) and both
+	// sub-slices alias the same backing array, so the in-place mutation the
+	// ticker performs still lands on the sector's own stations.
+	stations := s.statics.Stations
+	off := int(s.tick % uint64(len(stations)))
 	var cycles int
 	err := w.dbCall(ctx, func(ctx context.Context) error {
-		var err error
-		cycles, err = w.production.Tick(ctx, s.statics.Stations, now)
-		return err
+		head, errHead := w.production.Tick(ctx, stations[off:], now)
+		tail, errTail := w.production.Tick(ctx, stations[:off], now)
+		cycles = head + tail
+		return errors.Join(errHead, errTail)
 	})
 	if err != nil {
-		w.logger.ErrorContext(ctx, "production tick", "err", err, "sector", int64(s.sectorID))
+		if dbDeadline(err) {
+			w.logger.WarnContext(ctx, "production cycle truncated by the repo deadline",
+				"err", err, "sector", int64(s.sectorID), "stations", len(stations),
+				"start", off, "repo_timeout", w.cfg.RepoTimeout)
+		} else {
+			w.logger.ErrorContext(ctx, "production tick", "err", err, "sector", int64(s.sectorID))
+		}
 	}
 	if cycles > 0 {
 		s.productionCycles += uint64(cycles)
@@ -1198,7 +1224,15 @@ func (w *Worker) dbCallCost(started time.Time) time.Duration {
 // per call and therefore proportional to how many DB operations a tick performs
 // — finite and self-limiting, unlike the previous "forever".
 func (w *Worker) dbCall(parent context.Context, fn func(ctx context.Context) error) error {
-	ctx, cancel := context.WithTimeout(parent, w.cfg.RepoTimeout)
+	timeout := w.cfg.RepoTimeout
+	if timeout <= 0 {
+		// A non-positive timeout is an already-blown deadline: every call would
+		// fail with DeadlineExceeded before touching the DB. withDefaults keeps
+		// production away from that, but the white-box tests build Worker literals
+		// directly and would otherwise run their stubs under a dead context.
+		timeout = defaultRepoTimeout
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	started := time.Now()
@@ -1207,14 +1241,23 @@ func (w *Worker) dbCall(parent context.Context, fn func(ctx context.Context) err
 	return err
 }
 
-// publish emits one bus message under the same contract as a DB call (TASK-148),
-// and for the same reason rather than out of symmetry: bus.InMemory.Publish
-// blocks once a subscriber is more than SubscriberBuffer messages behind — it
-// takes back-pressure over silent loss deliberately — and under
-// context.Background() that block had no end. A worker whose intake subscriber
-// stopped draining (its own Run goroutine already parked on a hung DB, say) could
-// therefore park the publishing worker too, which is how a single stuck sector
-// becomes two.
+// publish emits one NOTIFICATION bus message under the same contract as a DB
+// call (TASK-148), and for the same reason rather than out of symmetry:
+// bus.InMemory.Publish blocks once a subscriber is more than SubscriberBuffer
+// messages behind — it takes back-pressure over silent loss deliberately — and
+// under context.Background() that block had no end. A worker whose intake
+// subscriber stopped draining (its own Run goroutine already parked on a hung DB,
+// say) could therefore park the publishing worker too, which is how a single
+// stuck sector becomes two.
+//
+// Multi-subscriber semantics, which are the whole reason publishEffect exists
+// alongside this: a deadline here can deliver to SOME subscribers of a topic and
+// not others (bus.PartialDelivery names which). That is acceptable only where a
+// missed delivery costs the client a refresh — WS re-binds, journal lines,
+// police scans, module knockoffs, the docked/jumped pacer triggers, and the
+// single-subscriber sector intake. It is NOT acceptable where the subscriber
+// performs an irreversible effect nobody will redo; those topics go through
+// publishEffect.
 //
 // Callers must have checked w.bus != nil; every publish site already gates on it
 // to stay a no-op in pure unit tests.
@@ -1222,6 +1265,37 @@ func (w *Worker) publish(parent context.Context, topic string, payload []byte) e
 	return w.dbCall(parent, func(ctx context.Context) error {
 		return w.bus.Publish(ctx, topic, payload)
 	})
+}
+
+// publishEffect emits a bus message whose DELIVERY IS THE STATE CHANGE, and is
+// therefore the one path in this package that deliberately carries no deadline
+// (TASK-148 review). Two topics qualify:
+//
+//   - EntityKilledTopic — four subscribers in app.go, each doing irreversible DB
+//     work: bounty payout, insurance payout, quest progress, and the spacesuit
+//     respawn that is the ONLY thing standing between a dead player and an
+//     account with no ship at all. The victim's row is already gone (RecordKill)
+//     by the time this runs.
+//   - ShipCapturedTopic — ejects the captured ship's old crew into spacesuits.
+//     Same "the ship is already re-owned" one-way street.
+//
+// Nothing retries these. There is no outbox, and the publisher cannot tell a
+// subscriber "you missed one". So the only correct failure mode is the one this
+// bus was built with: block until every subscriber has taken it (back-pressure),
+// and let the tick pay for it. A bounded publish here would trade a recoverable
+// stall for permanently broken player state — which is exactly the regression
+// TASK-148's first cut introduced, and why these two topics are carved out
+// rather than sharing publish's deadline.
+//
+// The stall is still bounded in practice by the subscribers' own progress: with
+// bus.InMemory's fixed per-subscriber buffer, this blocks only once a handler is
+// SubscriberBuffer events behind. The real fix — a transactional outbox, so the
+// effect is durable before the tick moves on — is a separate change.
+func (w *Worker) publishEffect(topic string, payload []byte) error {
+	started := time.Now()
+	err := w.bus.Publish(context.Background(), topic, payload)
+	w.spendDBBudget(started)
+	return err
 }
 
 // dbDeadline reports whether err is the in-tick deadline (or a shutdown

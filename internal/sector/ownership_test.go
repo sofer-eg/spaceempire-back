@@ -65,7 +65,7 @@ func TestUnit_ChangeShipOwner_ReownsResetsPersistsAndEjects(t *testing.T) {
 	s := w.sectors[ownSector]
 	sh := s.ships[3]
 
-	w.changeShipOwner(ctx, s, sh, 9)
+	require.NoError(t, w.changeShipOwner(ctx, s, sh, 9))
 
 	// FR-B1: re-owned + neutralised + combat/motion reset.
 	assert.Equal(t, domain.PlayerID(9), sh.PlayerID)
@@ -77,7 +77,9 @@ func TestUnit_ChangeShipOwner_ReownsResetsPersistsAndEjects(t *testing.T) {
 	assert.Nil(t, sh.PassengerPlayers, "passengers cleared (ejected)")
 
 	// Persisted immediately (player_id + race).
-	require.Len(t, repo.saves, 1, "changeShipOwner persists via immediateSave")
+	// The row is written BEFORE the RAM ship is re-owned (TASK-148): player_id and
+	// race are Save-only columns, so a failed write has nothing to recover it.
+	require.Len(t, repo.saves, 1, "changeShipOwner persists the transfer through saveShip")
 	assert.Equal(t, domain.PlayerID(9), repo.saves[0].PlayerID)
 	assert.Equal(t, domain.RaceID(0), repo.saves[0].Race)
 

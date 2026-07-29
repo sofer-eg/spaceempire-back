@@ -39,8 +39,31 @@ func NewInMemory(subscriberBuffer int) *InMemory {
 }
 
 // Publish copies the payload into every subscriber channel for topic.
-// Returns ErrClosed if the Bus has been Close()d; ctx errors if a
-// subscriber is full and ctx expires before the send goes through.
+// Returns ErrClosed if the Bus has been Close()d, and a *PartialDelivery
+// (wrapping the context error) when ctx expires before some subscriber could
+// take it.
+//
+// Delivery semantics under a deadline — this is what callers must reason about
+// before putting a timeout on a Publish (TASK-148 review):
+//
+//   - EVERY subscriber is attempted. A ctx that expires on one subscriber does
+//     not skip the ones behind it in the list, which is what the first version
+//     of this loop did: it returned at the first blocked send, so a single slow
+//     handler silently starved every handler registered after it. On
+//     EntityKilledTopic that meant a slow bounty payout could cost a dead player
+//     his spacesuit.
+//   - A subscriber with room in its buffer ALWAYS receives the payload, even
+//     when ctx is already expired. That is why the send is tried non-blocking
+//     first: a plain `select` over both cases picks randomly when both are
+//     ready, so an expired context would rob ready subscribers half the time.
+//   - Only a subscriber whose buffer is full for the remainder of ctx misses
+//     the payload, and it is named (by index within the topic) in the returned
+//     PartialDelivery so the caller can log who.
+//
+// None of that makes a deadline safe for a topic whose delivery IS a state
+// change — a missed subscriber is a lost effect, and this bus has no retry. Such
+// topics must be published without a deadline (back-pressure), which is what
+// sector.Worker.publishEffect does.
 func (b *InMemory) Publish(ctx context.Context, topic string, payload []byte) error {
 	b.mu.RLock()
 	if b.closed {
@@ -55,7 +78,8 @@ func (b *InMemory) Publish(ctx context.Context, topic string, payload []byte) er
 	copy(snap, subs)
 	b.mu.RUnlock()
 
-	for _, sub := range snap {
+	var undelivered []int
+	for i, sub := range snap {
 		// Defensive copy: subscribers must not observe each other's
 		// mutations if a downstream handler ever decides to retain the
 		// slice. Cheap for the small payloads we send (handoff events).
@@ -63,8 +87,21 @@ func (b *InMemory) Publish(ctx context.Context, topic string, payload []byte) er
 		copy(cp, payload)
 		select {
 		case sub.ch <- cp:
+			continue
+		default:
+		}
+		select {
+		case sub.ch <- cp:
 		case <-ctx.Done():
-			return ctx.Err()
+			undelivered = append(undelivered, i)
+		}
+	}
+	if len(undelivered) > 0 {
+		return &PartialDelivery{
+			Topic:       topic,
+			Subscribers: len(snap),
+			Undelivered: undelivered,
+			Cause:       ctx.Err(),
 		}
 	}
 	return nil

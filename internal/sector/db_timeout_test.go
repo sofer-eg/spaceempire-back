@@ -2,6 +2,7 @@ package sector_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"spaceempire/back/internal/bus"
 	"spaceempire/back/internal/domain"
+	"spaceempire/back/internal/persistence/containers"
 	"spaceempire/back/internal/pkg/clock"
 	"spaceempire/back/internal/sector"
 )
@@ -42,17 +44,33 @@ var errNoTickDeadline = errors.New("in-tick db call carries no live deadline")
 // the deadline to fire. Every fake here is driven from the tick goroutine only,
 // so the plain fields need no locking; the tests that run Tick in a goroutine
 // read them after the tick has returned.
+//
+// violations is what makes the contract enforceable rather than decorative. On a
+// command path a missing deadline surfaces through the ack (the call fails with
+// errNoTickDeadline instead of DeadlineExceeded), but on a BEST-EFFORT path —
+// the periodic flush, the despawn delete, the kill sweep's loot drop — the error
+// is swallowed by a logger and the test passes either way. That is exactly what
+// happened on the first cut of TASK-148: deleting dbCall from persistDirty,
+// RemoveShipCommand or dropLoot left the suite green. Every test here asserts
+// violations == 0, so those mutations now fail.
+//
+// The deadline check runs BEFORE the hung wait on purpose: a call with no
+// deadline and hung == true would otherwise block forever on a tick context that
+// nobody cancels, hanging the suite instead of failing it.
 type dbStall struct {
-	hung  bool
-	calls int
+	hung       bool
+	calls      int
+	violations int
 }
 
 func (s *dbStall) enter(ctx context.Context) error {
 	s.calls++
 	if _, ok := ctx.Deadline(); !ok {
+		s.violations++
 		return fmt.Errorf("%w: none set", errNoTickDeadline)
 	}
 	if err := ctx.Err(); err != nil {
+		s.violations++
 		return fmt.Errorf("%w: already expired (%w)", errNoTickDeadline, err)
 	}
 	if !s.hung {
@@ -60,6 +78,14 @@ func (s *dbStall) enter(ctx context.Context) error {
 	}
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// noViolations is the assertion every test in this file ends with: no DB call
+// reached a fake without a live cfg.RepoTimeout deadline on its context.
+func noViolations(t *testing.T, s *dbStall) {
+	t.Helper()
+	assert.Zero(t, s.violations,
+		"a DB call reached the repo without a live deadline: some call site is not going through Worker.dbCall")
 }
 
 // stallShipRepo is a sector.ShipRepo whose every method honours dbStall.
@@ -129,9 +155,14 @@ func newStallContainerRepo(live ...domain.ContainerID) *stallContainerRepo {
 }
 
 // pickup is the transaction body: it is a no-op unless the row is still there.
+// The sentinel is the PERSISTENCE one (containers.ErrContainerNotFound), which is
+// what Repository.Pickup really returns after its containerExistsSQL check — not
+// sector.ErrContainerNotFound. Modelling the sector-level sentinel here tested a
+// branch production never takes, and hid that the API's writePickupError knew
+// only the sector one and answered 500 for a container that simply is not there.
 func (r *stallContainerRepo) pickup(id domain.ContainerID) error {
 	if !r.live[id] {
-		return sector.ErrContainerNotFound
+		return containers.ErrContainerNotFound
 	}
 	delete(r.live, id)
 	r.inHold++
@@ -260,6 +291,7 @@ func TestUnit_Pickup_HungDBKeepsContainerAndReportsDeadline(t *testing.T) {
 	require.ErrorIs(t, (<-reply).Err, context.DeadlineExceeded)
 	assert.Len(t, w.Snapshot(testSector).Containers, 1,
 		"an unconfirmed pickup must leave the container in the sector, not delete it on a maybe")
+	noViolations(t, &repo.dbStall)
 }
 
 // TestUnit_Pickup_DeadlineOnCommittedTxCannotDuplicateCargo is the AC#3 proof for
@@ -297,9 +329,15 @@ func TestUnit_Pickup_DeadlineOnCommittedTxCannotDuplicateCargo(t *testing.T) {
 	}))
 	tickWithin(t, w)
 
+	// The repo answers with its own sentinel (containers.ErrContainerNotFound);
+	// the worker translates it to the sector one so the HTTP layer reads 404
+	// rather than falling through to a 500, and sweeps the ghost on the way out
+	// instead of leaving it on the radar for the rest of its 600 s TTL.
 	require.ErrorIs(t, (<-second).Err, sector.ErrContainerNotFound)
 	assert.Equal(t, 1, repo.inHold,
 		"the ledger is the DB: a ghost container must not pay out a second load of cargo")
+	assert.Empty(t, w.Snapshot(testSector).Containers, "the ghost is swept once the DB confirms it is gone")
+	noViolations(t, &repo.dbStall)
 }
 
 // TestUnit_TransportCargo_HungDBChargesNoEnergy: the teleport's haul is bounded,
@@ -332,6 +370,7 @@ func TestUnit_TransportCargo_HungDBChargesNoEnergy(t *testing.T) {
 	assert.Zero(t, log.hauled, "a stalled haul moves nothing")
 	assert.EqualValues(t, 500, liveShip(t, w, 1).Energy,
 		"energy is debited after the haul commits, so an unconfirmed teleport is free")
+	noViolations(t, &log.dbStall)
 }
 
 // TestUnit_HackStation_HungDBChargesNothingAndDropsNoLoot: the rob is bounded and
@@ -369,6 +408,7 @@ func TestUnit_HackStation_HungDBChargesNothingAndDropsNoLoot(t *testing.T) {
 	assert.Zero(t, res.Robbed)
 	assert.EqualValues(t, 500, liveShip(t, w, 1).Energy, "an unconfirmed hack is free")
 	assert.Zero(t, containers.spawns, "no loot container for loot that may never have been taken")
+	noViolations(t, &rob.dbStall)
 }
 
 // TestUnit_Capture_HungDBLeavesShipWithItsOwner: the ownership transfer writes
@@ -401,6 +441,7 @@ func TestUnit_Capture_HungDBLeavesShipWithItsOwner(t *testing.T) {
 	assert.False(t, res.Captured)
 	assert.Equal(t, captOldOwner, liveShip(t, w, captTargetID).PlayerID,
 		"an unpersisted capture must not re-own the ship in RAM: nothing would ever write it")
+	noViolations(t, &repo.dbStall)
 }
 
 // --- AC#1/#2: no in-tick DB call can park the worker -------------------------
@@ -424,6 +465,7 @@ func TestUnit_SetShipAccess_HungDBRollsBackAndReportsDeadline(t *testing.T) {
 
 	require.ErrorIs(t, (<-reply).Err, context.DeadlineExceeded)
 	assert.False(t, liveShip(t, w, 1).IsOpen, "the flag is rolled back when its save does not land")
+	noViolations(t, &repo.dbStall)
 }
 
 // TestUnit_RemoveShip_HungDBDoesNotParkTick: the despawn's row delete used to run
@@ -443,6 +485,7 @@ func TestUnit_RemoveShip_HungDBDoesNotParkTick(t *testing.T) {
 	require.NoError(t, (<-reply).Err) // the despawn is idempotent and never fails
 	assert.Equal(t, 1, repo.calls, "the delete was attempted under a deadline")
 	assert.Empty(t, w.Snapshot(testSector).Ships)
+	noViolations(t, &repo.dbStall)
 }
 
 // TestUnit_Jump_HungDBKeepsShipInSourceSector: the handoff's ship save is bounded,
@@ -471,6 +514,7 @@ func TestUnit_Jump_HungDBKeepsShipInSourceSector(t *testing.T) {
 	require.ErrorIs(t, (<-reply).Err, context.DeadlineExceeded)
 	assert.Len(t, w.Snapshot(1).Ships, 1, "a jump that could not be persisted keeps the ship")
 	assert.Empty(t, b.snapshot(), "and hands it to nobody")
+	noViolations(t, &repo.dbStall)
 }
 
 // TestUnit_Jump_HungBusDoesNotParkTick: bus.InMemory.Publish blocks once a
@@ -540,6 +584,7 @@ func TestUnit_Tick_HungPeriodicFlushDoesNotParkTick(t *testing.T) {
 
 	assert.Positive(t, repo.calls, "the periodic flush ran and hit its deadline")
 	assert.Zero(t, repo.batches, "and wrote nothing")
+	noViolations(t, &repo.dbStall)
 }
 
 // TestUnit_Kill_HungDBDoesNotParkTick: the death path (cargo read, RecordKill,
@@ -559,6 +604,206 @@ func TestUnit_Kill_HungDBDoesNotParkTick(t *testing.T) {
 
 	assert.Positive(t, containers.calls, "the drop ran under a deadline")
 	assert.Empty(t, w.Snapshot(testSector).Ships, "the dead ship still leaves the sector")
+	noViolations(t, &containers.dbStall)
+}
+
+// TestUnit_Jump_UndeliveredPublishRestoresTheSourceSectorRow: executeJump writes
+// the relocated row BEFORE it publishes, so a publish that does not land leaves
+// the row naming a sector the ship never reached. BatchUpdate does not write the
+// sector column, so nothing repairs it — a crash before the next Save would
+// resurrect the ship on the far side of the gate. The window predates TASK-148
+// (the order is unchanged) but was theoretical while a publish could realistically
+// only fail with ErrClosed; a deadline on the publish makes back-pressure a
+// routine outcome, so the compensating write has to be routine too.
+func TestUnit_Jump_UndeliveredPublishRestoresTheSourceSectorRow(t *testing.T) {
+	t.Parallel()
+	// A real bus whose only intake subscriber never drains: the second publish
+	// blocks and times out.
+	b := bus.NewInMemory(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wedged := make(chan struct{})
+	defer close(wedged)
+	require.NoError(t, b.Subscribe(ctx, sector.IntakeTopic(2), func([]byte) { <-wedged }))
+
+	repo := &stallShipRepo{}
+	cfg := stallCfg()
+	cfg.GateRange = 50
+	ships := []domain.Ship{
+		{ID: 1, PlayerID: 100, SectorID: 1, Pos: domain.Vec2{X: 100, Y: 0}},
+		{ID: 2, PlayerID: 101, SectorID: 1, Pos: domain.Vec2{X: 100, Y: 0}},
+		{ID: 3, PlayerID: 102, SectorID: 1, Pos: domain.Vec2{X: 100, Y: 0}},
+	}
+	w := sector.NewWorker(0, cfg, clock.NewRealClock(), repo, nil,
+		map[domain.SectorID][]domain.Ship{1: ships},
+		sector.WithHandoff(handoffTopology(), b))
+
+	var last sector.CmdResult
+	for _, id := range []domain.ShipID{1, 2, 3} {
+		reply := make(chan sector.CmdResult, 1)
+		require.NoError(t, w.Send(1, sector.JumpCommand{
+			PlayerID: domain.PlayerID(99 + int64(id)), ShipID: id, GateID: 10, Reply: reply,
+		}))
+		tickWithin(t, w)
+		last = <-reply
+	}
+
+	require.ErrorIs(t, last.Err, context.DeadlineExceeded)
+	require.NotEmpty(t, repo.saved)
+	assert.EqualValues(t, 1, repo.saved[len(repo.saved)-1].SectorID,
+		"the last write must put the ship back in the sector it never left")
+	assert.Len(t, w.Snapshot(1).Ships, 1, "and it is still here in RAM")
+	noViolations(t, &repo.dbStall)
+}
+
+// --- side-effect topics: delivery IS the state change ------------------------
+
+// TestUnit_Kill_SlowSubscriberCannotStarveTheSpacesuit is the regression test for
+// the hole the first cut of TASK-148 opened. EntityKilledTopic has four
+// subscribers in app.go, each doing irreversible DB work: bounty payout,
+// insurance payout, quest credit, and the spacesuit respawn — the only thing
+// between a dead player and an account with no ship. bus.InMemory.Publish walks
+// them in registration order.
+//
+// With a deadline on that publish and a loop that returned at the first blocked
+// send, ONE slow handler (a bounty payout waiting on a busy table, say) filled
+// its buffer and every handler registered after it — including the spacesuit —
+// silently received nothing. The victim's row is already gone by then, and
+// nothing retries. Before the deadline existed Publish blocked until all four had
+// taken it, so the loss was impossible; the deadline invented it.
+//
+// Two things fix it and both are asserted here: the publish for this topic
+// carries no deadline at all (publishEffect), and bus.Publish attempts every
+// subscriber instead of bailing at the first one that blocks.
+func TestUnit_Kill_SlowSubscriberCannotStarveTheSpacesuit(t *testing.T) {
+	t.Parallel()
+	b := bus.NewInMemory(1) // 1-deep buffers: the slow handler backs up immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Subscriber 0 is the slow one: it drains, but slowly enough that its 1-deep
+	// buffer is full when the next kill publishes. Slow, not wedged — a handler
+	// waiting on a busy table is the case that actually happens, and it is the one
+	// that used to cost the subscribers behind it their events. (A permanently
+	// wedged handler is a different failure: back-pressure then blocks the tick,
+	// which is the deliberate trade publishEffect makes — losing the spacesuit is
+	// worse than stalling.)
+	slowSeen := make(chan struct{}, 8)
+	require.NoError(t, b.Subscribe(ctx, sector.EntityKilledTopic, func([]byte) {
+		time.Sleep(30 * time.Millisecond)
+		slowSeen <- struct{}{}
+	}))
+	// Subscriber 1 stands in for the spacesuit respawner: registered AFTER the
+	// slow one, which is half the point — it must not be starved by a handler
+	// ahead of it in the list. It is slow itself too, so its OWN 1-deep buffer
+	// backs up: that is the other half, and the one only the missing deadline
+	// (publishEffect) covers. A bounded publish would give up on it here.
+	suited := make(chan sector.EntityKilledEvent, 8)
+	require.NoError(t, b.Subscribe(ctx, sector.EntityKilledTopic, func(payload []byte) {
+		time.Sleep(25 * time.Millisecond)
+		var ev sector.EntityKilledEvent
+		require.NoError(t, json.Unmarshal(payload, &ev))
+		suited <- ev
+	}))
+
+	dead := []domain.Ship{
+		{ID: 1, PlayerID: 100, SectorID: testSector, HP: 0, MaxHP: 100},
+		{ID: 2, PlayerID: 101, SectorID: testSector, HP: 0, MaxHP: 100},
+		{ID: 3, PlayerID: 102, SectorID: testSector, HP: 0, MaxHP: 100},
+	}
+	w := sector.NewWorker(0, stallCfg(), clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: dead},
+		sector.WithHandoff(handoffTopology(), b))
+
+	// Prime both handlers so they are already busy (and their buffers already
+	// occupied) when the sweep publishes the three kills.
+	require.NoError(t, b.Publish(context.Background(), sector.EntityKilledTopic,
+		[]byte(`{"SectorID":1}`)))
+	<-suited
+	<-slowSeen
+
+	tickWithin(t, w)
+
+	victims := map[domain.PlayerID]bool{}
+	for i := 0; i < len(dead); i++ {
+		select {
+		case ev := <-suited:
+			victims[ev.VictimPlayer] = true
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of %d kills reached the spacesuit subscriber: a slow handler ahead of it starved it",
+				len(victims), len(dead))
+		}
+	}
+	assert.Len(t, victims, len(dead),
+		"every dead player must reach the respawn subscriber, whatever another handler is doing")
+}
+
+// TestUnit_Bus_ExpiredContextStillDeliversToSubscribersWithRoom pins the other
+// half of the bus fix at its own level: a subscriber that has room takes the
+// payload even when the context is already dead. Without the non-blocking first
+// attempt, a plain select over {send, ctx.Done()} picks randomly when both are
+// ready — so an expired context robbed ready subscribers about half the time, and
+// the resulting flake would have looked like anything but a bus bug.
+func TestUnit_Bus_ExpiredContextStillDeliversToSubscribersWithRoom(t *testing.T) {
+	t.Parallel()
+	b := bus.NewInMemory(4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	got := make(chan []byte, 8)
+	require.NoError(t, b.Subscribe(ctx, "t", func(p []byte) { got <- p }))
+
+	dead, cancelDead := context.WithCancel(context.Background())
+	cancelDead()
+	for i := 0; i < 4; i++ {
+		require.NoError(t, b.Publish(dead, "t", []byte("x")),
+			"a subscriber with room must receive the payload regardless of the context")
+	}
+	for i := 0; i < 4; i++ {
+		select {
+		case <-got:
+		case <-time.After(5 * time.Second):
+			t.Fatal("payload not delivered to a subscriber that had room")
+		}
+	}
+}
+
+// TestUnit_Bus_PartialDeliveryNamesWhoMissed: when a deadline does cost a
+// subscriber its payload, the error says which one — the caller has no other way
+// to know, since nothing retries and the publisher sees one error for the whole
+// topic.
+func TestUnit_Bus_PartialDeliveryNamesWhoMissed(t *testing.T) {
+	t.Parallel()
+	b := bus.NewInMemory(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wedged := make(chan struct{})
+	defer close(wedged)
+	ran := make(chan struct{}, 1)
+	require.NoError(t, b.Subscribe(ctx, "t", func([]byte) { ran <- struct{}{}; <-wedged }))
+	fast := make(chan struct{}, 8)
+	require.NoError(t, b.Subscribe(ctx, "t", func([]byte) { fast <- struct{}{} }))
+
+	require.NoError(t, b.Publish(context.Background(), "t", []byte("warm")))
+	<-ran
+	require.NoError(t, b.Publish(context.Background(), "t", []byte("fill"))) // slow buffer now full
+
+	short, cancelShort := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelShort()
+	err := b.Publish(short, "t", []byte("x"))
+
+	var partial *bus.PartialDelivery
+	require.ErrorAs(t, err, &partial)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "the cause stays inspectable")
+	assert.Equal(t, []int{0}, partial.Undelivered)
+	assert.Equal(t, 2, partial.Subscribers)
+	// And the subscriber behind the blocked one still got it.
+	select {
+	case <-fast:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second subscriber was starved by the first")
+	}
 }
 
 // --- the drain budget now covers every writing command -----------------------
@@ -613,6 +858,7 @@ func TestUnit_Pickup_DrainBudgetBoundsOneDrain(t *testing.T) {
 	tickWithin(t, w)
 	assert.Equal(t, queued, repo.calls, "the remainder was still in the inbox")
 	assert.Equal(t, queued-1, repo.inHold, "every pickup but the stalled one landed")
+	noViolations(t, &repo.dbStall)
 }
 
 // --- helpers ------------------------------------------------------------------

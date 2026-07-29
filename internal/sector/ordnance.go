@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"spaceempire/back/internal/domain"
 )
@@ -16,14 +15,16 @@ import (
 //   - a nil Ordnance refuses the launch (ErrOrdnanceUnavailable) rather than
 //     firing for free — the ordnance is what charges the player, and for the
 //     recall what pays them back;
-//   - the command apply path carries no context, so the DB call is bounded by
-//     cfg.RepoTimeout instead of running under an uninterruptible background
-//     context (which is what the pre-TASK-147 torpedo/drone INSERTs did): a hung
-//     Postgres stalls the tick for at most that long;
+//   - the command apply path carries no context, so the DB call goes through
+//     Worker.dbCall, which bounds it by cfg.RepoTimeout instead of letting it run
+//     under an uninterruptible background context (which is what the pre-TASK-147
+//     torpedo/drone INSERTs did): a hung Postgres stalls the tick for at most that
+//     long. These four helpers spelled the deadline out inline until TASK-148 made
+//     dbCall the single place it is attached;
 //   - the call's real cost is charged to the drain's DB budget, which caps ONE
 //     drain at ~2 × RepoTimeout so a queue of launches cannot park Run without a
 //     tick in between (see Worker.dbBudget; it does not shorten the queue's total
-//     stall — that is TASK-148);
+//     stall);
 //   - sentinel errors come back verbatim so the HTTP mapping
 //     (cargo.ErrInsufficientQuantity → 400, cargo.ErrGoodsTypeNotFound → 500)
 //     keeps working.
@@ -36,12 +37,9 @@ func (w *Worker) spendMissile(ship *domain.Ship, gtype domain.GoodsTypeID) error
 	if w.ordnance == nil {
 		return ErrOrdnanceUnavailable
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
-	defer cancel()
-
-	started := time.Now()
-	err := w.ordnance.SpendMissile(ctx, shipHold(ship), gtype)
-	w.spendDBBudget(started)
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		return w.ordnance.SpendMissile(ctx, shipHold(ship), gtype)
+	})
 	if err != nil {
 		w.logOrdnanceError(err, "missile", ship, gtype, 1)
 		return err
@@ -55,12 +53,12 @@ func (w *Worker) launchTorpedo(ship *domain.Ship, gtype domain.GoodsTypeID, t do
 	if w.ordnance == nil {
 		return 0, ErrOrdnanceUnavailable
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
-	defer cancel()
-
-	started := time.Now()
-	id, err := w.ordnance.LaunchTorpedo(ctx, shipHold(ship), gtype, t)
-	w.spendDBBudget(started)
+	var id domain.TorpedoID
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		var err error
+		id, err = w.ordnance.LaunchTorpedo(ctx, shipHold(ship), gtype, t)
+		return err
+	})
 	if err != nil {
 		w.logOrdnanceError(err, "torpedo", ship, gtype, 1)
 		return 0, err
@@ -79,12 +77,12 @@ func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []
 	if w.ordnance == nil {
 		return nil, ErrOrdnanceUnavailable
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
-	defer cancel()
-
-	started := time.Now()
-	ids, err := w.ordnance.LaunchDrones(ctx, shipHold(ship), gtype, ds)
-	w.spendDBBudget(started)
+	var ids []domain.DroneID
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		var err error
+		ids, err = w.ordnance.LaunchDrones(ctx, shipHold(ship), gtype, ds)
+		return err
+	})
 	if err != nil {
 		w.logOrdnanceError(err, "drone", ship, gtype, len(ds))
 		return nil, err
@@ -140,12 +138,12 @@ func (w *Worker) recallDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ids [
 		// endpoint after a deploy is exactly who must not get a cheerful 200.
 		return 0, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
-	defer cancel()
-
-	started := time.Now()
-	credited, err := w.ordnance.RecallDrones(ctx, shipHold(ship), gtype, ids)
-	w.spendDBBudget(started)
+	var credited int
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		var err error
+		credited, err = w.ordnance.RecallDrones(ctx, shipHold(ship), gtype, ids)
+		return err
+	})
 	if err != nil {
 		w.logRecallError(err, ship, gtype, len(ids))
 		return 0, err

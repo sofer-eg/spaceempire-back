@@ -2,7 +2,6 @@ package sector
 
 import (
 	"context"
-	"time"
 
 	"spaceempire/back/internal/domain"
 )
@@ -91,13 +90,13 @@ func (w *Worker) installJammer(s *sectorState, ship *domain.Ship, gtype domain.G
 		ShieldRecharge: jammerShieldRecharge,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
-	defer cancel()
-
 	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
-	started := time.Now()
-	id, err := w.staticInstaller.InstallJammer(ctx, hold, gtype, jam)
-	w.spendDBBudget(started)
+	var id domain.JammerID
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		var err error
+		id, err = w.staticInstaller.InstallJammer(ctx, hold, gtype, jam)
+		return err
+	})
 	if err != nil {
 		w.logInstallError(err, "jammer", ship, gtype)
 		return 0, err

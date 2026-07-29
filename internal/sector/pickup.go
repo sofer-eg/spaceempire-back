@@ -2,8 +2,10 @@ package sector
 
 import (
 	"context"
+	"errors"
 
 	"spaceempire/back/internal/domain"
+	"spaceempire/back/internal/persistence/containers"
 )
 
 // PickupContainerCommand transfers a loot container's cargo into the
@@ -48,6 +50,20 @@ func (w *Worker) pickupContainer(s *sectorState, ship *domain.Ship, id domain.Co
 		err := w.dbCall(context.Background(), func(ctx context.Context) error {
 			return w.containerRepo.Pickup(ctx, id, ship.ID)
 		})
+		if errors.Is(err, containers.ErrContainerNotFound) {
+			// The row is gone but RAM still shows the container: a ghost left by an
+			// earlier pickup whose COMMIT landed after its deadline fired (see
+			// logPickupError). Sweep it now instead of leaving it on the player's
+			// radar for the rest of its TTL, and answer with the sector-level
+			// sentinel so the HTTP layer maps it to 404 rather than 500 — the
+			// persistence sentinel is a different error value and falls through to
+			// "internal error", which is not what "this is not there" should read as.
+			s.removeContainer(id)
+			w.logger.Warn("pickup found no container row: sweeping the stale RAM entry",
+				"container", int64(id), "ship", int64(ship.ID),
+				"player", int64(ship.PlayerID), "sector", int64(s.sectorID))
+			return ErrContainerNotFound
+		}
 		if err != nil {
 			w.logPickupError(err, s, ship, id)
 			return err

@@ -7,6 +7,13 @@ import (
 	"spaceempire/back/internal/domain"
 )
 
+// defaultRepoTimeout is the fallback bound on one in-tick DB call: longer than
+// any healthy INSERT+commit, shorter than a stall a player would sit through.
+// withDefaults applies it to Config; Worker.dbCall applies it again at the call
+// site so a hand-built Worker literal cannot run under an already-blown
+// deadline.
+const defaultRepoTimeout = 2 * time.Second
+
 // Config tunes a single Worker. PoolConfig embeds this so every worker in a
 // Pool gets the same per-tick parameters.
 type Config struct {
@@ -50,9 +57,17 @@ type Config struct {
 	// With it the worker stalls at most RepoTimeout per call and the command fails
 	// with context.DeadlineExceeded. Default 2 s — longer than any healthy
 	// INSERT+commit, shorter than the tick budget a player would notice. It bounds
-	// ONE call; what bounds a whole inbox drain of them is Worker.dbBudget. The
-	// graceful-shutdown flush is the one path that does not use it — it has its own
-	// ShutdownTimeout and is not the tick.
+	// ONE call; what bounds a whole inbox drain of them is Worker.dbBudget.
+	//
+	// Two paths deliberately do not use it. The graceful-shutdown flush has its
+	// own ShutdownTimeout and is not the tick. The side-effect bus topics
+	// (Worker.publishEffect) carry no deadline at all, because there a missed
+	// delivery is lost game state rather than a retryable write.
+	//
+	// One caller stretches "ONE call": production.Service.Tick runs a transaction
+	// per station, so RepoTimeout bounds the whole production cycle rather than a
+	// single round trip. runProduction rotates the cycle's starting station every
+	// tick so a truncated cycle does not defer the same tail forever.
 	RepoTimeout time.Duration
 	// ContainerTTL is how long a loot container (dropped by a ship death,
 	// phase 4.6) survives before the tick sweeps it. Default 600 s.
@@ -172,7 +187,7 @@ func (c Config) withDefaults() Config {
 		c.ShutdownTimeout = 10 * time.Second
 	}
 	if c.RepoTimeout <= 0 {
-		c.RepoTimeout = 2 * time.Second
+		c.RepoTimeout = defaultRepoTimeout
 	}
 	if c.ContainerTTL <= 0 {
 		c.ContainerTTL = 600 * time.Second

@@ -2,7 +2,6 @@ package sector
 
 import (
 	"context"
-	"time"
 
 	"spaceempire/back/internal/domain"
 )
@@ -87,13 +86,13 @@ func (w *Worker) installSatellite(s *sectorState, ship *domain.Ship, gtype domai
 		ShieldRecharge: satelliteShieldRecharge,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.RepoTimeout)
-	defer cancel()
-
 	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
-	started := time.Now()
-	id, err := w.staticInstaller.InstallSatellite(ctx, hold, gtype, sat)
-	w.spendDBBudget(started)
+	var id domain.SatelliteID
+	err := w.dbCall(context.Background(), func(ctx context.Context) error {
+		var err error
+		id, err = w.staticInstaller.InstallSatellite(ctx, hold, gtype, sat)
+		return err
+	})
 	if err != nil {
 		w.logInstallError(err, "satellite", ship, gtype)
 		return 0, err

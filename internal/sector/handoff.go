@@ -188,6 +188,18 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 	}
 	if err := w.publish(context.Background(), IntakeTopic(targetSector), payload); err != nil {
 		w.logHandoffError(err, "publish jump event", ship, s.sectorID, targetSector)
+		// The row already names the target sector, and BatchUpdate never writes the
+		// sector column — so without this the ship keeps flying here while its row
+		// says it left, and a crash before the next Save teleports it out of the
+		// gate on cold start. Before TASK-148 a publish here could realistically
+		// only fail with ErrClosed, so the window was theoretical; with a deadline
+		// on the publish, back-pressure makes it a routine outcome, and the
+		// compensation has to be routine too. Best-effort: if this save fails as
+		// well the divergence stands, which is what the ERROR above is for.
+		if err := w.saveShip(*ship); err != nil {
+			w.logger.Error("handoff rollback save failed: the ship row still names the sector it never reached",
+				"err", err, "ship", int64(ship.ID), "from", int64(s.sectorID), "to", int64(targetSector))
+		}
 		return fmt.Errorf("publish jump event: %w", err)
 	}
 

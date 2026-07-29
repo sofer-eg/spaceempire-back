@@ -121,7 +121,10 @@ func (w *Worker) publishShipCaptured(ctx context.Context, s *sectorState, ev Shi
 		w.logger.ErrorContext(ctx, "capture: marshal event", "err", err, "ship", int64(ev.ShipID))
 		return
 	}
-	if err := w.publish(ctx, ShipCapturedTopic, payload); err != nil {
-		w.logger.ErrorContext(ctx, "capture: publish event", "err", err, "ship", int64(ev.ShipID))
+	if err := w.publishEffect(ShipCapturedTopic, payload); err != nil {
+		// The ship is already re-owned; this event is what puts the old crew into
+		// spacesuits, and nothing retries it.
+		w.logger.ErrorContext(ctx, "capture: ship_captured not delivered, the old crew was not ejected",
+			"err", err, "ship", int64(ev.ShipID), "old_owner", int64(ev.OldOwner))
 	}
 }

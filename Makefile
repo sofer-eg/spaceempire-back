@@ -109,8 +109,23 @@ test:
 		go test -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...; \
 		status=$$?; $(REAP) "$(TEST_RUN_LABEL)=$(TEST_RUN_ID)" $$status || echo "warning: container cleanup did not finish; run 'make test-clean'" >&2; exit $$status
 
+# test-unit carries -count=1 for a reason that has nothing to do with docker: a
+# cached ok says nothing about whether the tests still pass. This project checks
+# its tests by mutation — break the code, the test must fail — and the cache
+# quietly answers with the old green whenever the edit missed the packages under
+# test, so a caught defect reads as uncaught. It hid flakes too, which is how the
+# omission was found (TASK-158, TASK-164).
+#
+# -timeout is the same per-package budget as above, for a different failure: unit
+# packages finish in seconds, so it only ever fires on a hang, and a deadlock
+# under -race then costs 180s instead of go test's 10-minute default.
+#
+# The flag list is spelled out in each recipe rather than shared through one
+# variable: -count=1 being visible at the point of use is half of what makes it
+# stick, and the guard against the three targets drifting apart is
+# TestUnit_TestDB_MakefileTestTargetsDefeatTheCache, not DRY.
 test-unit:
-	go test -run '^TestUnit_' -race -p $(TEST_P) ./...
+	go test -run '^TestUnit_' -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...
 
 test-integration:
 	@SE_TEST_RUN_ID=$(TEST_RUN_ID) TESTCONTAINERS_RYUK_DISABLED=$(RYUK_DISABLED) \
@@ -132,6 +147,10 @@ test-clean-run:
 test-clean:
 	@$(REAP) "$(TEST_LABEL)"
 
+# No -count=1 here: -bench is not one of the flags go keys its test cache on, so
+# a run with it is never served from the cache in the first place. No -timeout
+# either — benchmarks are meant to take as long as they take, and the budget
+# above is sized for tests.
 bench:
 	go test -run '^$$' -bench=. -benchmem ./...
 

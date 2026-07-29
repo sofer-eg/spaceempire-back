@@ -19,8 +19,8 @@ API. See the design doc and `CLAUDE.md` at the repo root for architecture.
 make run                 # run the server
 make build               # build bin/starwind
 make lint                # golangci-lint
-make test-unit           # unit tests (-race), TestUnit_*
-make test-integration    # integration tests (-race), TestIntegration_*
+make test-unit           # unit tests (-race -count=1), TestUnit_*
+make test-integration    # integration tests (-race -count=1), TestIntegration_*
 make test-clean          # reap every test container this project left behind
 make migrate-up          # apply migrations to PG_DSN
 make migrate-status      # show migration state

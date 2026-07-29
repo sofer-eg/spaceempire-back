@@ -146,3 +146,28 @@ func TestUnit_TestDB_MakefileReapsWhatItStamps(t *testing.T) {
 		assert.NotContains(t, out, "org.testcontainers=true")
 	})
 }
+
+// TestUnit_TestDB_MakefileTestTargetsDefeatTheCache pins -count=1 onto every
+// target that runs go test, because losing it fails in the direction nobody
+// checks: go serves the previous run's result and the target reports ok having
+// run nothing. test-unit shipped that way, which hid flakes and quietly
+// invalidated the mutation checks this project verifies its tests with — break
+// the code, run make test-unit, read the cached green as "the test does not
+// catch it" (TASK-164).
+//
+// bench is not in the list: -bench is not one of the flags go keys the cache on,
+// so those runs never come from it.
+//
+// Asserted on the expanded recipe, like the reaper wiring above, so that moving
+// the flags behind a variable stays a refactor rather than a failure.
+func TestUnit_TestDB_MakefileTestTargetsDefeatTheCache(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range []string{"test", "test-unit", "test-integration"} {
+		t.Run(target, func(t *testing.T) {
+			t.Parallel()
+			assert.Contains(t, dryRun(t, target), "-count=1",
+				"make %s must pass -count=1, or a cached result can stand in for a run that never happened", target)
+		})
+	}
+}

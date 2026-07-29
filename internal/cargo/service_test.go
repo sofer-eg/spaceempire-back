@@ -385,12 +385,12 @@ func TestUnit_CargoService_Consume_HappyPath(t *testing.T) {
 	repo := newStubRepo()
 	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
 	repo.capacities[owner] = 100
-	repo.goodsTypes[50] = domain.GoodsType{ID: 50, Name: "Missile", Space: 2}
-	repo.seed(owner, 50, 0, 5)
+	repo.goodsTypes[2] = domain.GoodsType{ID: 2, Name: "Железо", Space: 2}
+	repo.seed(owner, 2, 0, 5)
 
 	svc := cargo.New(repo, inlineTx{repo: repo})
-	require.NoError(t, svc.Consume(context.Background(), owner, 50, 2))
-	assert.EqualValues(t, 3, repo.stacks[owner][stackKey{50, 0}])
+	require.NoError(t, svc.Consume(context.Background(), owner, 2, 2))
+	assert.EqualValues(t, 3, repo.stacks[owner][stackKey{2, 0}])
 }
 
 func TestUnit_CargoService_Consume_InsufficientQuantity(t *testing.T) {
@@ -399,13 +399,13 @@ func TestUnit_CargoService_Consume_InsufficientQuantity(t *testing.T) {
 	repo := newStubRepo()
 	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
 	repo.capacities[owner] = 100
-	repo.goodsTypes[50] = domain.GoodsType{ID: 50, Name: "Missile", Space: 2}
-	repo.seed(owner, 50, 0, 1)
+	repo.goodsTypes[2] = domain.GoodsType{ID: 2, Name: "Железо", Space: 2}
+	repo.seed(owner, 2, 0, 1)
 
 	svc := cargo.New(repo, inlineTx{repo: repo})
-	err := svc.Consume(context.Background(), owner, 50, 2)
+	err := svc.Consume(context.Background(), owner, 2, 2)
 	require.ErrorIs(t, err, cargo.ErrInsufficientQuantity)
-	assert.EqualValues(t, 1, repo.stacks[owner][stackKey{50, 0}])
+	assert.EqualValues(t, 1, repo.stacks[owner][stackKey{2, 0}])
 }
 
 func TestUnit_CargoService_Consume_RejectsNonPositive(t *testing.T) {
@@ -434,11 +434,11 @@ func TestUnit_CargoRefundIn_RestoresStack(t *testing.T) {
 	repo := newStubRepo()
 	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
 	repo.capacities[owner] = 100
-	repo.goodsTypes[50] = domain.GoodsType{ID: 50, Name: "Missile", Space: 2}
-	repo.seed(owner, 50, 0, 3)
+	repo.goodsTypes[2] = domain.GoodsType{ID: 2, Name: "Железо", Space: 2}
+	repo.seed(owner, 2, 0, 3)
 
-	require.NoError(t, cargo.RefundIn(context.Background(), repo, owner, 50, 2))
-	assert.EqualValues(t, 5, repo.stacks[owner][stackKey{50, 0}])
+	require.NoError(t, cargo.RefundIn(context.Background(), repo, owner, 2, 2))
+	assert.EqualValues(t, 5, repo.stacks[owner][stackKey{2, 0}])
 }
 
 func TestUnit_CargoRefundIn_RejectsNonPositive(t *testing.T) {
@@ -458,11 +458,11 @@ func TestUnit_CargoRefundIn_IgnoresCapacity(t *testing.T) {
 	repo := newStubRepo()
 	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
 	repo.capacities[owner] = 2 // room for one unit of a Space:2 good
-	repo.goodsTypes[50] = domain.GoodsType{ID: 50, Name: "Missile", Space: 2}
-	repo.seed(owner, 50, 0, 1)
+	repo.goodsTypes[2] = domain.GoodsType{ID: 2, Name: "Железо", Space: 2}
+	repo.seed(owner, 2, 0, 1)
 
-	require.NoError(t, cargo.RefundIn(context.Background(), repo, owner, 50, 3))
-	assert.EqualValues(t, 4, repo.stacks[owner][stackKey{50, 0}], "credited past capacity")
+	require.NoError(t, cargo.RefundIn(context.Background(), repo, owner, 2, 3))
+	assert.EqualValues(t, 4, repo.stacks[owner][stackKey{2, 0}], "credited past capacity")
 }
 
 // FitsIn is how a caller that must not overfill sizes its credit (TASK-156). It
@@ -473,29 +473,33 @@ func TestUnit_CargoFitsIn_SizesTheCreditToFreeSpace(t *testing.T) {
 	repo := newStubRepo()
 	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
 	repo.capacities[owner] = 100
-	repo.goodsTypes[51] = domain.GoodsType{ID: 51, Name: "Combat Drone", Space: 2}
+	// A Space:2 good with a round capacity keeps the arithmetic below readable;
+	// FitsIn knows nothing about the catalog, so id 2 «Железо» is as good a
+	// stand-in as the drone this was written for (TASK-167 moved the drone to
+	// space 290, which would drown the numbers in noise).
+	repo.goodsTypes[2] = domain.GoodsType{ID: 2, Name: "Железо", Space: 2}
 
 	// Empty hold: the caller's limit is the answer, not the 50 that would fit.
-	fits, err := cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	fits, err := cargo.FitsIn(context.Background(), repo, owner, 2, 5)
 	require.NoError(t, err)
 	assert.EqualValues(t, 5, fits, "never more than the caller asked for")
 
 	// 49 units of a Space:2 good leave room for exactly one more.
-	repo.seed(owner, 51, 0, 49)
-	fits, err = cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	repo.seed(owner, 2, 0, 49)
+	fits, err = cargo.FitsIn(context.Background(), repo, owner, 2, 5)
 	require.NoError(t, err)
-	assert.EqualValues(t, 1, fits, "whole units only — 2 free space is one drone")
+	assert.EqualValues(t, 1, fits, "whole units only — 2 free space is one unit")
 
 	// Full hold: zero, and it is not an error.
-	repo.seed(owner, 51, 0, 50)
-	fits, err = cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	repo.seed(owner, 2, 0, 50)
+	fits, err = cargo.FitsIn(context.Background(), repo, owner, 2, 5)
 	require.NoError(t, err)
 	assert.Zero(t, fits)
 
 	// Already over capacity (a pre-TASK-156 refund, or a cargobay downgrade):
 	// still zero, never a negative that would index past the caller's slice.
-	repo.seed(owner, 51, 0, 80)
-	fits, err = cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	repo.seed(owner, 2, 0, 80)
+	fits, err = cargo.FitsIn(context.Background(), repo, owner, 2, 5)
 	require.NoError(t, err)
 	assert.Zero(t, fits)
 }

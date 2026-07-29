@@ -13,9 +13,13 @@ import (
 	"spaceempire/back/internal/sector"
 )
 
-// DroneGoodsType is the goods_type id consumed per launched drone
-// (seeded by migration 0018, see drones.md §2).
-const DroneGoodsType domain.GoodsTypeID = 51
+// DroneGoodsType is the goods_type id consumed per launched drone: «Боевой дрон»
+// (space 290), from the legacy schema's own mapping ct_drones.cargo_id (class 1 →
+// 21) — the same table torpedos (23/24), the satellite (26) and the jammer (27)
+// already come from. Until TASK-167 it was 51, an English-named duplicate
+// migration 0018 minted with space 2; no station sold it, so a spent magazine was
+// unrefillable. See drones.md §2.
+const DroneGoodsType domain.GoodsTypeID = 21
 
 // handleLaunchDrone launches a salvo of combat drones from the player's ship at
 // a target (phase 4.4). Same orchestration shape as launch-missile: the handler

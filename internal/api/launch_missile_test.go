@@ -89,8 +89,9 @@ func TestUnit_LaunchMissile_OK(t *testing.T) {
 	require.Equal(t, 0, st.refunds, "nothing to refund — the debit is inside the launch")
 
 	// Assert the literal id, not api.MissileGoodsType — comparing the handler's
-	// constant against itself would pass even if it pointed at the drone's 51.
-	require.Equal(t, []domain.GoodsTypeID{50}, ord.chargedGoods())
+	// constant against itself would pass even if it pointed at the drone's 21.
+	// 10 is «Ракета Москит» in configs/balance.yaml and goods_types.
+	require.Equal(t, []domain.GoodsTypeID{10}, ord.chargedGoods())
 }
 
 // TestUnit_LaunchMissile_NoCargo: an empty magazine is refused inside the launch

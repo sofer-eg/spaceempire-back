@@ -32,8 +32,8 @@ const (
 	ordnanceSectorID  = domain.SectorID(2)
 	ordnanceBadShipID = domain.ShipID(999999)
 
-	missileGoods = domain.GoodsTypeID(50) // Ракета
-	droneGoods   = domain.GoodsTypeID(51) // Боевой дрон
+	missileGoods = domain.GoodsTypeID(10) // Ракета Москит
+	droneGoods   = domain.GoodsTypeID(21) // Боевой дрон
 	torpedoGoods = domain.GoodsTypeID(23) // Огненная Буря (class 2)
 )
 
@@ -68,9 +68,16 @@ func ordnanceFixture(t *testing.T) (*pgxpool.Pool, ordnance, domain.EntityRef, d
 	).Scan(&playerID), "seed player")
 
 	// A real ships row: drones.owner_ship_id / torpedos.owner_ship_id reference it.
+	//
+	// cargobay is spelled out rather than left on the 0006 default of 100, for the
+	// same reason installerFixture spells out 2000: the recall's capacity gate sizes
+	// the credit against ships.cargobay, and a combat drone takes 290 units of space
+	// (TASK-167 put the ammunition back on the real catalog). 2000 is the smallest
+	// round hold that leaves room for the four-drone recalls below — the kind of ship
+	// that carries drones in the first place.
 	var shipID int64
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`INSERT INTO ships (player_id, sector_id, hp, shield) VALUES ($1, $2, 100, 100) RETURNING id`,
+		`INSERT INTO ships (player_id, sector_id, hp, shield, cargobay) VALUES ($1, $2, 100, 100, 2000) RETURNING id`,
 		playerID, int64(ordnanceSectorID),
 	).Scan(&shipID), "seed ship")
 
@@ -291,8 +298,8 @@ func TestIntegration_Ordnance(t *testing.T) {
 	// repeatable up to the drone count. Now the recall is sized by what fits: one
 	// drone comes home, the other keeps flying, and the hold never goes over.
 	//
-	// The ship's cargobay is 100 (migration 0006) and a drone unit takes 2, so 49
-	// missiles leave room for exactly one drone.
+	// The fixture ship's cargobay is 2000 and a drone unit takes 290, so 1710 missiles
+	// (space 1 each) leave room for exactly one drone.
 	t.Run("RecallStopsAtHoldCapacity", func(t *testing.T) {
 		ctx := installCtx(t)
 		resetOrdnanceTables(t, pool)
@@ -304,8 +311,8 @@ func TestIntegration_Ordnance(t *testing.T) {
 		require.Zero(t, heldQty(t, pool, hold, droneGoods), "the salvo emptied the drone stack")
 
 		// The ship docks and fills the space its drones left behind.
-		stockHold(t, pool, hold, missileGoods, 49)
-		require.EqualValues(t, 98, usedSpace(t, pool, hold))
+		stockHold(t, pool, hold, missileGoods, 1710)
+		require.EqualValues(t, 1710, usedSpace(t, pool, hold))
 
 		out, err := ord.RecallDrones(ctx, hold, droneGoods, ids)
 		require.NoError(t, err)
@@ -313,12 +320,12 @@ func TestIntegration_Ordnance(t *testing.T) {
 		require.Len(t, out.Removed, 1, "only the credited drone's row is deleted")
 		assert.Equal(t, 1, rowCount(t, pool, "drones"), "the other drone keeps flying")
 		assert.EqualValues(t, 1, heldQty(t, pool, hold, droneGoods))
-		assert.EqualValues(t, 100, usedSpace(t, pool, hold), "at capacity, not over it")
+		assert.EqualValues(t, 2000, usedSpace(t, pool, hold), "at capacity, not over it")
 
 		// A completely full hold recalls nothing and still does not fail: the drone
 		// is not stranded, it is waiting.
 		stockHold(t, pool, hold, torpedoGoods, 1)
-		require.Greater(t, usedSpace(t, pool, hold), float64(100), "the hold is now overfull by other means")
+		require.Greater(t, usedSpace(t, pool, hold), float64(2000), "the hold is now overfull by other means")
 		left := []domain.DroneID{ids[0], ids[1]}
 		out, err = ord.RecallDrones(ctx, hold, droneGoods, left)
 		require.NoError(t, err, "a full hold is not an error")

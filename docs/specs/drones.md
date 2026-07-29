@@ -40,16 +40,53 @@ reduced behaviour set:
 
 ## 2. Cargo cost
 
-Each launched drone consumes **one `Combat Drone` cargo unit** (goods
-type id `51`, seeded by migration `0018_drones.sql`, `space=2`, chosen
-above the missile id `50`). `recall-drones {shipID}` returns **one unit
-per still-alive drone** owned by that ship to its cargo.
+Each launched drone consumes **one «Боевой дрон» cargo unit** (goods type
+id `21`, `space=290`). `recall-drones {shipID}` returns **one unit per
+still-alive drone** owned by that ship to its cargo, as far as the hold
+has room (§2.3).
+
+Migration `0018_drones.sql` originally minted a separate `51 'Combat Drone'`
+(`space=2`) for this, next to a catalog that already had the drone.
+`0063_consolidate_ammunition_goods.sql` (TASK-167) moved cargo 51 -> 21 and
+dropped 51. The mapping is the legacy schema's own — `ct_drones.cargo_id`:
+
+| class | name                  | cargo_id |
+|-------|-----------------------|----------|
+| 1     | Боевой дрон           | **21**   |
+| 2     | Огненная буря         | 23       |
+| 3     | Святая Торпеда        | 24       |
+| 4     | Мина "СКВОШ"          | 22       |
+| 5     | Ложная цель           | 25       |
+| 6     | Навигационный спутник | 26       |
+| 7     | Генератор гипер-помех | 27       |
+| 8     | Гипер-маяк            | 28       |
+
+Torpedos (23/24), the satellite (26) and the jammer (27) were already on
+those ids; the drone was the only one that had drifted off. No station ever
+sold 51, so a spent magazine could not be refilled, while good 21 — on 59
+station markets — was consumed by nothing.
+
+**`space` is back to the catalog's own 290**, not 0018's `2`. A drone is a
+big-ship weapon, exactly as in StarWind, where the same hulls carry the same
+cargobay: a starter hull (cargobay 50) holds none, and the HUD button reads
+«Нет дронов в трюме» until the player buys a bigger ship. The satellite (375)
+and the jammer (535) already set that precedent.
+
+**Salvo size is clamped by the client to the hold.** The worker clamps `Count`
+to what `up_drone_control` still allows, but not to what the hold carries, and
+the ordnance charges the clamped size as one all-or-nothing debit — so a salvo
+of 3 against 1 unit aboard is refused outright (see
+`TestIntegration_Ordnance/DroneSalvoIsAllOrNothing`). At `space=290` a single
+digit of drones aboard is the normal case, so `CombatHUD` sends
+`min(DRONE_SALVO, hold)`. The canvas `ObjectActionsMenu` has no cargo of its
+own and still sends the full salvo — its own documented split (the hold gate
+lives in `CombatHUD`).
 
 **Since TASK-147 the launch handler owns no cargo.** It only routes and
 maps, mirroring `install-jammer`:
 
 1. validate request,
-2. send `LaunchDroneCommand{PlayerID, ShipID, Target, Count, GoodsType: 51}`
+2. send `LaunchDroneCommand{PlayerID, ShipID, Target, Count, GoodsType: 21}`
    to the sector worker — the handler owns the goods constant so the
    sector package stays free of the catalog,
 3. wait for ack (`AckTimeout`) and map the outcome:
@@ -61,7 +98,7 @@ maps, mirroring `install-jammer`:
    compensation** (see §2.1).
 
 **Since TASK-152 the recall handler owns no cargo either.** It routes
-`RecallDronesCommand{PlayerID, ShipID, GoodsType: 51}` and maps the
+`RecallDronesCommand{PlayerID, ShipID, GoodsType: 21}` and maps the
 outcome (`ErrShipNotFound` → 404, `ErrForbidden` → 403,
 `ErrOrdnanceUnavailable` → 503, ack timeout → 504 with no compensation);
 the credit happens inside the worker, see §2.2. `api.DroneCargo` and the
@@ -175,7 +212,7 @@ Policy (chosen by the owner over "refuse the whole recall" and "allow
 overflow, force-drop later"): **credit what fits, leave the rest
 flying.**
 
-- Inside the recall transaction `cargo.FitsIn(hold, 51, len(ids))`
+- Inside the recall transaction `cargo.FitsIn(hold, 21, len(ids))`
   answers how many whole drone units still fit (`(capacity - used) /
   space`, clamped to `[0, len(ids)]`; a weightless good is unbounded).
   Only that many ids are deleted and credited.

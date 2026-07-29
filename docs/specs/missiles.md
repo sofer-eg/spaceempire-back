@@ -52,16 +52,61 @@ type Missile struct {
 
 ## 2. Goods integration
 
-Стрельба расходует одну единицу goods_type `id = 50` (`Missile`, space=2)
-из cargo стреляющего корабля.
+Стрельба расходует одну единицу goods_type `id = 10`
+(«Ракета Москит», space=1) из cargo стреляющего корабля.
 
-### Миграция `0017_missile_goods.sql`
+### Миграция `0017_missile_goods.sql` -> `0063` (TASK-167)
+
+Изначально 0017 завела для боеприпаса **отдельный** товар:
 
 ```sql
 INSERT INTO goods_types (id, name, space) VALUES (50, 'Missile', 2);
 ```
 
-Удалить в `Down`.
+Это был синтетический дубликат: в каталоге уже была ракета, и ни одна
+станция товар 50 не продавала -- истратив стартовый боезапас, игрок
+пополнить его не мог, а ракеты 10-14, которые продаются на 62-72 рынках,
+не расходовались ничем.
+
+Каноничный маппинг класса на товар живёт в самой старой схеме StarWind --
+`ct_missiles.cargo_id`:
+
+| class | name      | power | ttl | cargo_id |
+|-------|-----------|-------|-----|----------|
+| 1     | Москит    | 1000  | 5   | **10**   |
+| 2     | Оса       | 2500  | 6   | 11       |
+| 3     | Стрекоза  | 5000  | 6   | 12       |
+| 4     | Шелкопряд | 12000 | 9   | 13       |
+| 5     | Шершень   | 25000 | 10  | 14       |
+
+`0063_consolidate_ammunition_goods.sql` переносит cargo 50 -> 10
+(со слиянием количеств, см. §2.1) и удаляет товар 50. Реализован ровно
+один класс ракет (`combat.DefaultMissileSpec`), поэтому провязан только
+класс 1; 11-14 ждут каталога спеков и параметра класса в API.
+
+Вместе с id восстанавливается родной `space`: 2 -> 1.
+
+### §2.1 Слияние количеств в миграции
+
+У `cargo` есть UNIQUE `(owner_kind, owner_id, goods_type_id,
+goods_owner_id)`, поэтому простой `UPDATE ... SET goods_type_id = 10`
+падает на владельце, у которого товар 10 уже есть. Миграция делает
+`INSERT ... SELECT ... ON CONFLICT (те же четыре колонки) DO UPDATE SET
+quantity = cargo.quantity + EXCLUDED.quantity` + `DELETE` исходных строк.
+Набор колонок в `ON CONFLICT` обязан совпадать с constraint'ом --
+иначе Postgres падает с 42P10 на этапе планирования (TASK-151/155).
+
+Слияние необратимо: `Down` возвращает товар 50 в каталог и старые
+англоязычные имена, но разделить сложенные количества нельзя.
+
+### §2.2 Защита от расхождения каталога
+
+`GET /api/goods` отдаёт `configs/balance.yaml`, а сервер считает объём
+по `goods_types` в Postgres. Ничто не связывало два источника -- отсюда и
+взялись 50/51. `TestIntegration_BalanceCatalog_MatchesGoodsTypesTable`
+(`internal/balance/catalog_sync_integration_test.go`) сверяет их по
+**id + name + space**: id-only проверка пропустила бы товар, который
+подписан и померян по-разному в БД и у клиента.
 
 ### Spawner
 
@@ -319,7 +364,7 @@ Handler боеприпасом не владеет вообще -- он толь
 маппит исход (как `install-jammer`):
 
 1. handler принимает запрос, валидирует цель (`missileTargetable`-набор);
-2. `sector.Send(LaunchMissileCommand{..., GoodsType: 50})` -- id товара
+2. `sector.Send(LaunchMissileCommand{..., GoodsType: 10})` -- id товара
    несёт команда, чтобы sector не знал каталога;
 3. ждёт ack (`AckTimeout`) и маппит: `ErrShipNotFound` → 404,
    `ErrForbidden` → 403, `ErrShipDocked` → 400, `ErrEquipmentRequired` →
@@ -378,7 +423,7 @@ TASK-147 применила эту дисциплину ко всему семе
 
 | Команда | Товар | Что в одной транзакции |
 |---|---|---|
-| `launch-missile` | 50 | только списание (объект RAM-only) |
+| `launch-missile` | 10 | только списание (объект RAM-only) |
 | `launch-torpedo` | gt23 (кл.2) / gt24 (кл.3) -- маппинг класса живёт в handler'е | списание + `torpedosRepo.WithExecutor(tx).Create` |
 | `launch-drone` | 51 | списание `toSpawn` + `toSpawn` × `dronesRepo...Create`, всё-или-ничего (см. `drones.md` §2.1) |
 

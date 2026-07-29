@@ -19,11 +19,12 @@ import (
 )
 
 // Goods ids the launch commands carry in these tests. They mirror the api
-// constants (missile 50, drone 51, gt23 "Огненная Буря") but the sector package
-// knows nothing about the catalog — the id travels on the command.
+// constants (missile 10 «Ракета Москит», drone 21 «Боевой дрон», torpedo 23
+// «Огненная Буря») but the sector package knows nothing about the catalog — the id
+// travels on the command.
 const (
-	testMissileGoods = domain.GoodsTypeID(50)
-	testDroneGoods   = domain.GoodsTypeID(51)
+	testMissileGoods = domain.GoodsTypeID(10)
+	testDroneGoods   = domain.GoodsTypeID(21)
 	testTorpedoGoods = domain.GoodsTypeID(23)
 )
 

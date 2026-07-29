@@ -71,9 +71,9 @@ func TestUnit_LaunchDrone_OK(t *testing.T) {
 	require.Equal(t, 3, st.drones)
 	require.Equal(t, 0, st.refunds, "no shortfall to refund any more")
 
-	// 51 is «Боевой дрон» — assert the literal so a constant pointing at the
-	// missile's 50 would fail.
-	require.Equal(t, []domain.GoodsTypeID{51}, ord.chargedGoods())
+	// 21 is «Боевой дрон» — assert the literal so a constant pointing at the
+	// missile's 10 would fail.
+	require.Equal(t, []domain.GoodsTypeID{21}, ord.chargedGoods())
 }
 
 // TestUnit_LaunchDrone_NotEnoughCargo: fewer units in the hold than the salvo

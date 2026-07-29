@@ -13,9 +13,18 @@ import (
 	"spaceempire/back/internal/sector"
 )
 
-// MissileGoodsType is the goods_type id consumed by every missile launch.
-// Mirrors `app.MissileGoodsType` (seeded by migration 0017).
-const MissileGoodsType domain.GoodsTypeID = 50
+// MissileGoodsType is the goods_type id consumed by every missile launch:
+// «Ракета Москит» (space 1), the catalog's class-1 missile. Mirrors
+// `app.MissileGoodsType`, which seeds the starter magazine.
+//
+// The id comes from the legacy schema's own mapping, ct_missiles.cargo_id
+// (class 1 «Москит» → 10). Until TASK-167 it was 50, an English-named duplicate
+// migration 0017 minted next to the real catalog: no station ever sold 50, so a
+// spent magazine could not be refilled, while the 10-14 missiles on 62-72 markets
+// were consumed by nothing. Phase 4.3 still flies exactly one class
+// (combat.DefaultMissileSpec), so only class 1 is wired; 11-14 wait for a per-class
+// spec catalog.
+const MissileGoodsType domain.GoodsTypeID = 10
 
 // launchActionEnergyCost resolves the "action" energy a missile launch spends
 // (phase 10.3.1) from the up_launcher catalog row. energy_usage is uniform

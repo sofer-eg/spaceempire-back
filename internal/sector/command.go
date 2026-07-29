@@ -442,7 +442,7 @@ type LaunchMissileCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
 	Target   domain.EntityRef
-	// GoodsType is the goods id one missile costs (50); the handler owns that
+	// GoodsType is the goods id one missile costs (10); the handler owns that
 	// constant so the sector package stays free of the goods catalog.
 	GoodsType domain.GoodsTypeID
 	// Now lets tests inject a deterministic clock; production wiring leaves
@@ -714,7 +714,7 @@ type LaunchDroneCommand struct {
 	ShipID   domain.ShipID
 	Target   domain.EntityRef
 	Count    int
-	// GoodsType is the goods id one drone costs (51); the handler owns that
+	// GoodsType is the goods id one drone costs (21); the handler owns that
 	// constant so the sector package stays free of the goods catalog.
 	GoodsType domain.GoodsTypeID
 	// Now lets tests inject a deterministic clock; zero means the worker
@@ -844,7 +844,7 @@ type RecallDronesResult struct {
 type RecallDronesCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
-	// GoodsType is the goods id one recalled drone is worth (51), the same
+	// GoodsType is the goods id one recalled drone is worth (21), the same
 	// constant LaunchDroneCommand carries; the handler owns it so the sector
 	// package stays free of the goods catalog.
 	GoodsType domain.GoodsTypeID

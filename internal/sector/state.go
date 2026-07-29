@@ -97,6 +97,10 @@ type sectorState struct {
 	// which removes the whole container. So no dirty-tracking and no
 	// periodic batch: only added/removed deltas reach subscribers.
 	containers map[domain.ContainerID]*domain.Container
+	// containerHP is the hull every container in this sector floats with
+	// (Config.ContainerHP, TASK-111). Containers have no HP column, so the worker
+	// stamps it at cold start and addContainer stamps every later drop.
+	containerHP int
 
 	// asteroids holds the live minable ore bodies in this sector (phase
 	// 5.4). Persistent: mass is mined down in RAM, written by the periodic
@@ -326,6 +330,14 @@ func (s *sectorState) resolveTargetPos(ref domain.EntityRef) (domain.Vec2, bool)
 		}
 		return domain.Vec2{}, false
 	}
+	if ref.Kind == domain.EntityKindContainer {
+		// Containers live in their own map, not in destructibles: they are loot with
+		// a TTL, not sector layout (TASK-111).
+		if c, ok := s.containers[domain.ContainerID(ref.ID)]; ok && c.HP > 0 {
+			return c.Pos, true
+		}
+		return domain.Vec2{}, false
+	}
 	if d, ok := s.destructibles[ref]; ok && d.HP > 0 {
 		return d.Pos, true
 	}
@@ -426,6 +438,12 @@ func (s *sectorState) clearStaticCombatDeltas() {
 // set. Called from the kill handler after RecordKill returns the
 // DB-assigned ids.
 func (s *sectorState) addContainer(c *domain.Container) {
+	if c.HP <= 0 {
+		// Every drop path (kill loot, mined ore, hack loot) builds the container
+		// from its repo result, which knows nothing about combat — stamping here
+		// keeps one place responsible for a container being shootable at all.
+		c.HP = s.containerHP
+	}
 	s.containers[c.ID] = c
 }
 

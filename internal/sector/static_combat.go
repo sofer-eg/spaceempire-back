@@ -24,6 +24,21 @@ func IsStaticTargetKind(k domain.EntityKind) bool {
 	return false
 }
 
+// IsMissileTargetKind reports whether k is a non-ship kind a missile may be fired
+// at: any destructible static (gates included since TASK-110) or a loot container
+// (TASK-111 — denying an enemy their loot is a legitimate move, and the crate is a
+// soft target, see domain.Container.TakeDamage).
+//
+// Containers are deliberately NOT in IsStaticTargetKind: they are loot with a TTL
+// rather than sector layout, they live in their own map with their own reap path,
+// and that set also gates lasers and torpedoes, which stay off crates.
+//
+// Exported so the launch-missile handler rejects exactly the kinds the worker
+// does — one source of truth, the way IsStaticTargetKind serves the static set.
+func IsMissileTargetKind(k domain.EntityKind) bool {
+	return IsStaticTargetKind(k) || k == domain.EntityKindContainer
+}
+
 // staticAttackable reports whether attacker may fire at this static. Owned
 // statics go through the hostility oracle (6.2: friendly/neutral objects are
 // invulnerable). A gate has no owner and belongs to nobody's side, so the oracle

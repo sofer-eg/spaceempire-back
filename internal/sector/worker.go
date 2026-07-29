@@ -732,6 +732,18 @@ func NewWorker(
 	w.initialContainers = nil
 	w.initialAsteroids = nil
 
+	// Containers are shootable (TASK-111) but carry no HP column: stamp the
+	// configured hull onto the cold-start set and let addContainer do the same for
+	// every later drop.
+	for _, s := range w.sectors {
+		s.containerHP = cfg.ContainerHP
+		for _, c := range s.containers {
+			if c.HP <= 0 {
+				c.HP = cfg.ContainerHP
+			}
+		}
+	}
+
 	// Register this sector's side of every live gate as a shootable endpoint
 	// (TASK-110). Runs here, after the options, because it needs the topology.
 	for _, s := range w.sectors {

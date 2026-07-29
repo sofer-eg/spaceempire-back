@@ -93,6 +93,13 @@ type Config struct {
 	// ContainerTTL is how long a loot container (dropped by a ship death,
 	// phase 4.6) survives before the tick sweeps it. Default 600 s.
 	ContainerTTL time.Duration
+	// ContainerHP is the hull a loot container floats with (TASK-111): a crate is
+	// a soft target, and the point of shooting one is denial, so it must not take a
+	// salvo — the default 25 sits below one missile's 30 damage
+	// (combat.DefaultMissileSpec), i.e. one hit destroys it with its cargo.
+	// RAM-only: containers have no HP column, so this seeds every container at
+	// cold start and at spawn.
+	ContainerHP int
 	// PickupRange is the radius in world units a ship must be within of a
 	// container before PickupContainerCommand succeeds. Looser than
 	// DockRange — a container is not a dockable object ("достаточно
@@ -212,6 +219,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.EffectPublishTimeout <= 0 {
 		c.EffectPublishTimeout = defaultEffectPublishTimeout
+	}
+	if c.ContainerHP <= 0 {
+		c.ContainerHP = 25
 	}
 	if c.ContainerTTL <= 0 {
 		c.ContainerTTL = 600 * time.Second

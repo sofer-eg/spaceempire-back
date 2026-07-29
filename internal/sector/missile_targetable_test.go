@@ -8,10 +8,11 @@ import (
 	"spaceempire/back/internal/domain"
 )
 
-// TestUnit_missileTargetable enumerates the missile target set (TASK-113 FR-07):
-// a different ship and every destructible static are legal; self, gates, and
-// other non-destructible kinds are not. Missiles mirror torpedoes, so this is
-// the same set torpedoTargetable enforces.
+// TestUnit_missileTargetable enumerates the missile target set (TASK-113 FR-07,
+// widened by TASK-110/111): a different ship — a spacesuit is a ships row, so EVA
+// rides that branch — every destructible static including gates, and a loot
+// container. Self and the non-damageable kinds are not. The container is where the
+// missile set is wider than the torpedo's (torpedoTargetable stays on statics).
 func TestUnit_missileTargetable(t *testing.T) {
 	t.Parallel()
 	const self = domain.ShipID(7)
@@ -29,11 +30,13 @@ func TestUnit_missileTargetable(t *testing.T) {
 		{"pirbase", domain.EntityRef{Kind: domain.EntityKindPirbase, ID: 1}, true},
 		{"laser tower", domain.EntityRef{Kind: domain.EntityKindLaserTower, ID: 1}, true},
 		{"satellite", domain.EntityRef{Kind: domain.EntityKindSatellite, ID: 1}, true},
-		// Gates carry no EntityKind on the backend (ЧТЗ C-04, until TASK-110), so
-		// the "gate is not a weapon target" rule is exercised through the other
-		// non-destructible kinds a ref could carry.
-		{"container excluded", domain.EntityRef{Kind: domain.EntityKindContainer, ID: 1}, false},
+		{"jammer", domain.EntityRef{Kind: domain.EntityKindJammer, ID: 1}, true},
+		// TASK-110 gave gates combat state, which lifted ЧТЗ C-04.
+		{"gate", domain.EntityRef{Kind: domain.EntityKindGate, ID: 1}, true},
+		// TASK-111: a crate is destroyed with its cargo — denying loot is a move.
+		{"container", domain.EntityRef{Kind: domain.EntityKindContainer, ID: 1}, true},
 		{"drone excluded", domain.EntityRef{Kind: domain.EntityKindDrone, ID: 1}, false},
+		{"torpedo excluded", domain.EntityRef{Kind: domain.EntityKindTorpedo, ID: 1}, false},
 		{"unknown excluded", domain.EntityRef{Kind: domain.EntityKindUnknown, ID: 1}, false},
 	}
 	for _, tc := range cases {

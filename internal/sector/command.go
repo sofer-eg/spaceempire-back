@@ -465,8 +465,9 @@ func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
 		replyLaunchMissile(c.Reply, res)
 		return
 	case !missileTargetable(c.ShipID, c.Target):
-		// TASK-113: a missile may strike a ship (not itself) or any destructible
-		// static (IsStaticTargetKind); gates are excluded (ЧТЗ C-04).
+		// TASK-113/110/111: a missile may strike a ship (not itself, spacesuits
+		// included), any destructible static — gates among them — or a loot
+		// container. Anything else is refused before the hold is touched.
 		res.Err = ErrInvalidAttackTarget
 		replyLaunchMissile(c.Reply, res)
 		return
@@ -659,7 +660,10 @@ func torpedoTargetable(shipID domain.ShipID, ref domain.EntityRef) bool {
 // ship, or a destructible static; gates excluded until TASK-110), so this
 // mirrors torpedoTargetable (TASK-113 FR-07).
 func missileTargetable(shipID domain.ShipID, ref domain.EntityRef) bool {
-	return torpedoTargetable(shipID, ref)
+	if ref.Kind == domain.EntityKindShip {
+		return domain.ShipID(ref.ID) != shipID
+	}
+	return IsMissileTargetKind(ref.Kind)
 }
 
 func replyLaunchTorpedo(reply chan<- LaunchTorpedoResult, res LaunchTorpedoResult) {

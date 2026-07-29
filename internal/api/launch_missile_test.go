@@ -113,21 +113,44 @@ func TestUnit_LaunchMissile_NoCargo(t *testing.T) {
 	require.Equal(t, 0, st.refunds, "no refund — the failed debit rolled back")
 }
 
-// TestUnit_LaunchMissile_NonTargetableKind: a kind that is neither a ship nor a
-// destructible static (e.g. a container) is rejected at the handler boundary,
-// before the command is even built (TASK-113 FR-06 "прочие → 400").
+// TestUnit_LaunchMissile_NonTargetableKind: a kind outside the missile target set
+// (a drone — a projectile, not a target) is rejected at the handler boundary,
+// before the command is even built (TASK-113 FR-06 "прочие → 400"). Containers and
+// gates left this list in TASK-111/110 — see the next test.
 func TestUnit_LaunchMissile_NonTargetableKind(t *testing.T) {
 	t.Parallel()
 	srv, _, ord := newMissileTestServer(t, []domain.Ship{missileTestShip()}, 5)
 
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
-		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindContainer), ID: 7},
+		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindDrone), ID: 7},
 	})
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.EqualValues(t, 5, ord.left(api.MissileGoodsType))
 	require.Empty(t, ord.chargedGoods(), "request rejected before the ordnance is reached")
+}
+
+// TASK-111: a container passes the handler boundary now — the crate is a missile
+// target. With no such container in the sector the worker rejects it on its own
+// target gate (400) and, as with a missing static, the magazine stays untouched;
+// what this pins is that the handler no longer refuses the KIND.
+func TestUnit_LaunchMissile_ContainerTargetForwarded(t *testing.T) {
+	t.Parallel()
+	srv, w, ord := newMissileTestServer(t, []domain.Ship{missileTestShip()}, 5)
+	runWorker(t, w)
+
+	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
+		ShipID:    1,
+		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindContainer), ID: 7},
+	})
+
+	// 400 from the WORKER (no such container in the sector), which is what proves
+	// the container kind crossed the handler's kind switch.
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "invalid missile target")
+	require.NotContains(t, rec.Body.String(), "invalid target kind")
+	require.EqualValues(t, 5, ord.left(api.MissileGoodsType), "a refused launch spends nothing")
 }
 
 // TestUnit_LaunchMissile_StaticTargetForwarded: a destructible-static kind passes

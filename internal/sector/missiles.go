@@ -103,6 +103,13 @@ func (w *Worker) applyMissileHit(ctx context.Context, s *sectorState, id domain.
 		}
 		return
 	}
+	if m.Target.Kind == domain.EntityKindContainer {
+		// A loot container is soft and carries no shield: the crate either survives
+		// the hit or is destroyed with its cargo (TASK-111). Denying an enemy their
+		// loot is the point, so nothing is salvaged from the wreck.
+		w.applyMissileHitContainer(ctx, s, imp, domain.ContainerID(m.Target.ID), m.Damage)
+		return
+	}
 	// Destructible static: route point damage through Damageable (mirror of
 	// fireLaserAtStatic). Static kills carry no player attribution.
 	d := s.destructibles[m.Target]
@@ -114,5 +121,45 @@ func (w *Worker) applyMissileHit(ctx context.Context, s *sectorState, id domain.
 		w.killStatic(ctx, s, d)
 	} else {
 		s.markDestructibleDirty(m.Target)
+	}
+}
+
+// applyMissileHitContainer damages a loot container and, on a kill, removes it
+// from the sector and deletes its row — the same reap the TTL sweep runs, which is
+// also what disposes of the cargo (ON DELETE CASCADE on the container's cargo
+// rows). Nothing drops: the goods are destroyed, not spilled, which is what makes
+// shooting a crate a denial move rather than a slower pickup.
+//
+// The container's HP is RAM-only, so a survivor's damage is simply not persisted:
+// a restart heals it. That is the same treatment every other destructible's HP
+// gets (TASK-67), and a container's whole lifetime is a TTL anyway.
+func (w *Worker) applyMissileHitContainer(ctx context.Context, s *sectorState, imp MissileImpact, id domain.ContainerID, dmg int) {
+	c, ok := s.containers[id]
+	if !ok {
+		// Picked up or expired between the homing check and here: the missile is
+		// spent, nothing to damage.
+		imp.Expired = true
+		s.addMissileImpact(imp)
+		return
+	}
+	res := c.TakeDamage(dmg)
+	imp.Damage = res.HPAbsorbed
+	imp.Killed = res.Killed
+	s.addMissileImpact(imp)
+	if !res.Killed {
+		return
+	}
+	s.removeContainer(id)
+	if w.containerRepo == nil {
+		return
+	}
+	err := w.dbCall(ctx, func(ctx context.Context) error {
+		return w.containerRepo.Delete(ctx, id)
+	})
+	if err != nil {
+		// Same best-effort contract as the TTL sweep: the crate is gone from the
+		// sector either way, and the row is swept on the next restart's TTL pass.
+		w.logger.ErrorContext(ctx, "container destroyed but row delete failed",
+			"err", err, "container", int64(id), "sector", int64(s.sectorID))
 	}
 }

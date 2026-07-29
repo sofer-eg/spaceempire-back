@@ -72,6 +72,11 @@ type fakeOrdnance struct {
 	recalledIDs []domain.DroneID
 	missingRows map[domain.DroneID]bool
 
+	// recallFits caps how many of the handed-over drones the hold can take,
+	// standing in for cargo.FitsIn inside the real transaction (TASK-156). nil
+	// means every drone fits.
+	recallFits *int
+
 	// torpedoRepo, when set, creates every torpedo through the same fake repo
 	// the persistence tests count Create calls on — standing in for the real
 	// adapter's torpedosRepo.WithExecutor(tx).Create inside the transaction.
@@ -189,33 +194,39 @@ func (f *fakeOrdnance) LaunchDrones(ctx context.Context, owner domain.EntityRef,
 // RecallDrones is the launch's mirror image (TASK-152): it deletes the rows and
 // credits one unit per row it actually deleted, in one transaction. failWith
 // rolls the whole thing back (nothing deleted, nothing credited);
-// blockUntilCancel models the hung DB.
-func (f *fakeOrdnance) RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
+// blockUntilCancel models the hung DB; recallFits models the hold sizing the real
+// ordnance does with cargo.FitsIn (TASK-156).
+func (f *fakeOrdnance) RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (sector.RecallOutcome, error) {
 	if err := f.enter(ctx); err != nil {
-		return 0, err
+		return sector.RecallOutcome{}, err
 	}
 	if err := f.wait(ctx); err != nil {
-		return 0, err
+		return sector.RecallOutcome{}, err
 	}
 	f.owners = append(f.owners, owner)
 	f.goodsTypes = append(f.goodsTypes, gtype)
 	f.recalledIDs = append(f.recalledIDs, ids...)
 	if f.failWith != nil {
-		return 0, f.failWith
+		return sector.RecallOutcome{}, f.failWith
 	}
-	n := 0
-	for _, id := range ids {
+	take := len(ids)
+	if f.recallFits != nil && *f.recallFits < take {
+		take = *f.recallFits
+	}
+	var out sector.RecallOutcome
+	for _, id := range ids[:take] {
+		out.Removed = append(out.Removed, id)
 		if f.missingRows[id] {
 			continue
 		}
-		n++
+		out.Credited++
 	}
 	f.recalls++
-	f.credited[gtype] += int64(n)
+	f.credited[gtype] += int64(out.Credited)
 	if !f.unlimited {
-		f.stock[gtype] += int64(n)
+		f.stock[gtype] += int64(out.Credited)
 	}
-	return n, nil
+	return out, nil
 }
 
 func (f *fakeOrdnance) left(gtype domain.GoodsTypeID) int64 { return f.stock[gtype] }
@@ -874,7 +885,47 @@ func TestUnit_RecallDrones_CreditsOnlyDeletedRows(t *testing.T) {
 
 	// Tick ran on this goroutine, so the buffer is settled.
 	assert.Contains(t, logs.String(), "recall credited fewer units", "the shortfall is reported")
-	assert.Contains(t, logs.String(), "requested=2 credited=1")
+	assert.Contains(t, logs.String(), "removed=2 credited=1")
+}
+
+// TestUnit_RecallDrones_PartialWhenHoldIsFull is the worker's half of TASK-156:
+// the ordnance recalls only what the hold takes, and RAM must follow that — the
+// drones it did NOT settle keep flying and stay on the radar. The player is told
+// how many are still out (Left) so «Вернуть дронов» is not silently partial.
+func TestUnit_RecallDrones_PartialWhenHoldIsFull(t *testing.T) {
+	t.Parallel()
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 2})
+	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+
+	ids := launchSalvo(t, w, 2)
+	fits := 1
+	ord.recallFits = &fits
+
+	reply := make(chan sector.RecallDronesResult, 1)
+	sendRecall(t, w, reply)
+
+	res := <-reply
+	require.NoError(t, res.Err, "a full hold is not a failed recall")
+	assert.Equal(t, 1, res.Recalled, "credited for the one that fitted")
+	assert.Equal(t, 1, res.Left, "the other drone is still out there")
+	assert.EqualValues(t, 1, ord.left(testDroneGoods), "one unit back in the hold")
+
+	live := w.Snapshot(testSector).Drones
+	require.Len(t, live, 1, "the un-recalled drone keeps flying")
+	assert.Equal(t, ids[1], live[0].ID, "and it is the one the ordnance left alone")
+
+	// Space frees up and the player recalls again: the last drone comes home, so
+	// nothing is stranded permanently (AC#3).
+	ord.recallFits = nil
+	reply2 := make(chan sector.RecallDronesResult, 1)
+	sendRecall(t, w, reply2)
+
+	res = <-reply2
+	require.NoError(t, res.Err)
+	assert.Equal(t, 1, res.Recalled)
+	assert.Zero(t, res.Left)
+	assert.Empty(t, w.Snapshot(testSector).Drones, "nothing left flying")
+	assert.EqualValues(t, 2, ord.left(testDroneGoods), "both units home, exactly once each")
 }
 
 // TestUnit_RecallDrones_AllRowsGoneCreditsNothing is the self-healing half of the

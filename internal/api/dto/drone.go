@@ -22,10 +22,13 @@ type RecallDronesRequest struct {
 	ShipID int64 `json:"shipID"`
 }
 
-// RecallDronesResponse reports how many drones returned to cargo.
+// RecallDronesResponse reports how many drones returned to cargo and how many
+// stayed out because the hold could not take them (TASK-156). left > 0 is not an
+// error: the player frees space and recalls again.
 type RecallDronesResponse struct {
 	OK       bool `json:"ok"`
 	Recalled int  `json:"recalled"`
+	Left     int  `json:"left"`
 }
 
 // Drone mirrors domain.Drone on the wire. Pos / Vel / Direction are split

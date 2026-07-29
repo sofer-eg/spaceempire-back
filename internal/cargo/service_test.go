@@ -450,8 +450,8 @@ func TestUnit_CargoRefundIn_RejectsNonPositive(t *testing.T) {
 
 // TestUnit_CargoRefundIn_IgnoresCapacity pins the deliberate asymmetry with Add:
 // the credit must never be refusable, because its caller has already deleted the
-// object it is paying for (TASK-152). Overfilling a hold that filled up while the
-// drones were out is the known consequence — TASK-156.
+// object it is paying for (TASK-152). A caller for whom "it fitted a moment ago"
+// does not hold sizes its credit with FitsIn first instead (TASK-156).
 func TestUnit_CargoRefundIn_IgnoresCapacity(t *testing.T) {
 	t.Parallel()
 
@@ -463,6 +463,63 @@ func TestUnit_CargoRefundIn_IgnoresCapacity(t *testing.T) {
 
 	require.NoError(t, cargo.RefundIn(context.Background(), repo, owner, 50, 3))
 	assert.EqualValues(t, 4, repo.stacks[owner][stackKey{50, 0}], "credited past capacity")
+}
+
+// FitsIn is how a caller that must not overfill sizes its credit (TASK-156). It
+// answers in whole units of the good and never above the caller's own limit.
+func TestUnit_CargoFitsIn_SizesTheCreditToFreeSpace(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
+	repo.capacities[owner] = 100
+	repo.goodsTypes[51] = domain.GoodsType{ID: 51, Name: "Combat Drone", Space: 2}
+
+	// Empty hold: the caller's limit is the answer, not the 50 that would fit.
+	fits, err := cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	require.NoError(t, err)
+	assert.EqualValues(t, 5, fits, "never more than the caller asked for")
+
+	// 49 units of a Space:2 good leave room for exactly one more.
+	repo.seed(owner, 51, 0, 49)
+	fits, err = cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, fits, "whole units only — 2 free space is one drone")
+
+	// Full hold: zero, and it is not an error.
+	repo.seed(owner, 51, 0, 50)
+	fits, err = cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	require.NoError(t, err)
+	assert.Zero(t, fits)
+
+	// Already over capacity (a pre-TASK-156 refund, or a cargobay downgrade):
+	// still zero, never a negative that would index past the caller's slice.
+	repo.seed(owner, 51, 0, 80)
+	fits, err = cargo.FitsIn(context.Background(), repo, owner, 51, 5)
+	require.NoError(t, err)
+	assert.Zero(t, fits)
+}
+
+// A weightless good is not bounded by capacity, so FitsIn answers the caller's
+// limit instead of dividing by a zero space.
+func TestUnit_CargoFitsIn_WeightlessGoodIsUnbounded(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
+	repo.capacities[owner] = 0
+	repo.goodsTypes[9] = domain.GoodsType{ID: 9, Name: "Weightless", Space: 0}
+
+	fits, err := cargo.FitsIn(context.Background(), repo, owner, 9, 3)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, fits)
+}
+
+func TestUnit_CargoFitsIn_UnknownGoodsType(t *testing.T) {
+	t.Parallel()
+	repo := newStubRepo()
+	_, err := cargo.FitsIn(context.Background(), repo, domain.EntityRef{Kind: 1, ID: 1}, 51, 1)
+	require.ErrorIs(t, err, cargo.ErrGoodsTypeNotFound)
 }
 
 func TestUnit_CargoService_Move_UnknownGoodsType(t *testing.T) {

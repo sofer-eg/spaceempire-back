@@ -94,6 +94,28 @@ func resetOrdnanceTables(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, err, "reset ordnance tables")
 }
 
+// usedSpace is the physical space the hold's stacks occupy — the quantity the
+// capacity check compares against cargobay.
+func usedSpace(t *testing.T, pool *pgxpool.Pool, hold domain.EntityRef) float64 {
+	t.Helper()
+	var used float64
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT COALESCE(SUM(c.quantity * g.space), 0) FROM cargo c
+		 JOIN goods_types g ON g.id = c.goods_type_id
+		 WHERE c.owner_kind = $1 AND c.owner_id = $2`,
+		int16(hold.Kind), hold.ID).Scan(&used), "read used space")
+	return used
+}
+
+// clearHold drops one goods stack, standing in for the player selling it.
+func clearHold(t *testing.T, pool *pgxpool.Pool, hold domain.EntityRef, gtype domain.GoodsTypeID) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`DELETE FROM cargo WHERE owner_kind = $1 AND owner_id = $2 AND goods_type_id = $3`,
+		int16(hold.Kind), hold.ID, int32(gtype))
+	require.NoError(t, err, "clear hold")
+}
+
 // testTorpedo is a launch-shaped class-2 torpedo owned by the fixture's ship.
 func testTorpedo(ship domain.ShipID, player domain.PlayerID, sectorID domain.SectorID) domain.Torpedo {
 	return domain.Torpedo{
@@ -235,17 +257,20 @@ func TestIntegration_Ordnance(t *testing.T) {
 		require.Len(t, ids, 2)
 		require.Zero(t, heldQty(t, pool, hold, droneGoods))
 
-		credited, err := ord.RecallDrones(ctx, hold, droneGoods, ids)
+		out, err := ord.RecallDrones(ctx, hold, droneGoods, ids)
 		require.NoError(t, err)
-		assert.Equal(t, 2, credited, "one unit per deleted row")
+		assert.Equal(t, 2, out.Credited, "one unit per deleted row")
+		assert.ElementsMatch(t, ids, out.Removed, "both rows settled")
 		assert.Equal(t, 0, rowCount(t, pool, "drones"), "both rows deleted")
 		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods), "both units credited")
 
 		// The same recall again: the rows are gone, so it credits nothing and does
-		// not fail — the ship would otherwise be permanently unable to recall.
-		credited, err = ord.RecallDrones(ctx, hold, droneGoods, ids)
+		// not fail — the ship would otherwise be permanently unable to recall. The
+		// ids are still reported as settled so the worker can clear the ghosts.
+		out, err = ord.RecallDrones(ctx, hold, droneGoods, ids)
 		require.NoError(t, err)
-		assert.Zero(t, credited)
+		assert.Zero(t, out.Credited)
+		assert.ElementsMatch(t, ids, out.Removed, "ghost rows still leave RAM")
 		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods), "no double credit")
 
 		// Mixed: one live row among stale ids credits exactly one.
@@ -253,11 +278,63 @@ func TestIntegration_Ordnance(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1, heldQty(t, pool, hold, droneGoods))
 
-		credited, err = ord.RecallDrones(ctx, hold, droneGoods, append(ids, live...))
+		out, err = ord.RecallDrones(ctx, hold, droneGoods, append(ids, live...))
 		require.NoError(t, err)
-		assert.Equal(t, 1, credited)
+		assert.Equal(t, 1, out.Credited)
 		assert.Equal(t, 0, rowCount(t, pool, "drones"))
 		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods))
+	})
+
+	// TASK-156, the exploit and its fix: launch drones, fill the freed space with
+	// other goods, recall. The credit used to be unconditional, so those units
+	// landed on top of a full hold and the ship carried more than its cargobay —
+	// repeatable up to the drone count. Now the recall is sized by what fits: one
+	// drone comes home, the other keeps flying, and the hold never goes over.
+	//
+	// The ship's cargobay is 100 (migration 0006) and a drone unit takes 2, so 49
+	// missiles leave room for exactly one drone.
+	t.Run("RecallStopsAtHoldCapacity", func(t *testing.T) {
+		ctx := installCtx(t)
+		resetOrdnanceTables(t, pool)
+		stockHold(t, pool, hold, droneGoods, 2)
+
+		ids, err := ord.LaunchDrones(ctx, hold, droneGoods, testDrones(2, ship, player, ordnanceSectorID))
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+		require.Zero(t, heldQty(t, pool, hold, droneGoods), "the salvo emptied the drone stack")
+
+		// The ship docks and fills the space its drones left behind.
+		stockHold(t, pool, hold, missileGoods, 49)
+		require.EqualValues(t, 98, usedSpace(t, pool, hold))
+
+		out, err := ord.RecallDrones(ctx, hold, droneGoods, ids)
+		require.NoError(t, err)
+		assert.Equal(t, 1, out.Credited, "only what fits is credited")
+		require.Len(t, out.Removed, 1, "only the credited drone's row is deleted")
+		assert.Equal(t, 1, rowCount(t, pool, "drones"), "the other drone keeps flying")
+		assert.EqualValues(t, 1, heldQty(t, pool, hold, droneGoods))
+		assert.EqualValues(t, 100, usedSpace(t, pool, hold), "at capacity, not over it")
+
+		// A completely full hold recalls nothing and still does not fail: the drone
+		// is not stranded, it is waiting.
+		stockHold(t, pool, hold, torpedoGoods, 1)
+		require.Greater(t, usedSpace(t, pool, hold), float64(100), "the hold is now overfull by other means")
+		left := []domain.DroneID{ids[0], ids[1]}
+		out, err = ord.RecallDrones(ctx, hold, droneGoods, left)
+		require.NoError(t, err, "a full hold is not an error")
+		assert.Zero(t, out.Credited)
+		assert.Empty(t, out.Removed, "nothing settled → the drone stays on the radar")
+		assert.Equal(t, 1, rowCount(t, pool, "drones"))
+
+		// The player sells the cargo and recalls again: the last drone comes home,
+		// so no state leaves a ship permanently unable to recall (AC#3).
+		clearHold(t, pool, hold, missileGoods)
+		clearHold(t, pool, hold, torpedoGoods)
+		out, err = ord.RecallDrones(ctx, hold, droneGoods, left)
+		require.NoError(t, err)
+		assert.Equal(t, 1, out.Credited, "the freed space brings the last drone back")
+		assert.Equal(t, 0, rowCount(t, pool, "drones"))
+		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods), "both units are home, exactly once each")
 	})
 
 	// The INSERT is rejected (owner_ship_id violates the foreign key) *after* the

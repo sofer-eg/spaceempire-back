@@ -12,11 +12,12 @@ import (
 	"spaceempire/back/internal/sector"
 )
 
-// handleRecallDrones removes every live drone owned by the player's ship and
-// returns one drone cargo unit per recalled drone. Since TASK-152 the handler
-// owns no cargo: the deletes and the credit commit together inside the worker's
-// sector.Ordnance, so the handler only routes the command (carrying the goods id)
-// and maps the outcome — the same shape launch-drone took in TASK-147.
+// handleRecallDrones returns as many of the player's live drones to the hold as it
+// can take, one drone cargo unit each, and reports how many stayed out (TASK-156).
+// Since TASK-152 the handler owns no cargo: the deletes and the credit commit
+// together inside the worker's sector.Ordnance, so the handler only routes the
+// command (carrying the goods id) and maps the outcome — the same shape
+// launch-drone took in TASK-147.
 func (s *Server) handleRecallDrones(w http.ResponseWriter, r *http.Request) {
 	var req dto.RecallDronesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -72,6 +73,7 @@ func (s *Server) handleRecallDrones(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, dto.RecallDronesResponse{
 			OK:       true,
 			Recalled: res.Recalled,
+			Left:     res.Left,
 		})
 	case <-ctx.Done():
 		// No compensation to run: the drone DELETEs and the cargo credit commit

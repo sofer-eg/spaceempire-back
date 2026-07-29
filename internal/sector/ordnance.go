@@ -106,19 +106,25 @@ func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []
 	return ids, nil
 }
 
-// recallDrones deletes the given drone rows and credits one cargo unit per row
-// actually deleted, in ONE transaction (TASK-152). It returns the credited
-// count, which is what the player is told was recalled.
+// recallDrones deletes the drone rows the hold can pay for and credits one cargo
+// unit per row actually deleted, in ONE transaction (TASK-152/156). It returns the
+// outcome: which drones are settled (the caller clears exactly those from RAM) and
+// how many units were credited, which is what the player is told was recalled.
 //
 // Same shape as the launch helpers, and the same nil-Ordnance doctrine read
 // backwards: without an ordnance the recall is refused rather than deleting the
 // drones with nobody to pay the player back.
 //
-// The credited count can be lower than len(ids) — the DB, not RAM, is the ledger
-// here. A drone whose row is already gone deletes as a no-op inside the
-// transaction and is worth nothing: its unit was paid out once already (see
-// logRecallError for how that residue arises). Crediting it again would mint
-// consumables out of a stale RAM entry.
+// Two independent reasons the outcome can fall short of len(ids):
+//
+//   - No room. The hold is sized inside the transaction and only what fits is
+//     recalled (TASK-156); the rest keeps flying until the player frees space.
+//     Nothing is stranded permanently — a recall never refuses outright.
+//   - A row already gone. The DB, not RAM, is the ledger here: such a drone
+//     deletes as a no-op inside the transaction and is worth nothing, because its
+//     unit was paid out once already (see logRecallError for how that residue
+//     arises). Crediting it again would mint consumables out of a stale RAM entry;
+//     it is still cleared from RAM so the ghost leaves the radar.
 //
 // Ordering, and why it is this way: the caller collects the ids WITHOUT touching
 // RAM, and only removes them once this call has returned successfully. The tick
@@ -127,40 +133,41 @@ func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []
 // "commit first, then mutate RAM" free of races and, unlike the previous
 // delete-then-write order, unable to leave the drones deleted in RAM after a
 // rolled-back transaction.
-func (w *Worker) recallDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
+func (w *Worker) recallDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ids []domain.DroneID) (RecallOutcome, error) {
 	if w.ordnance == nil {
-		return 0, ErrOrdnanceUnavailable
+		return RecallOutcome{}, ErrOrdnanceUnavailable
 	}
 	if len(ids) == 0 {
 		// Nothing to delete and nothing to credit: no transaction, no round trip.
 		// Deliberately AFTER the nil gate, so a misconfigured worker answers the
 		// same way whether or not the ship has drones out — an admin poking the
 		// endpoint after a deploy is exactly who must not get a cheerful 200.
-		return 0, nil
+		return RecallOutcome{}, nil
 	}
-	var credited int
+	var out RecallOutcome
 	err := w.dbCall(context.Background(), func(ctx context.Context) error {
 		var err error
-		credited, err = w.ordnance.RecallDrones(ctx, shipHold(ship), gtype, ids)
+		out, err = w.ordnance.RecallDrones(ctx, shipHold(ship), gtype, ids)
 		return err
 	})
 	if err != nil {
 		w.logRecallError(err, ship, gtype, len(ids))
-		return 0, err
+		return RecallOutcome{}, err
 	}
-	if credited < len(ids) {
+	if out.Credited < len(out.Removed) {
 		// The one event that confirms (or refutes) a past "recall outcome in doubt"
 		// ERROR: those rows were deleted and paid for by an earlier attempt whose
 		// COMMIT landed after the deadline fired. Worth a line either way — if rows
 		// ever start vanishing for a real reason (an out-of-band DELETE, a cascade
 		// from the owning ship), players quietly lose consumables and this is the
-		// only place that would show it.
+		// only place that would show it. Gated on Removed, not on len(ids): a drone
+		// left flying for want of hold space is expected, not a lost unit.
 		w.logger.Warn("recall credited fewer units than drones removed: rows already gone",
-			"requested", len(ids), "credited", credited, "ship", int64(ship.ID),
+			"removed", len(out.Removed), "credited", out.Credited, "ship", int64(ship.ID),
 			"player", int64(ship.PlayerID), "sector", int64(ship.SectorID),
 			"goods_type", int64(gtype))
 	}
-	return credited, nil
+	return out, nil
 }
 
 // shipHold is the cargo owner a launch debits: the launching ship itself.

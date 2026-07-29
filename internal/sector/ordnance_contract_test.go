@@ -32,8 +32,8 @@ func (o miscountingOrdnance) LaunchDrones(context.Context, domain.EntityRef, dom
 	return o.ids, nil
 }
 
-func (o miscountingOrdnance) RecallDrones(_ context.Context, _ domain.EntityRef, _ domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
-	return len(ids), nil
+func (o miscountingOrdnance) RecallDrones(_ context.Context, _ domain.EntityRef, _ domain.GoodsTypeID, ids []domain.DroneID) (RecallOutcome, error) {
+	return RecallOutcome{Removed: ids, Credited: len(ids)}, nil
 }
 
 // TestUnit_LaunchDrones_IDCountContract is a white-box test of the guard in

@@ -13,6 +13,7 @@ import (
 	dronesrepo "spaceempire/back/internal/persistence/drones"
 	torpedosrepo "spaceempire/back/internal/persistence/torpedos"
 	"spaceempire/back/internal/pkg/database"
+	"spaceempire/back/internal/sector"
 )
 
 // ordnance is the sector.Ordnance implementation (TASK-147): it debits the
@@ -106,44 +107,59 @@ func (o ordnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtyp
 // ack — so a lost ack (AckTimeout is only TickInterval + 1s) deleted the drones
 // and paid nothing back.
 //
-// A row that is already gone (ErrDroneNotFound) is NOT an error and is NOT
-// credited. That is the residue of an ambiguous COMMIT-in-flight deadline: the
-// deletes and the credit landed, the worker treated the timeout as a failure and
-// kept the drones in RAM. The retry then finds no rows — crediting them again
-// would pay twice for the same drones, and failing outright would leave the ship
-// permanently unable to recall. Every other delete error rolls the whole
-// transaction back: nothing deleted, nothing credited.
+// It recalls only as many drones as the hold can take (TASK-156). The launch
+// side's "the units fitted here a moment ago" premise does not hold in this
+// direction: a drone's whole TTL can pass between launch and recall, and the ship
+// can dock, sell, buy and fill the hold in between. Crediting unconditionally let
+// a player launch drones, refill the freed space and recall — repeatably carrying
+// more than cargobay. Refusing the whole recall instead would strand the drones
+// until their TTL killed them, so the transaction credits what fits and leaves the
+// rest flying: the player frees space and recalls again (AC#1, AC#3).
 //
-// cargo.RefundIn (not cargo.AddIn) because the transaction is ours and the
-// DELETEs must ride along in it, and because the credit must not fail on a full
-// hold: refusing it would mean deleting the drones with nothing paid back, the
-// very hole this method closes. That skipped capacity check is NOT the launch
-// side's "the units fitted here a moment ago" argument — a drone's whole TTL can
-// pass between launch and recall, and the ship can dock and fill the hold in
-// between, so a recall can legitimately overfill it. Deliberate for now;
-// TASK-156 owns choosing what should happen instead (drop to a container,
-// partial credit, refuse the recall).
-func (o ordnance) RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
-	var credited int
+// A row that is already gone (ErrDroneNotFound) is NOT an error and is NOT
+// credited, but IS reported as removed. That is the residue of an ambiguous
+// COMMIT-in-flight deadline: the deletes and the credit landed, the worker treated
+// the timeout as a failure and kept the drones in RAM. The retry then finds no
+// rows — crediting them again would pay twice for the same drones, and leaving
+// them in RAM would keep a ghost on the radar forever. Every other delete error
+// rolls the whole transaction back: nothing deleted, nothing credited.
+//
+// cargo.RefundIn (not cargo.Add) because the transaction is ours and the DELETEs
+// must ride along in it. Its skipped capacity check is now sized by cargo.FitsIn
+// above it instead of being relied upon.
+func (o ordnance) RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (sector.RecallOutcome, error) {
+	var out sector.RecallOutcome
 	err := o.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		credited = 0 // see LaunchDrones: an accumulator outside the closure
+		out = sector.RecallOutcome{} // see LaunchDrones: an accumulator outside the closure
+		cargoRepo := o.cargo.WithExecutor(tx)
+
+		fits, err := cargo.FitsIn(ctx, cargoRepo, owner, gtype, int64(len(ids)))
+		if err != nil {
+			return err
+		}
+		if fits == 0 {
+			return nil
+		}
+
 		repo := o.drones.WithExecutor(tx)
-		for _, id := range ids {
+		for _, id := range ids[:fits] {
 			switch err := repo.Delete(ctx, id); {
 			case err == nil:
-				credited++
+				out.Removed = append(out.Removed, id)
+				out.Credited++
 			case errors.Is(err, dronesrepo.ErrDroneNotFound):
+				out.Removed = append(out.Removed, id)
 			default:
 				return fmt.Errorf("delete drone: %w", err)
 			}
 		}
-		if credited == 0 {
+		if out.Credited == 0 {
 			return nil
 		}
-		return cargo.RefundIn(ctx, o.cargo.WithExecutor(tx), owner, gtype, int64(credited))
+		return cargo.RefundIn(ctx, cargoRepo, owner, gtype, int64(out.Credited))
 	})
 	if err != nil {
-		return 0, err
+		return sector.RecallOutcome{}, err
 	}
-	return credited, nil
+	return out, nil
 }

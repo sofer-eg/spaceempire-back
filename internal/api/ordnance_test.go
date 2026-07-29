@@ -100,12 +100,12 @@ func (f *fakeOrdnance) LaunchDrones(_ context.Context, _ domain.EntityRef, gtype
 // RecallDrones is the launch's mirror (TASK-152): the DELETEs and the credit
 // commit together inside the worker, so the recalled units land in the same stock
 // a launch debits.
-func (f *fakeOrdnance) RecallDrones(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error) {
+func (f *fakeOrdnance) RecallDrones(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (sector.RecallOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refunds++
 	f.stock[gtype] += int64(len(ids))
-	return len(ids), nil
+	return sector.RecallOutcome{Removed: ids, Credited: len(ids)}, nil
 }
 
 // ordnanceState is a consistent read of the counters, so tests do not race the

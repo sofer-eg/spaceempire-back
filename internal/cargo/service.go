@@ -140,6 +140,55 @@ func ConsumeIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype dom
 	return nil
 }
 
+// FitsIn reports how many whole units of gtype the owner's hold can still take,
+// from inside the caller's ALREADY OPEN transaction. It is Add's capacity check
+// turned into a quantity: a caller that must not be refused, but must not overfill
+// either, sizes its credit with this and pays back only what fits (TASK-156's
+// partial drone recall).
+//
+// A weightless good (space <= 0) is unbounded by capacity, so the answer is
+// limit — the caller's own ceiling — rather than a division by zero. An
+// already-overfull hold answers 0, never a negative.
+//
+// repo must already be bound to that transaction (persistence/cargo
+// Repository.WithExecutor(tx)). Errors mirror Add's: ErrGoodsTypeNotFound,
+// ErrOwnerNotFound, ErrUnsupportedOwnerKind.
+func FitsIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype domain.GoodsTypeID, limit int64) (int64, error) {
+	gt, err := repo.GoodsType(ctx, gtype)
+	if err != nil {
+		if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
+			return 0, ErrGoodsTypeNotFound
+		}
+		return 0, err
+	}
+	if gt.Space <= 0 {
+		return limit, nil
+	}
+	capacity, err := repo.Capacity(ctx, owner)
+	if err != nil {
+		if errors.Is(err, cargorepo.ErrOwnerNotFound) {
+			return 0, ErrOwnerNotFound
+		}
+		if errors.Is(err, cargorepo.ErrUnsupportedOwnerKind) {
+			return 0, ErrUnsupportedOwnerKind
+		}
+		return 0, err
+	}
+	used, err := repo.UsedSpace(ctx, owner)
+	if err != nil {
+		return 0, err
+	}
+	fits := int64((capacity - used) / gt.Space)
+	switch {
+	case fits < 0:
+		return 0, nil
+	case fits > limit:
+		return limit, nil
+	default:
+		return fits, nil
+	}
+}
+
 // RefundIn inserts (or grows) qty units of gtype into the owner's stack from
 // inside the caller's ALREADY OPEN transaction — the mirror of ConsumeIn, for an
 // operation that must commit together with the credit. Used by the recall-drones
@@ -149,8 +198,8 @@ func ConsumeIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype dom
 //
 // It deliberately skips the capacity check that Add makes: the credit must not
 // be refusable, or the caller is left holding a deleted object it cannot pay for.
-// The consequence — a recall can overfill a hold the ship filled while its drones
-// were out — is TASK-156's to resolve.
+// Callers for whom the "it fitted a moment ago" premise does not hold size the
+// credit with FitsIn first (TASK-156) instead of asking this to refuse.
 //
 // There is no Service-level Refund wrapper: since TASK-152 every compensation
 // left in the codebase happens inside a caller's transaction, and the wrapper had

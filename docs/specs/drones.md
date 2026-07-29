@@ -156,11 +156,41 @@ Consequences:
   drain's DB budget, exactly like a launch.
 - **The credit skips the capacity check** (`cargo.RefundIn`, not `Add`):
   it must not be refusable, or the transaction would delete drones it
-  cannot pay for. Unlike the launch-side refund it replaced, this is
-  *not* covered by "the units fitted a moment ago" — a whole drone TTL
-  can pass, and the ship can dock and fill its hold meanwhile, so a
-  recall can legitimately overfill it. Known and deliberate; **TASK-156**
-  owns what should happen instead.
+  cannot pay for. Since TASK-156 the amount is *sized* before the deletes
+  instead (`cargo.FitsIn`), so nothing has to be refused — see §2.3.
+
+### 2.3 Partial recall by free hold space (TASK-156)
+
+**Invariant: a recall never takes the hold past `cargobay`, and never
+strands a drone permanently.**
+
+The launch side's "the units fitted here a moment ago" premise does not
+hold in this direction: a whole drone TTL can pass between launch and
+recall, and the ship can dock, sell, buy and fill the freed space
+meanwhile. Crediting unconditionally was an exploit — launch N drones,
+refill the freed space, recall, repeat — carrying arbitrarily more than
+`cargobay`.
+
+Policy (chosen by the owner over "refuse the whole recall" and "allow
+overflow, force-drop later"): **credit what fits, leave the rest
+flying.**
+
+- Inside the recall transaction `cargo.FitsIn(hold, 51, len(ids))`
+  answers how many whole drone units still fit (`(capacity - used) /
+  space`, clamped to `[0, len(ids)]`; a weightless good is unbounded).
+  Only that many ids are deleted and credited.
+- `sector.RecallOutcome{Removed, Credited}` reports both sides: `Removed`
+  is what the worker clears from RAM (the un-recalled drones stay in
+  `s.drones` and on the radar), `Credited` is what the player is paid.
+  `Credited < len(Removed)` still means ghost rows, and still logs the
+  WARN above.
+- A full hold recalls nothing and is **not** an error: the ack is 200 with
+  `recalled: 0, left: N`. The drone is waiting, not lost — the player
+  frees space and recalls again. That is what keeps "no state where a ship
+  can never recall its drones" true.
+- The SPA journals the outcome (`front/src/recallDrones.ts`): a partial
+  recall is a WARN line naming how many stayed out, because the button is
+  otherwise silent about it.
 
 ## 3. Persistence (immediate, unlike missiles)
 

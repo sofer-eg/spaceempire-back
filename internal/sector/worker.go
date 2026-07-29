@@ -161,9 +161,10 @@ type StaticInstaller interface {
 //
 // RecallDrones runs the same transaction backwards (TASK-152): it deletes the
 // drone rows and credits the units in one commit, so a lost ack cannot delete a
-// player's drones and pay nothing back. It returns how many units were credited
-// — one per row it actually deleted, which can be fewer than len(ids) when a row
-// is already gone (see recallDrones).
+// player's drones and pay nothing back. It recalls only what the hold can take
+// (TASK-156) and reports both sides of that: which drones it settled (the worker
+// clears exactly those from RAM) and how many units it credited, which can be
+// fewer when a row was already gone (see recallDrones).
 //
 // This is the ONLY launch path, and the only recall path. A worker without one
 // refuses every launch with ErrOrdnanceUnavailable rather than firing for free,
@@ -177,7 +178,17 @@ type Ordnance interface {
 	SpendMissile(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID) error
 	LaunchTorpedo(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, t domain.Torpedo) (domain.TorpedoID, error)
 	LaunchDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error)
-	RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (int, error)
+	RecallDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ids []domain.DroneID) (RecallOutcome, error)
+}
+
+// RecallOutcome is what one recall settled (TASK-156). Removed names the drones
+// whose rows are gone from the DB — the worker clears exactly these from RAM, and
+// leaves the rest flying. Credited counts the units actually paid back into the
+// hold: one per row that was still there, so it is Removed minus any ghost rows.
+// A hold with no room recalls nothing and returns both empty.
+type RecallOutcome struct {
+	Removed  []domain.DroneID
+	Credited int
 }
 
 // Relations is the worker's hostility oracle (phase 6.2a): ship-vs-ship

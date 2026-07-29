@@ -109,14 +109,20 @@ func TestIntegration_AuctionService_Bid_ConcurrentBidsSingleWinner(t *testing.T)
 
 	aRead := make(chan struct{})
 	bRead := make(chan struct{})
+	// Each signal fires at most once. Bid reads the lot exactly once today, but
+	// the day it grows a retry (a 40001 serialization_failure retry is the
+	// obvious candidate) the second close would panic the package binary.
+	var onceA, onceB sync.Once
 	svcA := auction.New(gatedTxRunner{inner: runner, onRead: func() {
-		close(aRead)
+		onceA.Do(func() { close(aRead) })
 		select {
 		case <-bRead:
 		case <-time.After(secondReadWindow):
 		}
 	}}, clk, nil)
-	svcB := auction.New(gatedTxRunner{inner: runner, onRead: func() { close(bRead) }}, clk, nil)
+	svcB := auction.New(gatedTxRunner{inner: runner, onRead: func() {
+		onceB.Do(func() { close(bRead) })
+	}}, clk, nil)
 
 	var (
 		wg         sync.WaitGroup
@@ -129,7 +135,20 @@ func TestIntegration_AuctionService_Bid_ConcurrentBidsSingleWinner(t *testing.T)
 	}()
 	go func() {
 		defer wg.Done()
-		<-aRead // enter only once A holds the lot inside its transaction
+		// Enter only once A holds the lot inside its transaction — but never
+		// wait forever. If A fails before reading the lot (a tightened
+		// requireDocked, a ships-schema migration that invalidates the seed),
+		// aRead is never closed; an unbounded receive would then hang until
+		// the package-wide test timeout, whose panic kills the whole binary
+		// and reddens the auction unit tests along with it, burying the real
+		// cause. Failing here names it instead.
+		select {
+		case <-aRead:
+		case <-time.After(secondReadWindow):
+			t.Errorf("the first bidder never read the lot within %s — the barrier could not arm",
+				secondReadWindow)
+			return
+		}
 		_, errB = svcB.Bid(ctx, bidderB, shipB, lot.ID, 200)
 	}()
 	wg.Wait()

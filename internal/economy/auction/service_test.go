@@ -128,6 +128,16 @@ func (s *stubRepo) snapshot() stubState {
 		stacks:    make(map[domain.EntityRef]map[domain.GoodsTypeID]int64, len(s.stacks)),
 	}
 	for id, lot := range s.lots {
+		// Deep-copy the one pointer a Lot carries. UpdateBid assigns a fresh
+		// pointer today, so a shallow copy would survive — but a method that
+		// ever wrote through the existing one (*lot.CurrentBidderID = x) would
+		// slip past restore unnoticed, and a "nothing moved after the rejected
+		// bid" test would go green over genuinely changed state: exactly the
+		// false signal this snapshot exists to remove.
+		if lot.CurrentBidderID != nil {
+			bidder := *lot.CurrentBidderID
+			lot.CurrentBidderID = &bidder
+		}
 		st.lots[id] = lot
 	}
 	for player, v := range s.cash {

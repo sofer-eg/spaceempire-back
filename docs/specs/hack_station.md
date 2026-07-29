@@ -86,7 +86,7 @@ spaceempire у торговой станции нет единственного
 ТОЛЬКО среди производимых товаров. Resale-cap `1e6` у TS при этом не меняется —
 рынок buy/sell цел, reseed не нужен.
 
-**Расчёт** (`trade.Service.Rob`, одна транзакция):
+**Расчёт** (`trade.RobIn`, внутри транзакции `app.hackRaider` — TASK-160):
 - `robbed = floor(hack_rob_fraction · stock)` (0.15),
 - `damaged = floor(hack_damage_fraction · stock)` (0.05),
 - клэмп как в SP: если `robbed+damaged > stock` → `robbed = 0`; если
@@ -97,8 +97,19 @@ spaceempire у торговой станции нет единственного
 **Лут** (faithful SP): при `Level(up_hack) >= 2` **и** есть место в трюме —
 `robbed` кладётся в трюм взломщика (`AddCargo` в той же транзакции, что и
 списание stock → атомарно; `Delivered=true`). Иначе (`Level 1` или трюм полон)
-— воркер спавнит контейнер рядом со станцией с `robbed` единицами
-(`ContainerRepo.SpawnContainer`, образец `spawnOreContainer`/mining).
+— контейнер с `robbed` единицами создаётся рядом со станцией **в той же
+транзакции** (`containers.SpawnIn`, TASK-160). Позицию, TTL и сектор выбирает
+воркер и передаёт в `sector.LootDrop`; сам он контейнер не пишет — получает
+готовый `RobResult.Container` и только добавляет его в live-набор
+(`s.addContainer`).
+
+До TASK-160 контейнер спавнился воркером **после** возврата `Rob` отдельной
+транзакцией, и товар терялся в двух случаях: успешный `Rob` с упавшим
+`SpawnContainer`, и дедлайн `RepoTimeout`, сработавший при уже летящем COMMIT
+(pgx рвёт соединение и отдаёт `DeadlineExceeded`, Postgres коммитит). Теперь оба
+случая безопасны: либо коммитятся оба факта, либо ни один. Остаточный эффект
+дедлайна — только RAM: `addContainer` не выполнился, контейнер лежит в БД
+невидимым до следующего cold-start (`LoadAll`), см. `logRobError`.
 
 **Репутация.** Штраф расе станции (только основные расы 1–5) пропорционально
 доле изъятого: `penalty = round((robbed+damaged)/basis · hack_reputation_penalty)`
@@ -154,9 +165,11 @@ app-side (`stationRobber.Rob`) из `RobOutcome.MaxStock` — `Rob` кладёт
   `AdjustStock`), НЕ сырым UPDATE.
 - Лут в трюм — через `cargo`-путь (`AddCargo` в trade-транзакции), НЕ ad-hoc
   `ship.Save` (Save пишет лишь подмножество колонок).
-- `Rob` (списание stock + депозит в трюм) — одна транзакция; штраф репутации —
-  отдельная атомарная запись после неё (как police: confiscate-tx, затем
-  standing.Adjust). Контейнер-фолбэк — RAM+DB воркера (`s.addContainer`).
+- `Rob` (списание stock + депозит в трюм + контейнер-фолбэк) — одна транзакция,
+  которой владеет `app.hackRaider` (образец `staticInstaller`/`ordnance`); штраф
+  репутации — отдельная атомарная запись после неё (как police: confiscate-tx,
+  затем standing.Adjust). Воркер получает созданный контейнер и добавляет его
+  только в RAM.
 - Интеграционный round-trip (`TestIntegration_*`) подтверждает, что списанный
   stock и лут в трюме переживают cold-start (они в БД).
 

@@ -312,100 +312,114 @@ type RobOutcome struct {
 	MaxStock  int64
 }
 
-// Rob executes the market side of a station hack (SP UseHack, ЧТЗ FR-D3/D4). It
-// targets the station's richest good (highest stock; tie-break lowest goods
-// type), gates on that good holding >= minFrac of its max_stock (else
-// ErrTooLittleGoods), then in one transaction removes robFrac+damageFrac of its
-// stock and — when depositToHold and the hold has room — adds the robbed units
-// to the hacker ship's hold. The clamp mirrors the SP: if robbed+damaged would
-// exceed the stock, robbed is dropped to 0 (only the damage lands). Reputation
-// is applied by the caller (racestanding), outside this transaction.
+// Rob executes the market side of a station hack (SP UseHack, ЧТЗ FR-D3/D4) in
+// its own transaction. See RobIn for the semantics; this wrapper exists for
+// callers that raid nothing else in the same commit.
 func (s *Service) Rob(ctx context.Context, station, hackerShip domain.EntityRef, robFrac, damageFrac, minFrac float64, depositToHold bool) (RobOutcome, error) {
-	if !isStationKind(station.Kind) {
-		return RobOutcome{}, ErrInvalidStationKind
-	}
 	var out RobOutcome
 	err := s.tx.Do(ctx, func(ctx context.Context, txRepo Repo) error {
-		entries, err := txRepo.ListMarket(ctx, station)
-		if err != nil {
-			if errors.Is(err, traderepo.ErrUnsupportedStationKind) {
-				return ErrInvalidStationKind
-			}
-			return err
-		}
-
-		// prodRef is the production reference cap (max max_stock over owner_kind
-		// 2) per good, the hack basis for a trade station whose own max_stock is a
-		// 1e6 resale cap (migration 0044). Only trade stations consult it —
-		// production stations and pirbases keep their own max_stock as basis, so
-		// their behaviour is unchanged (TASK-128).
-		var prodRef map[domain.GoodsTypeID]int64
-		if station.Kind == domain.EntityKindTradeStation {
-			prodRef, err = txRepo.ProductionRefMaxes(ctx)
-			if err != nil {
-				return fmt.Errorf("production ref maxes: %w", err)
-			}
-		}
-
-		target, basis, ok := richestRobbable(entries, station.Kind, prodRef)
-		if !ok || basis <= 0 ||
-			float64(target.Stock) < minFrac*float64(basis) {
-			return ErrTooLittleGoods
-		}
-
-		robbed := int64(robFrac * float64(target.Stock))
-		damaged := int64(damageFrac * float64(target.Stock))
-		if robbed+damaged > target.Stock {
-			robbed = 0
-		}
-		if damaged > target.Stock {
-			damaged = 0
-		}
-
-		if total := robbed + damaged; total > 0 {
-			if _, err := txRepo.AdjustStock(ctx, station, target.GoodsType, -total); err != nil {
-				return fmt.Errorf("rob adjust stock: %w", err)
-			}
-		}
-
-		delivered := false
-		if depositToHold && robbed > 0 {
-			gt, err := txRepo.GoodsType(ctx, target.GoodsType)
-			if err != nil {
-				if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
-					return ErrGoodsTypeNotFound
-				}
-				return err
-			}
-			capacity, err := txRepo.Capacity(ctx, hackerShip)
-			if err != nil {
-				return fmt.Errorf("hacker capacity: %w", err)
-			}
-			used, err := txRepo.UsedSpace(ctx, hackerShip)
-			if err != nil {
-				return fmt.Errorf("hacker used space: %w", err)
-			}
-			if used+float64(robbed)*gt.Space <= capacity {
-				if err := txRepo.AddCargo(ctx, hackerShip, target.GoodsType, robbed); err != nil {
-					return fmt.Errorf("deposit loot: %w", err)
-				}
-				delivered = true
-			}
-		}
-
-		out = RobOutcome{
-			GoodsType: target.GoodsType,
-			Robbed:    robbed,
-			Damaged:   damaged,
-			Delivered: delivered,
-			MaxStock:  basis,
-		}
-		return nil
+		var err error
+		out, err = RobIn(ctx, txRepo, station, hackerShip, robFrac, damageFrac, minFrac, depositToHold)
+		return err
 	})
 	if err != nil {
 		return RobOutcome{}, err
 	}
 	return out, nil
+}
+
+// RobIn is Rob's body without the transaction: it targets the station's richest
+// good (highest stock; tie-break lowest goods type), gates on that good holding
+// >= minFrac of its max_stock (else ErrTooLittleGoods), removes
+// robFrac+damageFrac of its stock and — when depositToHold and the hold has
+// room — adds the robbed units to the hacker ship's hold. The clamp mirrors the
+// SP: if robbed+damaged would exceed the stock, robbed is dropped to 0 (only the
+// damage lands). Reputation is applied by the caller (racestanding), outside the
+// transaction.
+//
+// It takes a Repo instead of opening one, like cargo.ConsumeIn, so a caller that
+// must land another write in the SAME commit can own the transaction. That is
+// what the loot container needs (TASK-160): stock leaving the shelf and the
+// container that carries it away are one commit or neither.
+func RobIn(ctx context.Context, repo Repo, station, hackerShip domain.EntityRef, robFrac, damageFrac, minFrac float64, depositToHold bool) (RobOutcome, error) {
+	if !isStationKind(station.Kind) {
+		return RobOutcome{}, ErrInvalidStationKind
+	}
+
+	entries, err := repo.ListMarket(ctx, station)
+	if err != nil {
+		if errors.Is(err, traderepo.ErrUnsupportedStationKind) {
+			return RobOutcome{}, ErrInvalidStationKind
+		}
+		return RobOutcome{}, err
+	}
+
+	// prodRef is the production reference cap (max max_stock over owner_kind
+	// 2) per good, the hack basis for a trade station whose own max_stock is a
+	// 1e6 resale cap (migration 0044). Only trade stations consult it —
+	// production stations and pirbases keep their own max_stock as basis, so
+	// their behaviour is unchanged (TASK-128).
+	var prodRef map[domain.GoodsTypeID]int64
+	if station.Kind == domain.EntityKindTradeStation {
+		prodRef, err = repo.ProductionRefMaxes(ctx)
+		if err != nil {
+			return RobOutcome{}, fmt.Errorf("production ref maxes: %w", err)
+		}
+	}
+
+	target, basis, ok := richestRobbable(entries, station.Kind, prodRef)
+	if !ok || basis <= 0 ||
+		float64(target.Stock) < minFrac*float64(basis) {
+		return RobOutcome{}, ErrTooLittleGoods
+	}
+
+	robbed := int64(robFrac * float64(target.Stock))
+	damaged := int64(damageFrac * float64(target.Stock))
+	if robbed+damaged > target.Stock {
+		robbed = 0
+	}
+	if damaged > target.Stock {
+		damaged = 0
+	}
+
+	if total := robbed + damaged; total > 0 {
+		if _, err := repo.AdjustStock(ctx, station, target.GoodsType, -total); err != nil {
+			return RobOutcome{}, fmt.Errorf("rob adjust stock: %w", err)
+		}
+	}
+
+	delivered := false
+	if depositToHold && robbed > 0 {
+		gt, err := repo.GoodsType(ctx, target.GoodsType)
+		if err != nil {
+			if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
+				return RobOutcome{}, ErrGoodsTypeNotFound
+			}
+			return RobOutcome{}, err
+		}
+		capacity, err := repo.Capacity(ctx, hackerShip)
+		if err != nil {
+			return RobOutcome{}, fmt.Errorf("hacker capacity: %w", err)
+		}
+		used, err := repo.UsedSpace(ctx, hackerShip)
+		if err != nil {
+			return RobOutcome{}, fmt.Errorf("hacker used space: %w", err)
+		}
+		if used+float64(robbed)*gt.Space <= capacity {
+			if err := repo.AddCargo(ctx, hackerShip, target.GoodsType, robbed); err != nil {
+				return RobOutcome{}, fmt.Errorf("deposit loot: %w", err)
+			}
+			delivered = true
+		}
+	}
+
+	return RobOutcome{
+		GoodsType: target.GoodsType,
+		Robbed:    robbed,
+		Damaged:   damaged,
+		Delivered: delivered,
+		MaxStock:  basis,
+	}, nil
 }
 
 // hackBasis returns the gate/penalty denominator for one market entry and

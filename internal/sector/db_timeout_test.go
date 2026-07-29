@@ -227,15 +227,25 @@ func (l *stallLogistics) Haul(ctx context.Context, _, _ domain.EntityRef, _ doma
 	return nil
 }
 
-// stallRobber is a sector.StationRobber whose Rob honours dbStall.
+// stallRobber is a sector.StationRobber whose Rob honours dbStall. With
+// commitOnStall set it models the deadline-with-COMMIT-in-flight outcome: the raid
+// landed in the DB — stock deducted AND, since TASK-160, the loot container
+// created in the same transaction — while pgx reported the context error, so the
+// worker learns nothing about the container it should have published.
 type stallRobber struct {
 	dbStall
-	robbed int64
+	robbed        int64
+	commitOnStall bool
+	committedLoot int
 }
 
 func (s *stallRobber) Rob(ctx context.Context, _ domain.EntityRef, _ domain.RaceID,
-	_ domain.PlayerID, _ domain.EntityRef, _ bool) (sector.RobResult, error) {
+	_ domain.PlayerID, _ domain.EntityRef, _ bool, _ sector.LootDrop) (sector.RobResult, error) {
 	if err := s.enter(ctx); err != nil {
+		if s.commitOnStall {
+			s.robbed += 10
+			s.committedLoot++
+		}
 		return sector.RobResult{}, err
 	}
 	s.robbed += 10
@@ -408,6 +418,55 @@ func TestUnit_HackStation_HungDBChargesNothingAndDropsNoLoot(t *testing.T) {
 	assert.Zero(t, res.Robbed)
 	assert.EqualValues(t, 500, liveShip(t, w, 1).Energy, "an unconfirmed hack is free")
 	assert.Zero(t, containers.spawns, "no loot container for loot that may never have been taken")
+	assert.Empty(t, w.Snapshot(testSector).Containers)
+	noViolations(t, &rob.dbStall)
+}
+
+// TestUnit_HackStation_DeadlineOnCommittedTxKeepsLootInTheDB is the TASK-160 proof
+// for the ordering that used to destroy goods: the raid's COMMIT lands after the
+// deadline fires, so the worker is told DeadlineExceeded about a hack that really
+// happened.
+//
+// Before TASK-160 the loot container was a SECOND transaction the worker opened
+// after Rob returned, so this outcome deducted the station's stock and created
+// nothing — the goods left the game. Now the container is part of the raid's own
+// commit: it exists, holds the loot, and a cold start's LoadAll puts it back on
+// the radar. What the worker loses is only the RAM side (addContainer never ran),
+// and the hacker pays no energy for an outcome it was told failed.
+func TestUnit_HackStation_DeadlineOnCommittedTxKeepsLootInTheDB(t *testing.T) {
+	t.Parallel()
+	rob := &stallRobber{commitOnStall: true}
+	rob.hung = true
+	containers := newStallContainerRepo()
+
+	ship := domain.Ship{
+		ID: 1, PlayerID: 100, SectorID: testSector, Energy: 500, MaxEnergy: 500,
+		Equipment: []domain.InstalledEquipment{{EquipmentID: 122, Type: "up_hack", Level: 1}},
+	}
+	station := domain.TradeStation{ID: 3, SectorID: testSector, Pos: domain.Vec2{X: 10}, Race: 1, Built: true}
+	w := sector.NewWorker(0, stallCfg(), clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {ship}},
+		sector.WithStationRobber(rob),
+		sector.WithContainers(containers, nil),
+		sector.WithStatics(map[domain.SectorID]domain.SectorStatics{
+			testSector: {TradeStations: []domain.TradeStation{station}},
+		}))
+
+	reply := make(chan sector.HackResult, 1)
+	require.NoError(t, w.Send(testSector, sector.HackStationCommand{
+		PlayerID: 100, ShipID: 1,
+		Target:     domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: 3},
+		EnergyCost: 60, Reply: reply,
+	}))
+	tickWithin(t, w)
+
+	require.ErrorIs(t, (<-reply).Err, context.DeadlineExceeded)
+	assert.Equal(t, 1, rob.committedLoot,
+		"the loot container rode the same commit as the stock deduction: the goods are not lost")
+	assert.Empty(t, w.Snapshot(testSector).Containers,
+		"the worker cannot publish a container it was never told about — it surfaces at the next cold start")
+	assert.EqualValues(t, 500, liveShip(t, w, 1).Energy, "an unconfirmed hack is free")
+	assert.Zero(t, containers.spawns, "the worker opens no second transaction of its own")
 	noViolations(t, &rob.dbStall)
 }
 

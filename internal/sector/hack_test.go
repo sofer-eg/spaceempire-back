@@ -26,16 +26,19 @@ type fakeRobber struct {
 	gotHacker  domain.PlayerID
 	gotShip    domain.EntityRef
 	gotDeposit bool
+	gotLoot    sector.LootDrop
 }
 
 func (f *fakeRobber) Rob(_ context.Context, station domain.EntityRef, race domain.RaceID,
-	hacker domain.PlayerID, ship domain.EntityRef, deposit bool) (sector.RobResult, error) {
+	hacker domain.PlayerID, ship domain.EntityRef, deposit bool,
+	loot sector.LootDrop) (sector.RobResult, error) {
 	f.called = true
 	f.gotStation = station
 	f.gotRace = race
 	f.gotHacker = hacker
 	f.gotShip = ship
 	f.gotDeposit = deposit
+	f.gotLoot = loot
 	return f.result, f.err
 }
 
@@ -228,6 +231,7 @@ func TestUnit_Hack_Success_Level1_Container_Energy_Reveal_Event(t *testing.T) {
 	t.Parallel()
 	robber := &fakeRobber{result: sector.RobResult{
 		GoodsType: hackGoodType, Robbed: 150, Damaged: 50, Delivered: false,
+		Container: &domain.Container{ID: 55, SectorID: testSector, Pos: domain.Vec2{X: 10, Y: 0}},
 	}}
 	fcr := &fakeContainerRepo{}
 	b := &fakeBus{}
@@ -250,9 +254,14 @@ func TestUnit_Hack_Success_Level1_Container_Energy_Reveal_Event(t *testing.T) {
 	assert.Equal(t, 400, got.Energy, "action energy debited (500-100)")
 	assert.True(t, got.MissileJustFired, "cloaked hacker revealed for this tick")
 
-	require.Len(t, fcr.spawned, 1, "robbed goods dropped as one container")
-	assert.Equal(t, hackGoodType, fcr.spawned[0].GoodsType)
-	assert.Equal(t, int64(150), fcr.spawned[0].Quantity)
+	// TASK-160: the container rode the rob's transaction, so the worker only adds
+	// it to the live set — it must not write one of its own.
+	containers := w.Snapshot(testSector).Containers
+	require.Len(t, containers, 1, "the loot container is live in the sector")
+	assert.Equal(t, domain.ContainerID(55), containers[0].ID)
+	assert.Empty(t, fcr.spawned, "the worker no longer spawns the loot container itself")
+	assert.Equal(t, testSector, robber.gotLoot.SectorID, "the worker chose where the loot lands")
+	assert.False(t, robber.gotLoot.ExpiresAt.IsZero(), "the drop carries the container TTL")
 
 	ev := hackedEvent(t, b)
 	require.NotNil(t, ev, "hacker got a journal event")
@@ -267,6 +276,7 @@ func TestUnit_Hack_ProductionStation_Success(t *testing.T) {
 	t.Parallel()
 	robber := &fakeRobber{result: sector.RobResult{
 		GoodsType: hackGoodType, Robbed: 705, Damaged: 235, Delivered: false,
+		Container: &domain.Container{ID: 56, SectorID: testSector, Pos: domain.Vec2{X: 10, Y: 0}},
 	}}
 	fcr := &fakeContainerRepo{}
 	b := &fakeBus{}
@@ -283,8 +293,8 @@ func TestUnit_Hack_ProductionStation_Success(t *testing.T) {
 	assert.Equal(t, prodStationRef(hackStatID), robber.gotStation, "production station targeted")
 	assert.Equal(t, domain.RaceID(1), robber.gotRace, "factory race drives the penalty")
 
-	require.Len(t, fcr.spawned, 1)
-	assert.Equal(t, int64(705), fcr.spawned[0].Quantity)
+	require.Len(t, w.Snapshot(testSector).Containers, 1, "the loot container is live in the sector")
+	assert.Empty(t, fcr.spawned, "the worker no longer spawns the loot container itself")
 
 	ev := hackedEvent(t, b)
 	require.NotNil(t, ev)
@@ -308,7 +318,8 @@ func TestUnit_Hack_Success_Level2_Delivered_NoContainer(t *testing.T) {
 	res := sendHack(t, w, tradeStationRef(hackStatID))
 	require.NoError(t, res.Err)
 	assert.True(t, robber.gotDeposit, "up_hack level 2 deposits to the hold")
-	assert.Empty(t, fcr.spawned, "loot delivered to the hold → no container")
+	assert.Empty(t, w.Snapshot(testSector).Containers, "loot delivered to the hold → no container")
+	assert.Empty(t, fcr.spawned)
 
 	ev := hackedEvent(t, b)
 	require.NotNil(t, ev)
@@ -333,7 +344,8 @@ func TestUnit_Hack_Robbed0_Unsuccessful_NoContainer(t *testing.T) {
 	res := sendHack(t, w, tradeStationRef(hackStatID))
 	require.NoError(t, res.Err)
 	assert.Equal(t, int64(0), res.Robbed)
-	assert.Empty(t, fcr.spawned, "nothing stolen → no loot container")
+	assert.Empty(t, w.Snapshot(testSector).Containers, "nothing stolen → no loot container")
+	assert.Empty(t, fcr.spawned)
 	assert.Equal(t, 400, snapByID(w)[hackShipID].Energy, "energy still spent on the attempt")
 
 	ev := hackedEvent(t, b)

@@ -12,22 +12,32 @@ import (
 	"spaceempire/back/internal/trade"
 )
 
-// fakeHackMarket is a stub trade.Service.Rob for robber tests.
+// fakeHackMarket is a stub hackRaider.Rob for robber tests.
 type fakeHackMarket struct {
 	out        trade.RobOutcome
+	container  *domain.Container
 	err        error
 	calls      int
 	gotStation domain.EntityRef
 	gotShip    domain.EntityRef
 	gotDeposit bool
+	gotLoot    sector.LootDrop
 }
 
-func (f *fakeHackMarket) Rob(_ context.Context, station, ship domain.EntityRef, _, _, _ float64, deposit bool) (trade.RobOutcome, error) {
+func (f *fakeHackMarket) Rob(_ context.Context, station, ship domain.EntityRef, _, _, _ float64, deposit bool,
+	loot sector.LootDrop,
+) (trade.RobOutcome, *domain.Container, error) {
 	f.calls++
 	f.gotStation = station
 	f.gotShip = ship
 	f.gotDeposit = deposit
-	return f.out, f.err
+	f.gotLoot = loot
+	return f.out, f.container, f.err
+}
+
+// testLoot is the drop the worker would hand the robber.
+func testLoot() sector.LootDrop {
+	return sector.LootDrop{SectorID: 1, Pos: domain.Vec2{X: 10, Y: 20}}
 }
 
 func hackCfg() HackConfig {
@@ -47,7 +57,7 @@ func TestUnit_StationRobber_AppliesProportionalStandingPenalty(t *testing.T) {
 
 	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
 	station := domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: 3}
-	res, err := r.Rob(context.Background(), station, 1, 100, ship, true)
+	res, err := r.Rob(context.Background(), station, 1, 100, ship, true, testLoot())
 	require.NoError(t, err)
 
 	assert.Equal(t, sector.RobResult{GoodsType: 2, Robbed: 150, Damaged: 50, Delivered: true}, res)
@@ -71,7 +81,7 @@ func TestUnit_StationRobber_ProductionStation_PenaltyNonZero(t *testing.T) {
 	// Production station (owner_kind 2), Argon race 1.
 	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 2}
 	_, err := r.Rob(context.Background(), station, 1, 100,
-		domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}, false)
+		domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}, false, testLoot())
 	require.NoError(t, err)
 	require.Len(t, standing.adjusts, 1, "a real haul drops standing")
 	assert.Equal(t, adjust{player: 100, race: 1, delta: -5}, standing.adjusts[0])
@@ -86,7 +96,7 @@ func TestUnit_StationRobber_TooLittleGoods_MapsSentinel(t *testing.T) {
 	r := stationRobber{market: market, standing: standing, cfg: hackCfg(), npc: 99}
 
 	_, err := r.Rob(context.Background(), domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: 3},
-		1, 100, domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}, true)
+		1, 100, domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}, true, testLoot())
 	assert.ErrorIs(t, err, sector.ErrHackTooLittleGoods)
 	assert.Empty(t, standing.adjusts)
 }
@@ -104,7 +114,7 @@ func TestUnit_StationRobber_ZeroPenalty_NoStandingChange(t *testing.T) {
 	r := stationRobber{market: market, standing: standing, cfg: hackCfg(), npc: 99}
 
 	_, err := r.Rob(context.Background(), domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: 3},
-		1, 100, domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}, false)
+		1, 100, domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}, false, testLoot())
 	require.NoError(t, err)
 	assert.Empty(t, standing.adjusts, "sub-unit fraction rounds to no penalty")
 }
@@ -120,7 +130,7 @@ func TestUnit_StationRobber_SkipsNPCAndNonMainRace(t *testing.T) {
 	market := &fakeHackMarket{out: out}
 	standing := newFakeStanding(-10)
 	r := stationRobber{market: market, standing: standing, cfg: hackCfg(), npc: 99}
-	_, err := r.Rob(context.Background(), station, 1, 99, ship, false)
+	_, err := r.Rob(context.Background(), station, 1, 99, ship, false, testLoot())
 	require.NoError(t, err)
 	assert.Empty(t, standing.adjusts, "NPC hacker carries no standing")
 
@@ -128,10 +138,33 @@ func TestUnit_StationRobber_SkipsNPCAndNonMainRace(t *testing.T) {
 	market2 := &fakeHackMarket{out: out}
 	standing2 := newFakeStanding(-10)
 	r2 := stationRobber{market: market2, standing: standing2, cfg: hackCfg(), npc: 99}
-	_, err = r2.Rob(context.Background(), station, 7, 100, ship, false)
+	_, err = r2.Rob(context.Background(), station, 7, 100, ship, false, testLoot())
 	require.NoError(t, err)
 	assert.Empty(t, standing2.adjusts, "non-main race carries no per-player standing")
 }
 
+// TASK-160: the worker's drop reaches the raid, and the loot container the raid
+// created inside its own transaction is handed back for the worker to publish —
+// the robber never spawns one itself.
+func TestUnit_StationRobber_ForwardsLootDropAndContainer(t *testing.T) {
+	t.Parallel()
+	created := domain.Container{ID: 42, SectorID: 1, Pos: domain.Vec2{X: 10, Y: 20}}
+	market := &fakeHackMarket{
+		out:       trade.RobOutcome{GoodsType: 2, Robbed: 150, Damaged: 50, MaxStock: 1000},
+		container: &created,
+	}
+	r := stationRobber{market: market, standing: newFakeStanding(-10), cfg: hackCfg(), npc: 99}
+
+	res, err := r.Rob(context.Background(), domain.EntityRef{Kind: domain.EntityKindStation, ID: 2},
+		1, 100, domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}, false, testLoot())
+	require.NoError(t, err)
+	assert.Equal(t, testLoot(), market.gotLoot, "the worker picks where the loot lands")
+	require.NotNil(t, res.Container, "the container created in the rob transaction is reported")
+	assert.Equal(t, created, *res.Container)
+}
+
 // guard: the app robber satisfies the sector port.
 var _ sector.StationRobber = stationRobber{}
+
+// guard: the transactional raider satisfies the robber's market seam.
+var _ hackMarket = hackRaider{}

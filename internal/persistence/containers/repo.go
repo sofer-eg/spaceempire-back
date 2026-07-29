@@ -174,29 +174,39 @@ func (r *Repository) RecordKill(ctx context.Context, victim domain.ShipID, secto
 func (r *Repository) SpawnContainer(ctx context.Context, sectorID domain.SectorID, drop domain.ContainerDrop) (domain.Container, error) {
 	var created domain.Container
 	err := r.tm.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var id int64
-		if err := tx.QueryRow(ctx, insertContainerSQL,
-			int64(sectorID), drop.Pos.X, drop.Pos.Y, drop.ExpiresAt,
-		).Scan(&id); err != nil {
-			return fmt.Errorf("insert container: %w", err)
-		}
-		if _, err := tx.Exec(ctx, insertCargoSQL,
-			int16(domain.EntityKindContainer), id, int32(drop.GoodsType), drop.Quantity,
-		); err != nil {
-			return fmt.Errorf("insert container cargo: %w", err)
-		}
-		created = domain.Container{
-			ID:        domain.ContainerID(id),
-			SectorID:  sectorID,
-			Pos:       drop.Pos,
-			ExpiresAt: drop.ExpiresAt,
-		}
-		return nil
+		var err error
+		created, err = SpawnIn(ctx, tx, sectorID, drop)
+		return err
 	})
 	if err != nil {
 		return domain.Container{}, err
 	}
 	return created, nil
+}
+
+// SpawnIn is SpawnContainer's two inserts without the transaction, for a caller
+// that already owns one and needs the container to share its commit — the
+// station hack, whose loot must not leave the station's shelf unless the
+// container that carries it is created too (TASK-160). Same shape as
+// cargo.ConsumeIn.
+func SpawnIn(ctx context.Context, exec database.Executor, sectorID domain.SectorID, drop domain.ContainerDrop) (domain.Container, error) {
+	var id int64
+	if err := exec.QueryRow(ctx, insertContainerSQL,
+		int64(sectorID), drop.Pos.X, drop.Pos.Y, drop.ExpiresAt,
+	).Scan(&id); err != nil {
+		return domain.Container{}, fmt.Errorf("insert container: %w", err)
+	}
+	if _, err := exec.Exec(ctx, insertCargoSQL,
+		int16(domain.EntityKindContainer), id, int32(drop.GoodsType), drop.Quantity,
+	); err != nil {
+		return domain.Container{}, fmt.Errorf("insert container cargo: %w", err)
+	}
+	return domain.Container{
+		ID:        domain.ContainerID(id),
+		SectorID:  sectorID,
+		Pos:       drop.Pos,
+		ExpiresAt: drop.ExpiresAt,
+	}, nil
 }
 
 const (

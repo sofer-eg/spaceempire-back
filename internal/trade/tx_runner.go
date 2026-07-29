@@ -28,7 +28,10 @@ func NewPoolRepo(trade *traderepo.Repository, players *playersrepo.Repository, c
 	return &PoolRepo{trade: trade, players: players, cargo: cargo}
 }
 
-func (r *PoolRepo) withExecutor(exec database.Executor) *PoolRepo {
+// WithExecutor returns a PoolRepo bound to exec — a transaction the caller owns
+// (TASK-160: the station hack commits its loot container in the same one) or the
+// pgx.Tx RepoTxRunner opens for Buy/Sell.
+func (r *PoolRepo) WithExecutor(exec database.Executor) *PoolRepo {
 	return &PoolRepo{
 		trade:   r.trade.WithExecutor(exec),
 		players: r.players.WithExecutor(exec),
@@ -120,6 +123,6 @@ func NewRepoTxRunner(tm *database.TxManager, base *PoolRepo) *RepoTxRunner {
 // Do implements TxRunner.
 func (r *RepoTxRunner) Do(ctx context.Context, fn func(ctx context.Context, txRepo Repo) error) error {
 	return r.tm.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, r.base.withExecutor(tx))
+		return fn(ctx, r.base.WithExecutor(tx))
 	})
 }

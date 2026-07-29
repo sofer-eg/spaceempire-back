@@ -10,10 +10,13 @@ import (
 	"spaceempire/back/internal/trade"
 )
 
-// hackMarket is the slice of trade.Service the station robber needs (ISP):
-// the one-transaction market raid. *trade.Service satisfies it.
+// hackMarket is the raid the station robber needs (ISP): one transaction that
+// deducts the stock, deposits the loot into the hold or creates the loot
+// container, and reports which happened. hackRaider satisfies it (TASK-160).
 type hackMarket interface {
-	Rob(ctx context.Context, station, hackerShip domain.EntityRef, robFrac, damageFrac, minFrac float64, depositToHold bool) (trade.RobOutcome, error)
+	Rob(ctx context.Context, station, hackerShip domain.EntityRef,
+		robFrac, damageFrac, minFrac float64, depositToHold bool,
+		loot sector.LootDrop) (trade.RobOutcome, *domain.Container, error)
 }
 
 // HackConfig is the SP UseHack tuning the robber needs, sourced from
@@ -42,9 +45,9 @@ type stationRobber struct {
 // station's race proportionally to the fraction taken. ErrTooLittleGoods maps to
 // sector.ErrHackTooLittleGoods (a clean reject the worker turns into 422 without
 // spending energy).
-func (r stationRobber) Rob(ctx context.Context, station domain.EntityRef, stationRace domain.RaceID, hacker domain.PlayerID, hackerShip domain.EntityRef, depositToHold bool) (sector.RobResult, error) {
-	out, err := r.market.Rob(ctx, station, hackerShip,
-		r.cfg.RobFraction, r.cfg.DamageFraction, r.cfg.GoodsMinFraction, depositToHold)
+func (r stationRobber) Rob(ctx context.Context, station domain.EntityRef, stationRace domain.RaceID, hacker domain.PlayerID, hackerShip domain.EntityRef, depositToHold bool, loot sector.LootDrop) (sector.RobResult, error) {
+	out, container, err := r.market.Rob(ctx, station, hackerShip,
+		r.cfg.RobFraction, r.cfg.DamageFraction, r.cfg.GoodsMinFraction, depositToHold, loot)
 	if err != nil {
 		if errors.Is(err, trade.ErrTooLittleGoods) {
 			return sector.RobResult{}, sector.ErrHackTooLittleGoods
@@ -70,5 +73,6 @@ func (r stationRobber) Rob(ctx context.Context, station domain.EntityRef, statio
 		Robbed:    out.Robbed,
 		Damaged:   out.Damaged,
 		Delivered: out.Delivered,
+		Container: container,
 	}, nil
 }

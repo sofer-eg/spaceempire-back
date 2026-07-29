@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"spaceempire/back/internal/domain"
 )
@@ -28,27 +29,42 @@ var (
 
 // StationRobber runs the market + reputation side of a station hack
 // (TASK-100.3.9.3, SP UseHack). It robs the station's richest good (deduct
-// stock, deposit loot into the hacker's hold in one transaction) and drops the
-// hacker's standing with the station's race proportionally to the fraction
-// taken. Returns what was taken so the worker drops a loot container when the
-// hold could not take it, and journals the outcome. Injected via
-// WithStationRobber; nil disables the effect (pure unit tests). The real
-// implementation lives in app/ over trade.Service + racestanding, keeping the
-// sector package free of trade/standing deps — the same split as PoliceScanner.
+// stock, deposit the loot into the hacker's hold, or create the loot container
+// when the hold cannot take it — all in one transaction) and drops the hacker's
+// standing with the station's race proportionally to the fraction taken. Returns
+// what was taken so the worker can add the container to the live set and journal
+// the outcome. Injected via WithStationRobber; nil disables the effect (pure unit
+// tests). The real implementation lives in app/ over trade + containers +
+// racestanding, keeping the sector package free of those deps — the same split as
+// PoliceScanner.
 type StationRobber interface {
 	Rob(ctx context.Context, station domain.EntityRef, stationRace domain.RaceID,
-		hacker domain.PlayerID, hackerShip domain.EntityRef, depositToHold bool) (RobResult, error)
+		hacker domain.PlayerID, hackerShip domain.EntityRef, depositToHold bool,
+		loot LootDrop) (RobResult, error)
 }
 
-// RobResult reports the loot outcome of a hack for the worker to finish (drop a
-// container, journal). Robbed is the loot amount, Damaged the destroyed amount.
-// Delivered is true when Robbed was already added to the hold (level >= 2 with
-// room); false means the worker must drop a container with Robbed units.
+// LootDrop is where the robber must put the loot container when the hold does not
+// take the goods. The worker owns these values (its sector, a position off the
+// station's centre, its container TTL) but not the write: the container INSERT
+// rides the rob's transaction (TASK-160), so the robber needs them up front.
+type LootDrop struct {
+	SectorID  domain.SectorID
+	Pos       domain.Vec2
+	ExpiresAt time.Time
+}
+
+// RobResult reports the loot outcome of a hack for the worker to finish (add the
+// container to the live set, journal). Robbed is the loot amount, Damaged the
+// destroyed amount. Delivered is true when Robbed went to the hold (level >= 2
+// with room). Container is non-nil when the robber created a loot container
+// instead, in the same transaction as the stock deduction — the worker only has
+// to add it to RAM.
 type RobResult struct {
 	GoodsType domain.GoodsTypeID
 	Robbed    int64
 	Damaged   int64
 	Delivered bool
+	Container *domain.Container
 }
 
 // WithStationRobber wires the station-hack executor (TASK-100.3.9.3). Nil
@@ -156,14 +172,19 @@ func (c HackStationCommand) apply(w *Worker, s *sectorState) {
 	depositToHold := shipEquipmentLevel(ship, hackModuleType) >= 2
 	shipRef := domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(ship.ID)}
 	// Commit first, mutate RAM after (TASK-152's ordering, TASK-148's deadline):
-	// the stock deduction, the hold deposit and the standing drop are one
-	// transaction, and the energy debit / container drop / journal below only run
-	// once it has landed.
+	// the stock deduction, the hold deposit / loot container and the standing drop
+	// are one transaction, and the energy debit / journal below only run once it
+	// has landed.
+	loot := LootDrop{
+		SectorID:  s.sectorID,
+		Pos:       containerDropPos(station.pos, 1, 2), // off-centre so it is not on the station
+		ExpiresAt: w.clock.Now().Add(w.cfg.ContainerTTL),
+	}
 	var rob RobResult
 	err := w.dbCall(context.Background(), func(ctx context.Context) error {
 		var err error
 		rob, err = w.robber.Rob(ctx, c.Target, domain.RaceID(station.race),
-			c.PlayerID, shipRef, depositToHold)
+			c.PlayerID, shipRef, depositToHold, loot)
 		return err
 	})
 	if err != nil {
@@ -179,7 +200,7 @@ func (c HackStationCommand) apply(w *Worker, s *sectorState) {
 
 	// The hack committed: spend the action energy, reveal the hacker for this
 	// tick (up_hide off, TASK-106 — same transient path as a missile launch), and
-	// drop a loot container when the hold did not take the goods.
+	// publish the loot container the robber created in the same transaction.
 	if c.EnergyCost > 0 {
 		ship.Energy -= c.EnergyCost
 		s.markDirty(c.ShipID)
@@ -187,8 +208,8 @@ func (c HackStationCommand) apply(w *Worker, s *sectorState) {
 	if ship.IsHidden {
 		ship.MissileJustFired = true // reveal for this tick's snapshot (phase 10.20a)
 	}
-	if rob.Robbed > 0 && !rob.Delivered {
-		w.spawnHackContainer(context.Background(), s, station.pos, rob.GoodsType, rob.Robbed)
+	if rob.Container != nil {
+		s.addContainer(rob.Container)
 	}
 	w.publishStationHacked(context.Background(), s, StationHackedEvent{
 		PlayerID:  c.PlayerID,
@@ -204,22 +225,21 @@ func (c HackStationCommand) apply(w *Worker, s *sectorState) {
 }
 
 // logRobError records a failed station raid (TASK-148). The rob is one
-// transaction — stock down, loot into the hold (level 2), standing down — so a
-// clean failure leaves the station and the hacker exactly as they were: WARN,
-// the player has the reason on the ack.
+// transaction — stock down, loot into the hold (level 2) or into a freshly
+// created container (level 1), standing down — so a clean failure leaves the
+// station and the hacker exactly as they were: the player has the reason on the
+// ack.
 //
-// A deadline is the one outcome that can cost goods, and unlike Pickup/Haul the
-// ordering cannot fix it: the loot's destination for a level-1 hack is a
-// container this worker spawns AFTER the rob returns, so a COMMIT that lands
-// after the deadline fired takes the goods off the station's shelf with nothing
-// created to hold them. They are gone. That window is inherent to the two-step
-// rob-then-drop design and predates the deadline (a successful rob followed by a
-// failed SpawnContainer loses the same goods); closing it needs the drop to ride
-// the rob's transaction. Until then it is an ERROR carrying the station, ship and
-// player so the amount can be reconstructed from the station's stock history.
+// A deadline stays the ambiguous outcome, but since TASK-160 it no longer costs
+// goods: a COMMIT landing after the deadline fired takes the stock off the shelf
+// AND creates the container that holds it, because both are the same commit. What
+// the worker loses is only the RAM side — addContainer never ran, so the loot sits
+// invisible in the DB until a restart's LoadAll picks it up (the same residue
+// logInstallError describes for a deployed object). Logged at ERROR with the
+// station, ship and player so it can be reconciled by hand rather than waited out.
 func (w *Worker) logRobError(err error, s *sectorState, ship *domain.Ship, target domain.EntityRef) {
 	if dbDeadline(err) {
-		w.logger.Error("hack outcome in doubt: station stock may be deducted with the loot never delivered",
+		w.logger.Error("hack outcome in doubt: loot container may exist in the DB while missing from RAM until restart",
 			"err", err, "ship", int64(ship.ID), "player", int64(ship.PlayerID),
 			"station_kind", target.Kind, "station", target.ID,
 			"sector", int64(s.sectorID), "repo_timeout", w.cfg.RepoTimeout)
@@ -275,33 +295,6 @@ func resolveHackStation(s *sectorState, ref domain.EntityRef) (hackTarget, bool)
 		}
 	}
 	return hackTarget{}, false
-}
-
-// spawnHackContainer drops the robbed goods as a loot container next to the
-// station (level-1 loot, or the level-2 full-hold fallback). Reuses the loot
-// container machinery (SpawnContainer); a nil repo (unit tests) is a no-op.
-// Mirrors spawnOreContainer.
-func (w *Worker) spawnHackContainer(ctx context.Context, s *sectorState, at domain.Vec2, gtype domain.GoodsTypeID, qty int64) {
-	if w.containerRepo == nil {
-		return
-	}
-	var c domain.Container
-	err := w.dbCall(ctx, func(ctx context.Context) error {
-		var err error
-		c, err = w.containerRepo.SpawnContainer(ctx, s.sectorID, domain.ContainerDrop{
-			Pos:       containerDropPos(at, 1, 2), // off-centre so it is not on the station
-			ExpiresAt: w.clock.Now().Add(w.cfg.ContainerTTL),
-			GoodsType: gtype,
-			Quantity:  qty,
-		})
-		return err
-	})
-	if err != nil {
-		w.logger.ErrorContext(ctx, "hack spawn loot container failed",
-			"err", err, "goods", int(gtype), "amount", qty, "sector", int64(s.sectorID))
-		return
-	}
-	s.addContainer(&c)
 }
 
 // publishStationHacked emits the per-player hack event on the bus. Best-effort:

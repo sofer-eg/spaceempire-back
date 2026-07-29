@@ -491,11 +491,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		// combat (SP DestroyModule), so it loses that module's stat boost.
 		sector.WithRefit(equipmentRefitter{classes: shipClasses, equipment: equipment, cfg: spawnCfg}),
 		// 10.3.9.3: station hack (SP UseHack) — up_hack raids a trade station's
-		// richest good (stock deduction + loot into the hold, via trade.Service),
-		// and drops the hacker's standing with the station's race. Fractions/penalty
-		// come from capture.yaml, not hardcoded (NFR-004).
+		// richest good (stock deduction + loot into the hold or into a loot
+		// container, one transaction via hackRaider — TASK-160), and drops the
+		// hacker's standing with the station's race. Fractions/penalty come from
+		// capture.yaml, not hardcoded (NFR-004).
 		sector.WithStationRobber(stationRobber{
-			market:   tradeSvc,
+			market:   hackRaider{tx: txManager, trade: tradePool},
 			standing: standingSvc,
 			cfg: HackConfig{
 				RobFraction:       captureCfg.HackRobFraction,

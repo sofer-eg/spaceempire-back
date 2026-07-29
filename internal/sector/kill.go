@@ -36,9 +36,14 @@ type EntityKilledEvent struct {
 }
 
 // missileGoodsType is the cargo goods-type the SP treats specially in the
-// kill drop (probabilistic throw, see kill_object.md §3). Matches the
-// "Missile" seed in migration 0017.
-const missileGoodsType domain.GoodsTypeID = 50
+// kill drop (probabilistic throw, see kill_object.md §3).
+//
+// Aliased from domain rather than spelled out: this constant carried its own
+// literal 50 until TASK-167, and when the consolidation moved the launch handlers
+// onto the real catalog id it was the one copy left behind. A stale id does not
+// fail loudly here — the stack simply stops matching and drops in full, every
+// time, with missileThrow never reached. Alias, so there is nothing left to drift.
+const missileGoodsType = domain.MissileGoodsType
 
 // slavesGoodsType is the contraband a killed passenger ship spills — matches
 // the "Slaves" seed in migration 0027. Phase 5.6.

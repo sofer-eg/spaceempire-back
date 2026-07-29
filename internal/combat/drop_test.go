@@ -9,7 +9,13 @@ import (
 	"spaceempire/back/internal/domain"
 )
 
-const testMissileType domain.GoodsTypeID = 50
+// testMissileType is deliberately NOT domain.MissileGoodsType: PlanShipDrops takes
+// the missile id as a parameter, and these tests are about the two loops it runs,
+// not about which good is the missile. An arbitrary id keeps them honest — but it
+// also means they say nothing about the constant the production caller passes, which
+// is why that is pinned separately (TestUnit_AmmunitionGoodsIDsAreInTheCatalog, and
+// the shared constant in sector.missileGoodsType).
+const testMissileType domain.GoodsTypeID = 4242
 
 // queueRNG returns the queued values in order; one Float64 call per
 // missile stack. Panics if drained — a regular-cargo stack must never

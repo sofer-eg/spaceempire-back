@@ -24,7 +24,7 @@ import (
 // were consumed by nothing. Phase 4.3 still flies exactly one class
 // (combat.DefaultMissileSpec), so only class 1 is wired; 11-14 wait for a per-class
 // spec catalog.
-const MissileGoodsType domain.GoodsTypeID = 10
+const MissileGoodsType = domain.MissileGoodsType
 
 // launchActionEnergyCost resolves the "action" energy a missile launch spends
 // (phase 10.3.1) from the up_launcher catalog row. energy_usage is uniform

@@ -72,7 +72,10 @@ The SP runs two cargo loops over the dead ship's stacks (`cargo` rows
 with `location = ship_full_id`):
 
 **Missile stacks** (`cargo_missiles` cursor — cargo whose goods type is a
-missile; in Go that is goods type id `50`, seeded by `0017_missile_goods`):
+missile; in Go that is `domain.MissileGoodsType` — goods type id `10`
+«Ракета Москит», the catalog's class-1 missile. It was `50` until TASK-167,
+an English-named duplicate `0017_missile_goods` minted beside the real
+catalog; `0063_consolidate_ammunition_goods` removed it):
 
 ```
 chance = round(16 * rand())          # 0..16

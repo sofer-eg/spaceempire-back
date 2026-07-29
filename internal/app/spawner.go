@@ -19,7 +19,7 @@ import (
 // «Ракета Москит», the catalog's class-1 missile (ct_missiles.cargo_id = 10 in
 // StarWind). Mirrors api.MissileGoodsType — see it for why the starter magazine
 // has to be a good stations actually sell (TASK-167).
-const MissileGoodsType domain.GoodsTypeID = 10
+const MissileGoodsType = domain.MissileGoodsType
 
 // ShipSpawnerConfig knobs the spawner exposes to app wiring.
 type ShipSpawnerConfig struct {

@@ -273,8 +273,15 @@ func TestUnit_KillShip_MissileCargoBurnsUp(t *testing.T) {
 	ctx := context.Background()
 
 	// Missile-only hold; a low roll (0.0 → chance 0 < 12) destroys it.
+	//
+	// The shared constant, not a literal: this fixture carried a hardcoded 50 and so
+	// stayed green through TASK-167, while production had moved the missile onto
+	// catalog id 10 and this branch had stopped being reached at all. A test that
+	// spells the id itself only ever proves the branch works for the id the test
+	// picked. That the id is a real catalog good is a separate check —
+	// TestUnit_AmmunitionGoodsIDsAreInTheCatalog.
 	repo := &fakeContainerRepo{cargoByShip: map[domain.ShipID][]domain.CargoItem{
-		2: {{GoodsType: 50, Quantity: 100000}},
+		2: {{GoodsType: domain.MissileGoodsType, Quantity: 100000}},
 	}}
 	w := killerVictim(t, repo, staticRNG{v: 0})
 

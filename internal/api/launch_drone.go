@@ -19,7 +19,7 @@ import (
 // already come from. Until TASK-167 it was 51, an English-named duplicate
 // migration 0018 minted with space 2; no station sold it, so a spent magazine was
 // unrefillable. See drones.md §2.
-const DroneGoodsType domain.GoodsTypeID = 21
+const DroneGoodsType = domain.DroneGoodsType
 
 // handleLaunchDrone launches a salvo of combat drones from the player's ship at
 // a target (phase 4.4). Same orchestration shape as launch-missile: the handler

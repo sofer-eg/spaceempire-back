@@ -2,10 +2,17 @@ package observ_test
 
 import (
 	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +21,7 @@ import (
 
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/observ"
+	"spaceempire/back/internal/pkg/config"
 )
 
 // hijackableRW is a ResponseWriter that supports hijacking (like the real Go
@@ -114,6 +122,138 @@ func TestUnit_BasicAuth_GatesWhenConfigured(t *testing.T) {
 	req.SetBasicAuth("admin", "secret")
 	h.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// captureRequestCtx runs one request through AccessLog and returns the context
+// the wrapped handler saw plus the id echoed in the response header. The
+// context key is package-private, so this is the only honest way to obtain a
+// context that really carries an id — the same way a real handler gets one.
+func captureRequestCtx(t *testing.T, logger *slog.Logger) (context.Context, string) {
+	t.Helper()
+	var got context.Context
+	h := observ.AccessLog(logger)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = r.Context()
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/thing", nil))
+	id := rec.Header().Get("X-Request-ID")
+	require.NotEmpty(t, id, "AccessLog must echo the id it assigned")
+	require.NotNil(t, got, "the wrapped handler must have run")
+	return got, id
+}
+
+// debugLogger builds a JSON logger over buf with the request-id injection in
+// place. Debug level because AccessLog's own access line is logged at Debug.
+func debugLogger(buf io.Writer) *slog.Logger {
+	return slog.New(observ.WithRequestID(slog.NewJSONHandler(buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
+}
+
+// TestUnit_WithRequestID_InjectsIntoHandlerLogs is the point of the wrapper:
+// a handler that logs with the request context gets `request_id` on its own
+// line, correlating it with the access line. slog's JSON/Text handlers ignore
+// context values entirely, so without this nothing but AccessLog carries one.
+func TestUnit_WithRequestID_InjectsIntoHandlerLogs(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := debugLogger(&buf)
+	ctx, id := captureRequestCtx(t, logger)
+
+	logger.ErrorContext(ctx, "handler blew up")
+
+	line := lastLineWith(t, &buf, "handler blew up")
+	assert.Equal(t, id, line["request_id"],
+		"the handler's own line must carry the id from the response header")
+}
+
+// TestUnit_WithRequestID_SurvivesLoggerWith guards the classic wrapper bug:
+// slog returns a NEW handler from WithAttrs/WithGroup, so a wrapper that does
+// not re-wrap silently loses its behaviour for every derived logger. The
+// sector worker, sector pool, quest pacer and story picker all derive theirs
+// with logger.With("component", …), so an unwrapped WithAttrs would strip the
+// id from exactly the components most worth correlating.
+func TestUnit_WithRequestID_SurvivesLoggerWith(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := debugLogger(&buf)
+	ctx, id := captureRequestCtx(t, logger)
+
+	derived := logger.With("component", "sector.worker")
+	derived.ErrorContext(ctx, "derived line")
+
+	line := lastLineWith(t, &buf, "derived line")
+	assert.Equal(t, id, line["request_id"], "logger.With must not drop the injection")
+	assert.Equal(t, "sector.worker", line["component"], "the derived attrs still apply")
+}
+
+// TestUnit_WithRequestID_AccessLineNotDuplicated: AccessLog attaches the field
+// itself (it must, since it may wrap a logger this handler never saw — the
+// AccessLog(nil) fallback goes to slog.Default()). The wrapper therefore has
+// to skip a record that already carries the key, or the access line emits
+// request_id twice in one JSON object.
+func TestUnit_WithRequestID_AccessLineNotDuplicated(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	_, id := captureRequestCtx(t, debugLogger(&buf))
+
+	line := lastLineWith(t, &buf, "http request")
+	assert.Equal(t, id, line["request_id"])
+	assert.Equal(t, 1, strings.Count(rawLineWith(t, buf.String(), "http request"), `"request_id"`),
+		"the access line must carry request_id exactly once")
+}
+
+// TestUnit_WithRequestID_AbsentWithoutRequest: background logging (workers,
+// startup) has no request context and must not grow an empty or bogus field.
+func TestUnit_WithRequestID_AbsentWithoutRequest(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	debugLogger(&buf).Info("tick done")
+
+	line := lastLineWith(t, &buf, "tick done")
+	_, present := line["request_id"]
+	assert.False(t, present, "no request context → no request_id attribute")
+}
+
+// TestUnit_NewLogger_WiresRequestID closes the gap the tests above leave: they
+// all build their own wrapped handler, so dropping WithRequestID from
+// NewLogger would leave every one of them green while the running server lost
+// the field entirely. Exercising the production path (LogFile set → rotated
+// JSON) is the only way to assert the wiring itself.
+func TestUnit_NewLogger_WiresRequestID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.log")
+	logger := observ.NewLogger(config.ObservabilityConfig{
+		LogLevel: "debug",
+		LogFile:  path,
+	})
+	ctx, id := captureRequestCtx(t, logger)
+	logger.ErrorContext(ctx, "wired through NewLogger")
+
+	out, err := os.ReadFile(path)
+	require.NoError(t, err)
+	line := rawLineWith(t, string(out), "wired through NewLogger")
+	assert.Contains(t, line, `"request_id":"`+id+`"`,
+		"the logger NewLogger actually returns must inject the request id")
+}
+
+// rawLineWith returns the raw JSON line whose "msg" contains want.
+func rawLineWith(t *testing.T, out, want string) string {
+	t.Helper()
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.Contains(l, want) {
+			return l
+		}
+	}
+	t.Fatalf("no log line containing %q in:\n%s", want, out)
+	return ""
+}
+
+// lastLineWith parses the JSON log line whose "msg" contains want.
+func lastLineWith(t *testing.T, buf *bytes.Buffer, want string) map[string]any {
+	t.Helper()
+	var line map[string]any
+	require.NoError(t, json.Unmarshal([]byte(rawLineWith(t, buf.String(), want)), &line))
+	return line
 }
 
 // compile-time check that Metrics satisfies the sector sink shape.

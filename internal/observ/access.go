@@ -13,6 +13,10 @@ type ctxKey int
 
 const requestIDKey ctxKey = 0
 
+// requestIDAttr is the log field name shared by AccessLog and the
+// WithRequestID handler, so the two can never disagree on the key.
+const requestIDAttr = "request_id"
+
 // RequestIDFromContext returns the per-request id set by AccessLog, if any.
 // Handlers can attach it to their own log lines for correlation.
 func RequestIDFromContext(ctx context.Context) (string, bool) {
@@ -45,7 +49,7 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			next.ServeHTTP(rec, r.WithContext(ctx))
 			logger.LogAttrs(ctx, slog.LevelDebug, "http request",
-				slog.String("request_id", id),
+				slog.String(requestIDAttr, id),
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.Int("status", rec.status),

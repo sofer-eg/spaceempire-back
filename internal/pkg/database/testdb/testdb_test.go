@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -147,27 +148,109 @@ func TestUnit_TestDB_MakefileReapsWhatItStamps(t *testing.T) {
 	})
 }
 
-// TestUnit_TestDB_MakefileTestTargetsDefeatTheCache pins -count=1 onto every
-// target that runs go test, because losing it fails in the direction nobody
-// checks: go serves the previous run's result and the target reports ok having
-// run nothing. test-unit shipped that way, which hid flakes and quietly
-// invalidated the mutation checks this project verifies its tests with — break
-// the code, run make test-unit, read the cached green as "the test does not
-// catch it" (TASK-164).
+// makefileTarget matches a target line — `name:` — and nothing else. The
+// exclusion that matters is variable assignment: `MIGRATE := go run ...` and
+// `PG_DSN ?= postgres://...` both put a colon on the line, and treating either
+// as a target would attach the recipes below it to the wrong name.
+var makefileTarget = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_.-]*)[ \t]*:(?:[^=]|$)`)
+
+// makeTargetsRunningGoTest returns the targets whose recipes invoke `go test`.
 //
-// bench is not in the list: -bench is not one of the flags go keys the cache on,
-// so those runs never come from it.
+// Discovery is over the Makefile's text because `make -n` expands one target at
+// a time and so cannot enumerate them. The cost of reading the text is that this
+// finds the invocations spelled `go test` literally: a recipe reaching it through
+// a variable would not be found, and the flags are therefore checked against the
+// expansion afterwards rather than here.
+func makeTargetsRunningGoTest(t *testing.T) []string {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, "Makefile"))
+	require.NoError(t, err)
+
+	var targets []string
+	current := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "\t") { // a recipe line belongs to the last target seen
+			if current != "" && strings.Contains(line, "go test") {
+				targets = append(targets, current)
+				current = "" // one entry per target, however many commands it runs
+			}
+			continue
+		}
+		if m := makefileTarget.FindStringSubmatch(line); m != nil {
+			current = m[1]
+		}
+	}
+	return targets
+}
+
+// goTestInvocations pulls every `go test` command out of an expanded recipe.
+// Continuation lines are joined first (make prints them with the backslashes
+// intact), then each line is split on the separators these recipes use, so a
+// target running go test twice yields two commands — a flag missing from the
+// second cannot hide behind the first.
+func goTestInvocations(recipe string) []string {
+	joined := regexp.MustCompile(`\\\n[ \t]*`).ReplaceAllString(recipe, " ")
+
+	var cmds []string
+	for _, line := range strings.Split(joined, "\n") {
+		for _, cmd := range regexp.MustCompile(`;|&&|\|\||\|`).Split(line, -1) {
+			if strings.Contains(cmd, "go test") {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+	return cmds
+}
+
+// TestUnit_TestDB_MakefileTestTargetsDefeatTheCache pins -count=1 and -timeout
+// onto every `go test` the Makefile runs, because losing either fails in the
+// direction nobody checks. Without -count=1 go serves the previous run's result
+// and the target reports ok having run nothing: test-unit shipped that way,
+// which hid flakes and quietly invalidated the mutation checks this project
+// verifies its tests with — break the code, run make test-unit, read the cached
+// green as "the test does not catch it" (TASK-164). Without -timeout a package
+// deadlocked under -race sits for go test's ten-minute default instead of the
+// project's 180s.
 //
-// Asserted on the expanded recipe, like the reaper wiring above, so that moving
-// the flags behind a variable stays a refactor rather than a failure.
+// Both the targets and the commands within them are discovered rather than
+// listed, because the drift this has to catch is a new cacheable target or a
+// second invocation added beside a correct one — neither of which a fixed list
+// of three names, or a substring search over the whole recipe, would notice.
+//
+// The flags are read off the expanded recipe, like the reaper wiring above, so
+// that moving them behind a shared variable stays a refactor rather than a
+// failure.
 func TestUnit_TestDB_MakefileTestTargetsDefeatTheCache(t *testing.T) {
 	t.Parallel()
 
-	for _, target := range []string{"test", "test-unit", "test-integration"} {
+	targets := makeTargetsRunningGoTest(t)
+	// A parser that quietly stops matching would leave every subtest below
+	// unwritten and the test green, so pin the targets that must be found. This
+	// is a canary for the discovery, not the list being checked.
+	require.Subset(t, targets, []string{"test", "test-unit", "test-integration", "bench"},
+		"discovery missed a known go test target — makefileTarget or the recipe scan is broken")
+
+	for _, target := range targets {
 		t.Run(target, func(t *testing.T) {
 			t.Parallel()
-			assert.Contains(t, dryRun(t, target), "-count=1",
-				"make %s must pass -count=1, or a cached result can stand in for a run that never happened", target)
+
+			cmds := goTestInvocations(dryRun(t, target))
+			require.NotEmpty(t, cmds, "no go test command found in the expansion of %s", target)
+
+			for _, cmd := range cmds {
+				// bench is exempt from both, for two separate reasons: -bench is
+				// not one of the flags go keys the cache on, so those runs are
+				// never served from it, and benchmarks are sized by hand rather
+				// than by the budget the tests share.
+				if strings.Contains(cmd, "-bench") {
+					continue
+				}
+				assert.Regexp(t, `-count[= ]1\b`, cmd,
+					"%s must pass -count=1, or a cached result can stand in for a run that never happened:\n\t%s", target, cmd)
+				assert.Regexp(t, `-timeout[= ]\S`, cmd,
+					"%s must pass a -timeout, or a hung package runs for go test's default ten minutes:\n\t%s", target, cmd)
+			}
 		})
 	}
 }

@@ -19,12 +19,19 @@ API. See the design doc and `CLAUDE.md` at the repo root for architecture.
 make run                 # run the server
 make build               # build bin/starwind
 make lint                # golangci-lint
-make test-unit           # unit tests (-race -count=1), TestUnit_*
-make test-integration    # integration tests (-race -count=1), TestIntegration_*
+make test-unit           # unit tests, TestUnit_*
+make test-integration    # integration tests, TestIntegration_*
 make test-clean          # reap every test container this project left behind
 make migrate-up          # apply migrations to PG_DSN
 make migrate-status      # show migration state
 ```
+
+All three test targets (`test`, `test-unit`, `test-integration`) run with
+`-race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT)`, pinned by
+`TestUnit_TestDB_MakefileTestTargetsDefeatTheCache`. `-count=1` is not optional:
+without it go answers a repeat run from its cache and reports `ok` for tests it
+never ran, which hides flakes and defeats the mutation checks this project
+verifies its tests with. `TEST_P` and `TEST_TIMEOUT` are described below.
 
 Postgres connection is configured via the `PG_*` Make variables (default
 `localhost:5432`, db `spaceempire`). Override `PG_DSN` to point elsewhere.
@@ -61,10 +68,10 @@ func TestMain(m *testing.M) { testdb.Main(m) }
 otherwise the omission would be invisible (the tests still pass) and the package
 would leak its container on every run.
 
-`make test-integration` also caps how many package binaries run at once
-(`TEST_P`, default 2). The core-count default saturated an 8-core box — every
-integration package racing to start its own Postgres under `-race`, with whole
-packages then missing their container-start deadline. Raise it on a bigger
+`test`, `test-unit` and `test-integration` all cap how many package binaries run
+at once (`TEST_P`, default 2). The core-count default saturated an 8-core box —
+every integration package racing to start its own Postgres under `-race`, with
+whole packages then missing their container-start deadline. Raise it on a bigger
 runner:
 
 ```bash
@@ -72,8 +79,8 @@ make test-integration TEST_P=8
 ```
 
 The per-package budget is `TEST_TIMEOUT` (default 180s), comfortably above the
-slowest package, so it only fires on a genuine hang. The target also passes
-`-count=1`: these tests depend on state Go does not key its build cache on (the
+slowest package, so it only fires on a genuine hang. `-count=1` carries extra
+weight here: these tests depend on state Go does not key its build cache on (the
 docker daemon, the image cache, container startup), so a cached `ok` can report
 green for an environment that no longer works.
 

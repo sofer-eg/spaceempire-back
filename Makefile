@@ -122,8 +122,10 @@ test:
 #
 # The flag list is spelled out in each recipe rather than shared through one
 # variable: -count=1 being visible at the point of use is half of what makes it
-# stick, and the guard against the three targets drifting apart is
-# TestUnit_TestDB_MakefileTestTargetsDefeatTheCache, not DRY.
+# stick, and the guard against the recipes drifting apart is
+# TestUnit_TestDB_MakefileTestTargetsDefeatTheCache — which finds the targets
+# running go test and checks each invocation, so a new target or a second
+# invocation is covered too — not DRY.
 test-unit:
 	go test -run '^TestUnit_' -race -count=1 -p $(TEST_P) -timeout $(TEST_TIMEOUT) ./...
 
@@ -149,8 +151,9 @@ test-clean:
 
 # No -count=1 here: -bench is not one of the flags go keys its test cache on, so
 # a run with it is never served from the cache in the first place. No -timeout
-# either — benchmarks are meant to take as long as they take, and the budget
-# above is sized for tests.
+# either, which is not the same as no limit — go test's own 10-minute default
+# still applies, and a benchmark that needs longer has to raise it itself. What
+# benchmarks stay out of is TEST_TIMEOUT, which is sized for tests.
 bench:
 	go test -run '^$$' -bench=. -benchmem ./...
 

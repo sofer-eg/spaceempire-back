@@ -1439,33 +1439,15 @@ func (w *Worker) applyEnvelope(env envelope) {
 // independent of worker state, so consumers may mutate it freely.
 //
 // Every per-tick effect buffer — LaserEffects, MissileImpacts, DroneImpacts,
-// TorpedoImpacts — is copied, not aliased, so the worker can clear its own
-// slices on the next tick without invalidating subscribers. The clear
-// truncates with [:0] and the next impact appends back into the same backing
-// array, so an aliased snapshot would be silently rewritten under its holder.
+// TorpedoImpacts — goes through cloneTickBuffer, so the worker can clear its own
+// slices on the next tick without invalidating subscribers.
 // Missiles, Drones and Torpedos follow the same isolation contract.
 func publishSnapshotFor(s *sectorState, elapsed time.Duration) {
 	out, in := s.handoffCopies()
-	var effects []combat.LaserBeam
-	if len(s.laserEffects) > 0 {
-		effects = make([]combat.LaserBeam, len(s.laserEffects))
-		copy(effects, s.laserEffects)
-	}
-	var impacts []MissileImpact
-	if len(s.missileImpacts) > 0 {
-		impacts = make([]MissileImpact, len(s.missileImpacts))
-		copy(impacts, s.missileImpacts)
-	}
-	var dImpacts []DroneImpact
-	if len(s.droneImpacts) > 0 {
-		dImpacts = make([]DroneImpact, len(s.droneImpacts))
-		copy(dImpacts, s.droneImpacts)
-	}
-	var tImpacts []TorpedoImpact
-	if len(s.torpedoImpacts) > 0 {
-		tImpacts = make([]TorpedoImpact, len(s.torpedoImpacts))
-		copy(tImpacts, s.torpedoImpacts)
-	}
+	effects := cloneTickBuffer(s.laserEffects)
+	impacts := cloneTickBuffer(s.missileImpacts)
+	dImpacts := cloneTickBuffer(s.droneImpacts)
+	tImpacts := cloneTickBuffer(s.torpedoImpacts)
 	snap := &Snapshot{
 		SectorID:         s.sectorID,
 		Tick:             s.tick,
@@ -1487,6 +1469,28 @@ func publishSnapshotFor(s *sectorState, elapsed time.Duration) {
 		Destructibles:    s.snapshotDestructibles(),
 	}
 	s.snap.Store(snap)
+}
+
+// cloneTickBuffer returns an independent copy of one of the worker's per-tick
+// effect buffers (nil when it is empty — the published field stays absent
+// rather than becoming an empty slice). It is the single place the snapshot's
+// isolation from those one-frame slices is implemented: clear*() truncates with
+// [:0] and the next event appends straight back into the same backing array, so
+// handing the argument itself out would silently rewrite an already-published
+// snapshot under its holder while keeping its len() intact. All four buffers go
+// through here on purpose — one implementation to protect instead of four
+// copy-paste blocks. Guarded by the *AreCopiedNotAliased tests in
+// snapshot_isolation_test.go (laser/missile/drone) and
+// TestUnit_Torpedo_SnapshotCarriesFlightAndImpacts (torpedo); each asserts the
+// VALUE a held snapshot still carries after a later tick, since the length
+// survives aliasing.
+func cloneTickBuffer[T any](src []T) []T {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]T, len(src))
+	copy(out, src)
+	return out
 }
 
 // snapshotMissiles returns a sorted-by-ID slice of value-type missiles.

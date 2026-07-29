@@ -56,6 +56,57 @@ func (i staticInstaller) InstallJammer(ctx context.Context, owner domain.EntityR
 	return id, nil
 }
 
+// DismantleJammer is InstallJammer read backwards (TASK-146): it deletes the
+// generator's row and credits its goods unit back to the hold in one transaction,
+// so a lost ack cannot fold up a ≈1.13M cr object and pay nothing for it.
+//
+// Unlike the drone recall (TASK-156, which credits what fits), one object is
+// indivisible: a hold without room for it is refused with cargo.ErrNoSpace and the
+// generator stays deployed. Nothing is lost either way — the player makes room and
+// tries again.
+func (i staticInstaller) DismantleJammer(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, id domain.JammerID) error {
+	return i.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := i.creditOne(ctx, tx, owner, gtype); err != nil {
+			return err
+		}
+		if err := i.jammers.WithExecutor(tx).Delete(ctx, id); err != nil {
+			return fmt.Errorf("delete jammer: %w", err)
+		}
+		return nil
+	})
+}
+
+// DismantleSatellite mirrors DismantleJammer for the navigation satellite.
+func (i staticInstaller) DismantleSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, id domain.SatelliteID) error {
+	return i.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := i.creditOne(ctx, tx, owner, gtype); err != nil {
+			return err
+		}
+		if err := i.satellites.WithExecutor(tx).Delete(ctx, id); err != nil {
+			return fmt.Errorf("delete satellite: %w", err)
+		}
+		return nil
+	})
+}
+
+// creditOne puts one unit of gtype back into the hold inside the caller's
+// transaction, refusing when it does not fit. cargo.FitsIn sizes the credit and
+// cargo.RefundIn performs it: RefundIn skips the capacity check by design (its
+// usual caller has already destroyed what it is paying for), so the check has to
+// be made here — a dismantle that overfilled the hold would be the TASK-156
+// exploit under a different name.
+func (i staticInstaller) creditOne(ctx context.Context, tx pgx.Tx, owner domain.EntityRef, gtype domain.GoodsTypeID) error {
+	repo := i.cargo.WithExecutor(tx)
+	fits, err := cargo.FitsIn(ctx, repo, owner, gtype, 1)
+	if err != nil {
+		return err
+	}
+	if fits < 1 {
+		return cargo.ErrNoSpace
+	}
+	return cargo.RefundIn(ctx, repo, owner, gtype, 1)
+}
+
 func (i staticInstaller) InstallSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, s domain.Satellite) (domain.SatelliteID, error) {
 	var id domain.SatelliteID
 	err := i.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {

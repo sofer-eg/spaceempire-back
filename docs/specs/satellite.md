@@ -101,6 +101,15 @@ player sees 500. Full write-up in `jammer.md`.
 Install HP/Shield are package constants (`satelliteHP` etc.) — these are deploy
 defaults, not per-tick knobs, so they stay out of `Config`.
 
+## Dismantle (TASK-146)
+
+The owner can take a deployed satellite back into the hold with the same
+`DismantleStaticCommand` the generator uses (`POST /api/cmd/dismantle-static`,
+target kind 11): the goods unit is credited and the row deleted in ONE transaction,
+the object leaves the layout and the combat set, and the reveal it provided goes
+with it. Gates, the full-return-or-refuse policy and the in-doubt-commit residue are
+identical — full write-up in `jammer.md` («Dismantle»).
+
 ## Invariants
 
 - Owner = the installing player; `OwnerID` drives the hostility gate (a

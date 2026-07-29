@@ -34,6 +34,9 @@ const (
 
 	jammerGoods    = domain.GoodsTypeID(27) // Генератор гипер-помех
 	satelliteGoods = domain.GoodsTypeID(26) // Навигационный спутник
+	// batteryGoods is the filler the dismantle-without-room case uses: space 1,
+	// so a round number of them fills a hold exactly.
+	batteryGoods = domain.GoodsTypeID(1)
 )
 
 // installerFixture spins up a schema-migrated Postgres and returns the real
@@ -78,9 +81,18 @@ func installerFixture(t *testing.T) (*pgxpool.Pool, staticInstaller, domain.Enti
 		jammers:    jammersrepo.New(pool),
 		satellites: satellitesrepo.New(pool),
 	}
-	// The hold id does not have to be a real ship row (cargo.owner_id carries no
-	// foreign key), and the install path never reads the ship.
-	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: 4242}
+	// A real ships row, with a hold big enough to carry either object: the install
+	// path never reads the ship (cargo.owner_id carries no foreign key), but the
+	// dismantle does — it checks the hold has room for the object coming back, and
+	// that capacity is ships.cargobay. 2000 fits a generator (space 535) and a
+	// satellite (375) with room to spare, which is what a ship deploying them would
+	// need in the first place.
+	var shipID int64
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`INSERT INTO ships (player_id, sector_id, cargobay) VALUES ($1, $2, 2000) RETURNING id`,
+		playerID, int64(installerSectorID),
+	).Scan(&shipID), "seed installing ship")
+	hold := domain.EntityRef{Kind: domain.EntityKindShip, ID: shipID}
 	return pool, inst, hold, domain.PlayerID(playerID)
 }
 
@@ -105,6 +117,15 @@ func heldQty(t *testing.T, pool *pgxpool.Pool, hold domain.EntityRef, gtype doma
 		 WHERE owner_kind = $1 AND owner_id = $2 AND goods_type_id = $3`,
 		int16(hold.Kind), hold.ID, int32(gtype)).Scan(&qty), "read hold")
 	return qty
+}
+
+// clearInstallerHold drops one goods stack, standing in for the player selling it.
+func clearInstallerHold(t *testing.T, pool *pgxpool.Pool, hold domain.EntityRef, gtype domain.GoodsTypeID) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`DELETE FROM cargo WHERE owner_kind = $1 AND owner_id = $2 AND goods_type_id = $3`,
+		int16(hold.Kind), hold.ID, int32(gtype))
+	require.NoError(t, err, "clear hold")
 }
 
 func rowCount(t *testing.T, pool *pgxpool.Pool, table string) int {
@@ -242,6 +263,73 @@ func TestIntegration_StaticInstaller(t *testing.T) {
 		})
 		require.ErrorIs(t, err, cargo.ErrInsufficientQuantity)
 		assert.Equal(t, 1, rowCount(t, pool, "satellites"), "no free second satellite")
+	})
+
+	// TASK-146: the dismantle is the install read backwards. The row goes away and
+	// the goods unit comes back in ONE transaction, on the caller's connection (the
+	// single-connection pool proves the ride-along here too).
+	t.Run("DismantleReturnsTheUnitAndDeletesTheRow", func(t *testing.T) {
+		ctx := installCtx(t)
+		resetInstallerTables(t, pool)
+		stockHold(t, pool, hold, jammerGoods, 1)
+		stockHold(t, pool, hold, satelliteGoods, 1)
+
+		jamID, err := inst.InstallJammer(ctx, hold, jammerGoods, domain.Jammer{
+			OwnerID: &owner, SectorID: installerSectorID, Built: true,
+		})
+		require.NoError(t, err)
+		satID, err := inst.InstallSatellite(ctx, hold, satelliteGoods, domain.Satellite{
+			OwnerID: &owner, SectorID: installerSectorID, Built: true,
+		})
+		require.NoError(t, err)
+		require.Zero(t, heldQty(t, pool, hold, jammerGoods), "both units are paid for")
+		require.Zero(t, heldQty(t, pool, hold, satelliteGoods))
+
+		require.NoError(t, inst.DismantleJammer(ctx, hold, jammerGoods, jamID))
+		assert.Equal(t, 0, rowCount(t, pool, "jammers"), "the generator row is gone")
+		assert.EqualValues(t, 1, heldQty(t, pool, hold, jammerGoods), "and its unit is back in the hold")
+
+		require.NoError(t, inst.DismantleSatellite(ctx, hold, satelliteGoods, satID))
+		assert.Equal(t, 0, rowCount(t, pool, "satellites"))
+		assert.EqualValues(t, 1, heldQty(t, pool, hold, satelliteGoods))
+
+		// The unit is back, so it can be redeployed — install/dismantle round-trips.
+		_, err = inst.InstallJammer(ctx, hold, jammerGoods, domain.Jammer{
+			OwnerID: &owner, SectorID: installerSectorID, Built: true,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, rowCount(t, pool, "jammers"))
+		assert.Zero(t, heldQty(t, pool, hold, jammerGoods))
+	})
+
+	// A hold with no room refuses the dismantle whole: one object is indivisible, so
+	// the alternative would be either overfilling the hold (the TASK-156 exploit
+	// under another name) or destroying a ≈1.13M cr object. The generator stays
+	// deployed and the transaction rolls back.
+	t.Run("DismantleWithoutRoomKeepsTheObject", func(t *testing.T) {
+		ctx := installCtx(t)
+		resetInstallerTables(t, pool)
+		stockHold(t, pool, hold, jammerGoods, 1)
+
+		jamID, err := inst.InstallJammer(ctx, hold, jammerGoods, domain.Jammer{
+			OwnerID: &owner, SectorID: installerSectorID, Built: true,
+		})
+		require.NoError(t, err)
+
+		// The hold is 2000 and the generator takes 535, so 1700 batteries (space 1)
+		// leave 300 free — not enough for it to come back.
+		stockHold(t, pool, hold, batteryGoods, 1700)
+
+		err = inst.DismantleJammer(ctx, hold, jammerGoods, jamID)
+		require.ErrorIs(t, err, cargo.ErrNoSpace)
+		assert.Equal(t, 1, rowCount(t, pool, "jammers"), "still deployed")
+		assert.Zero(t, heldQty(t, pool, hold, jammerGoods), "nothing credited")
+
+		// Room appears and the same call goes through.
+		clearInstallerHold(t, pool, hold, batteryGoods)
+		require.NoError(t, inst.DismantleJammer(ctx, hold, jammerGoods, jamID))
+		assert.Equal(t, 0, rowCount(t, pool, "jammers"))
+		assert.EqualValues(t, 1, heldQty(t, pool, hold, jammerGoods))
 	})
 
 	// The INSERT is rejected (sector_id violates the foreign key) *after* the debit

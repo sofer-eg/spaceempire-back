@@ -195,6 +195,46 @@ existed the window was practically absent (`Create` ran under
 `context.Background()`), but the trade was an unbounded tick stall; the bounded
 stall is worth the narrow in-doubt case.
 
+## Dismantle — taking it back (TASK-146)
+
+Before this a deployment was **irreversible**: there was no take-down command, and
+`fireLaserAtStatic` gates on `w.hostile(d.OwnerID, attacker)`, so you cannot shoot
+your own object. A generator parked next to your own station was therefore a
+permanent self-debuff on a ≈1.13M cr object — it jams *everyone* in
+`Config.JammerRange`, its owner included.
+
+`DismantleStaticCommand` (`POST /api/cmd/dismantle-static`, `sector/dismantle.go`)
+folds a deployed generator **or** navigation satellite back into the hold. One
+command covers both kinds — the mechanic is one, `isDismantlableKind` names the two
+`EntityKind`s, and the HTTP handler maps kind → goods (27 / 26) so the sector
+package stays free of the catalog.
+
+**Gates** (in order): own ship, ship in space (`ErrShipDocked`), dismantlable kind
+(`ErrNotDismantlable`), object present in this sector (`ErrDeployedNotFound`),
+object owned by the same player (`ErrForbidden` — someone else's has to be shot),
+and within `Config.PickupRange` (`ErrDeployedOutOfRange`) — the same reach a
+container pickup uses, because this is the same physical act of taking an object
+into the hold.
+
+**Atomicity.** `StaticInstaller.DismantleJammer` / `DismantleSatellite` (app-side
+`staticInstaller`) credit the goods unit and `DELETE` the row in ONE transaction,
+the install read backwards; the nil-installer doctrine holds too (no installer →
+`ErrInstallerUnavailable` → 503, rather than removing an object nobody can pay for).
+RAM changes only after the commit: `removeDestructible` + `removeStaticFromLayout`,
+which is also what lifts the no-jump zone (`jammerActive` reads `statics.Jammers`).
+
+**Full return, refusable** (owner's decision): the credit is capacity-checked
+(`cargo.FitsIn` before `cargo.RefundIn`). One object is indivisible, so a hold
+without room for it is refused whole with `cargo.ErrNoSpace` → 422 and the object
+stays deployed. Nothing is lost either way — the player makes room and tries again.
+Note the practical consequence: the generator takes 535 space, so the ship needs
+that much free before it can come home.
+
+**Residual in-doubt commit** mirrors the install's (see above): a `RepoTimeout`
+firing while COMMIT is in flight leaves the unit paid and the row gone while the
+object is still live in RAM — jamming, shootable and drawn to clients until a
+restart's `LoadAll` drops it. `logDismantleError` reports it at ERROR.
+
 ## Not a satellite
 
 The generator does **not** reveal the sector radar — that is satellite-only
@@ -222,4 +262,6 @@ The generator does **not** reveal the sector radar — that is satellite-only
   with a shield bar; matching row icon in `objectIcons`.
 - `TargetsPanel` → «Другое» tab, labelled «Генератор гипер-помех».
 - `ObjectActionsMenu`: not dockable (like the satellite/tower); «Лететь» and the
-  weapon actions stay.
+  weapon actions stay. The owner also gets «⤓ Демонтировать» (TASK-146) — gated on
+  `ownerID === ownPlayerID`, which is why the jammer/satellite dock-picks carry
+  `ownerID`; range and hold space stay server-authoritative (422 → journal).

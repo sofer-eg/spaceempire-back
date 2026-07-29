@@ -74,8 +74,12 @@ type fakeOrdnance struct {
 
 	// recallFits caps how many of the handed-over drones the hold can take,
 	// standing in for cargo.FitsIn inside the real transaction (TASK-156). nil
-	// means every drone fits.
+	// means every drone fits. removedIDs records what the fake actually settled,
+	// which a partial recall makes necessary: the worker collects ids by iterating
+	// the s.drones MAP, so which drone comes home is not deterministic and a test
+	// can only assert against what the ordnance reported back.
 	recallFits *int
+	removedIDs []domain.DroneID
 
 	// torpedoRepo, when set, creates every torpedo through the same fake repo
 	// the persistence tests count Create calls on — standing in for the real
@@ -222,6 +226,7 @@ func (f *fakeOrdnance) RecallDrones(ctx context.Context, owner domain.EntityRef,
 		out.Credited++
 	}
 	f.recalls++
+	f.removedIDs = append(f.removedIDs, out.Removed...)
 	f.credited[gtype] += int64(out.Credited)
 	if !f.unlimited {
 		f.stock[gtype] += int64(out.Credited)
@@ -912,7 +917,12 @@ func TestUnit_RecallDrones_PartialWhenHoldIsFull(t *testing.T) {
 
 	live := w.Snapshot(testSector).Drones
 	require.Len(t, live, 1, "the un-recalled drone keeps flying")
-	assert.Equal(t, ids[1], live[0].ID, "and it is the one the ordnance left alone")
+	// Which of the two came home is up to map iteration order in the worker, so the
+	// assertion is the invariant: RAM keeps exactly the drone the ordnance did NOT
+	// settle, and between them the two ids account for the whole salvo.
+	require.Len(t, ord.removedIDs, 1)
+	assert.NotEqual(t, ord.removedIDs[0], live[0].ID, "RAM keeps the one left flying")
+	assert.ElementsMatch(t, ids, []domain.DroneID{ord.removedIDs[0], live[0].ID})
 
 	// Space frees up and the player recalls again: the last drone comes home, so
 	// nothing is stranded permanently (AC#3).

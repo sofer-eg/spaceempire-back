@@ -36,6 +36,10 @@ type fakeInstaller struct {
 	jammers    int
 	satellites int
 	goodsTypes []domain.GoodsTypeID
+	// credits counts the dismantle credits; noRoom makes them fail with
+	// cargo.ErrNoSpace (TASK-146).
+	credits int
+	noRoom  bool
 }
 
 func (f *fakeInstaller) consume(gtype domain.GoodsTypeID) error {
@@ -68,6 +72,40 @@ func (f *fakeInstaller) InstallSatellite(_ context.Context, _ domain.EntityRef, 
 	defer f.mu.Unlock()
 	f.satellites++
 	return domain.SatelliteID(f.satellites), nil
+}
+
+// The dismantle pair (TASK-146) is the reverse: one unit back in the hold, one
+// object gone. noRoom models a hold too full to take the object back.
+func (f *fakeInstaller) credit(gtype domain.GoodsTypeID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.goodsTypes = append(f.goodsTypes, gtype)
+	if f.noRoom {
+		return cargo.ErrNoSpace
+	}
+	f.stock++
+	f.credits++
+	return nil
+}
+
+func (f *fakeInstaller) DismantleJammer(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, _ domain.JammerID) error {
+	if err := f.credit(gtype); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jammers--
+	return nil
+}
+
+func (f *fakeInstaller) DismantleSatellite(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, _ domain.SatelliteID) error {
+	if err := f.credit(gtype); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.satellites--
+	return nil
 }
 
 func (f *fakeInstaller) snapshot() (stock int64, debits, jammers, satellites int) {

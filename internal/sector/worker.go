@@ -141,9 +141,17 @@ type MinerLogistics interface {
 // The real implementation lives in app/ over cargo + the object repositories,
 // keeping the sector package free of cargo dependencies (mirrors
 // MinerLogistics).
+// The Dismantle pair runs the same transaction backwards (TASK-146): it deletes
+// the object's row and credits the goods unit back to the hold in one commit, so
+// a lost ack cannot take a deployed object away without paying for it. The credit
+// is capacity-checked there (cargo.ErrNoSpace on a full hold) — unlike the drone
+// recall, one object either comes home whole or stays deployed. Same
+// Ordnance-style pairing of an operation with its reverse in one port.
 type StaticInstaller interface {
 	InstallJammer(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, j domain.Jammer) (domain.JammerID, error)
 	InstallSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, s domain.Satellite) (domain.SatelliteID, error)
+	DismantleJammer(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, id domain.JammerID) error
+	DismantleSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, id domain.SatelliteID) error
 }
 
 // Ordnance charges a launch's ammunition and creates its projectile rows in ONE

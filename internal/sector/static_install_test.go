@@ -54,6 +54,12 @@ type fakeStaticInstaller struct {
 	// blockUntilCancel makes the call wait for ctx cancellation, standing in
 	// for a hung Postgres (AC#3).
 	blockUntilCancel bool
+	// credits counts the successful dismantle credits and dismantled names the
+	// objects whose rows were deleted (TASK-146). noRoom makes the credit fail
+	// with cargo.ErrNoSpace, modelling a hold with no space for the object.
+	credits    int
+	dismantled []domain.EntityRef
+	noRoom     bool
 }
 
 func (f *fakeStaticInstaller) consume(owner domain.EntityRef, gtype domain.GoodsTypeID) error {
@@ -122,6 +128,62 @@ func (f *fakeStaticInstaller) InstallSatellite(ctx context.Context, owner domain
 	s.ID = domain.SatelliteID(f.nextID)
 	f.satellites = append(f.satellites, s)
 	return s.ID, nil
+}
+
+// credit is consume read backwards (TASK-146): the dismantle pays one unit back
+// into the hold, refusing when it does not fit. noRoom models a full hold.
+func (f *fakeStaticInstaller) credit(owner domain.EntityRef, gtype domain.GoodsTypeID) error {
+	f.owners = append(f.owners, owner)
+	f.goodsTypes = append(f.goodsTypes, gtype)
+	if f.failWith != nil {
+		return f.failWith
+	}
+	if f.noRoom {
+		return cargo.ErrNoSpace
+	}
+	f.stock++
+	f.credits++
+	return nil
+}
+
+func (f *fakeStaticInstaller) DismantleJammer(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, id domain.JammerID) error {
+	if err := f.enter(ctx); err != nil {
+		return err
+	}
+	if err := f.wait(ctx); err != nil {
+		return err
+	}
+	if err := f.credit(owner, gtype); err != nil {
+		return err
+	}
+	f.jammers = dropByID(f.jammers, func(j domain.Jammer) bool { return j.ID == id })
+	f.dismantled = append(f.dismantled, domain.EntityRef{Kind: domain.EntityKindJammer, ID: int64(id)})
+	return nil
+}
+
+func (f *fakeStaticInstaller) DismantleSatellite(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, id domain.SatelliteID) error {
+	if err := f.enter(ctx); err != nil {
+		return err
+	}
+	if err := f.wait(ctx); err != nil {
+		return err
+	}
+	if err := f.credit(owner, gtype); err != nil {
+		return err
+	}
+	f.satellites = dropByID(f.satellites, func(s domain.Satellite) bool { return s.ID == id })
+	f.dismantled = append(f.dismantled, domain.EntityRef{Kind: domain.EntityKindSatellite, ID: int64(id)})
+	return nil
+}
+
+// dropByID removes the first element matching pred, modelling the DELETE.
+func dropByID[T any](xs []T, pred func(T) bool) []T {
+	for i := range xs {
+		if pred(xs[i]) {
+			return append(xs[:i:i], xs[i+1:]...)
+		}
+	}
+	return xs
 }
 
 func installerWorker(t *testing.T, inst *fakeStaticInstaller, cfg sector.Config, ships []domain.Ship, opts ...sector.Option) *sector.Worker {

@@ -211,6 +211,7 @@ func NewServer(router SectorRouter, cfg Config, logger *slog.Logger) *Server {
 	s.mux.Handle("POST /api/cmd/transport-cargo", s.protect(http.HandlerFunc(s.handleTransport)))
 	s.mux.Handle("POST /api/cmd/install-satellite", s.protect(http.HandlerFunc(s.handleInstallSatellite)))
 	s.mux.Handle("POST /api/cmd/install-jammer", s.protect(http.HandlerFunc(s.handleInstallJammer)))
+	s.mux.Handle("POST /api/cmd/dismantle-static", s.protect(http.HandlerFunc(s.handleDismantleStatic)))
 	s.mux.Handle("POST /api/ship/{id}/activate", s.protect(http.HandlerFunc(s.handleActivateShip)))
 	s.mux.Handle("GET /api/player/ships", s.protect(http.HandlerFunc(s.handleFleet)))
 	s.mux.Handle("POST /api/cmd/cargo/move", s.protect(http.HandlerFunc(s.handleCargoMove)))

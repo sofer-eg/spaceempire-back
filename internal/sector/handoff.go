@@ -358,14 +358,11 @@ func IntakeTopic(sectorID domain.SectorID) string {
 	return fmt.Sprintf("sector.%d.intake", int64(sectorID))
 }
 
+// gateByID resolves a live gate. A destroyed gate is not in the topology at all
+// (TASK-110), so this answers nil for it and the jump is refused with
+// ErrInvalidGate — no separate "is it wreckage" check anywhere.
 func (w *Worker) gateByID(id domain.GateID) *domain.Gate {
-	for i := range w.topology.Gates() {
-		g := &w.topology.Gates()[i]
-		if g.ID == id {
-			return g
-		}
-	}
-	return nil
+	return w.topology.Gate(id)
 }
 
 // gateSides returns the (source-side exit pos, target sector, target-side

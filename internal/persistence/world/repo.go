@@ -33,11 +33,21 @@ FROM sectors s
 ORDER BY s.id
 `
 
+// Only live gates are loaded (TASK-110): a destroyed gate's link is severed for
+// good, so leaving it out of the topology is what keeps the sever across restarts
+// — no consumer has to filter on the flag.
 const loadGatesSQL = `
-SELECT id, sector_a, pos_a_x, pos_a_y, sector_b, pos_b_x, pos_b_y
+SELECT id, sector_a, pos_a_x, pos_a_y, sector_b, pos_b_x, pos_b_y,
+       hp, shield, max_shield, shield_recharge
 FROM gates
+WHERE NOT destroyed
 ORDER BY id
 `
+
+// MarkGateDestroyedSQL flags a gate as wreckage. Idempotent: re-running it on an
+// already-destroyed gate is a no-op, which is what makes a retry after an
+// ambiguous commit safe.
+const markGateDestroyedSQL = `UPDATE gates SET destroyed = TRUE WHERE id = $1`
 
 // LoadAll returns every sector and gate. Called once at startup; both
 // slices are empty (not nil) when the tables are empty.
@@ -99,22 +109,38 @@ func (r *Repository) loadGates(ctx context.Context) ([]domain.Gate, error) {
 	out := []domain.Gate{}
 	for rows.Next() {
 		var (
-			id, sectorA, sectorB       int64
-			posAX, posAY, posBX, posBY float64
+			id, sectorA, sectorB              int64
+			posAX, posAY, posBX, posBY        float64
+			hp, shield, maxShield, shieldRech int
 		)
-		if err := rows.Scan(&id, &sectorA, &posAX, &posAY, &sectorB, &posBX, &posBY); err != nil {
+		if err := rows.Scan(&id, &sectorA, &posAX, &posAY, &sectorB, &posBX, &posBY,
+			&hp, &shield, &maxShield, &shieldRech); err != nil {
 			return nil, fmt.Errorf("scan gate: %w", err)
 		}
 		out = append(out, domain.Gate{
-			ID:      domain.GateID(id),
-			SectorA: domain.SectorID(sectorA),
-			PosA:    domain.Vec2{X: posAX, Y: posAY},
-			SectorB: domain.SectorID(sectorB),
-			PosB:    domain.Vec2{X: posBX, Y: posBY},
+			ID:             domain.GateID(id),
+			SectorA:        domain.SectorID(sectorA),
+			PosA:           domain.Vec2{X: posAX, Y: posAY},
+			SectorB:        domain.SectorID(sectorB),
+			PosB:           domain.Vec2{X: posBX, Y: posBY},
+			HP:             hp,
+			Shield:         shield,
+			MaxShield:      maxShield,
+			ShieldRecharge: shieldRech,
 		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate gates: %w", err)
 	}
 	return out, nil
+}
+
+// MarkDestroyed flags a gate as destroyed so the next cold start leaves it — and
+// its sector link — out of the topology (TASK-110). The live graph is severed by
+// world.Topology.DestroyGate; this is the persistence half.
+func (r *Repository) MarkDestroyed(ctx context.Context, id domain.GateID) error {
+	if _, err := r.exec.Exec(ctx, markGateDestroyedSQL, int64(id)); err != nil {
+		return fmt.Errorf("mark gate destroyed: %w", err)
+	}
+	return nil
 }

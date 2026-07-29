@@ -50,6 +50,14 @@ const (
 	// static that jams the seamless jump drive of every ship within
 	// Config.JammerRange. Same static machinery as the satellite.
 	EntityKindJammer EntityKind = 13
+	// EntityKindGate is a jump gate (TASK-110). Gates were the one static
+	// excluded from the weapon-target set (ЧТЗ C-04); they now carry combat
+	// state like the rest, with one difference that shapes everything about
+	// them: a gate has TWO endpoints, one in each linked sector, and each
+	// sector's worker owns only its own side. The row — and the link — is
+	// shared, so destroying either endpoint destroys the gate and severs the
+	// link (see world.Topology.DestroyGate and sector/gate_combat.go).
+	EntityKindGate EntityKind = 14
 )
 
 type EntityRef struct {

@@ -455,6 +455,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		// install/destroy so a deployed generator survives a restart and a
 		// killed one stays dead.
 		sector.WithJammers(jammersRepo),
+		// TASK-110: gates are destructible. The worker severs the link in the
+		// shared topology on a kill; this persists the wreck so the sector pair
+		// stays disconnected across restarts (repair is TASK-67).
+		sector.WithGates(worldRepo),
 		// TASK-144: the install-jammer / install-satellite commands charge the
 		// goods and create the object in ONE transaction, so a lost ack can no
 		// longer hand out a free generator (nor eat the goods on a failed

@@ -6,21 +6,26 @@ import (
 	"spaceempire/back/internal/domain"
 )
 
-// PathRouter resolves sector-to-sector routes over the static gate graph.
-// BFS is lazy and cached per source sector — the first lookup for a given
-// source walks the whole reachable subgraph; subsequent lookups from the
-// same source are O(1) hash hits plus one parent step for NextSector.
+// PathRouter resolves sector-to-sector routes over the gate graph. BFS is lazy
+// and cached per source sector — the first lookup for a given source walks the
+// whole reachable subgraph; subsequent lookups from the same source are O(1) hash
+// hits plus one parent step for NextSector.
 //
-// The world is immutable after startup, so cache entries never expire.
-// Concurrent readers walk the cache under RLock; writers take Lock and
-// re-check the cache after acquiring it (another goroutine may have
-// finished the BFS while we were waiting).
+// The graph changes only when a gate is destroyed (TASK-110), so the cache is
+// keyed on the topology's version: a lookup that finds a newer version throws the
+// whole cache away and re-runs BFS on the severed graph. Anything else would keep
+// routing ships through a gate that no longer exists.
+//
+// Concurrent readers walk the cache under RLock; writers take Lock and re-check
+// the cache after acquiring it (another goroutine may have finished the BFS while
+// we were waiting).
 type PathRouter struct {
 	topo     *Topology
 	excluded map[domain.SectorID]struct{}
 
-	mu    sync.RWMutex
-	cache map[domain.SectorID]*bfsResult
+	mu      sync.RWMutex
+	cache   map[domain.SectorID]*bfsResult
+	version uint64
 }
 
 // bfsResult holds per-destination distance and parent pointer relative to
@@ -46,6 +51,7 @@ func NewPathRouter(topo *Topology, excluded []domain.SectorID) *PathRouter {
 		topo:     topo,
 		excluded: ex,
 		cache:    make(map[domain.SectorID]*bfsResult),
+		version:  topo.Version(),
 	}
 }
 
@@ -125,8 +131,10 @@ func (r *PathRouter) GateSidePos(from, to domain.SectorID) (domain.Vec2, bool) {
 }
 
 func (r *PathRouter) bfsFrom(source domain.SectorID) *bfsResult {
+	version := r.topo.Version()
+
 	r.mu.RLock()
-	if res, ok := r.cache[source]; ok {
+	if res, ok := r.cache[source]; ok && r.version == version {
 		r.mu.RUnlock()
 		return res
 	}
@@ -134,6 +142,13 @@ func (r *PathRouter) bfsFrom(source domain.SectorID) *bfsResult {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.version != version {
+		// A gate was destroyed since these results were computed: every cached
+		// route may run through it, so the whole cache goes. Gate destruction is
+		// rare enough that a full re-BFS costs nothing worth optimising.
+		r.cache = make(map[domain.SectorID]*bfsResult, len(r.cache))
+		r.version = version
+	}
 	if res, ok := r.cache[source]; ok {
 		return res
 	}
@@ -154,7 +169,7 @@ func (r *PathRouter) runBFS(source domain.SectorID) *bfsResult {
 		cur := queue[0]
 		queue = queue[1:]
 
-		for neighbour := range r.topo.adjacency[cur] {
+		for _, neighbour := range r.topo.neighbours(cur) {
 			if _, blocked := r.excluded[neighbour]; blocked {
 				continue
 			}

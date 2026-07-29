@@ -201,3 +201,41 @@ func BenchmarkPathRouter_NextSector(b *testing.B) {
 		_, _ = r.NextSector(1, 4)
 	}
 }
+
+// TASK-110: the router caches BFS per source and the graph used to be immutable.
+// A destroyed gate breaks that premise, so a cached route must not survive it —
+// otherwise ships keep being routed through a gate that no longer exists.
+func TestUnit_PathRouter_DestroyedGateInvalidatesCache(t *testing.T) {
+	t.Parallel()
+
+	topo := routerFixture()
+	r := world.NewPathRouter(topo, nil)
+
+	// Warm the cache from both ends of the chain.
+	next, ok := r.NextSector(1, 3)
+	require.True(t, ok)
+	require.EqualValues(t, 2, next)
+	hops, ok := r.Hops(3, 1)
+	require.True(t, ok)
+	require.Equal(t, 2, hops)
+
+	require.True(t, topo.DestroyGate(10), "sever 1 — 2")
+
+	_, ok = r.NextSector(1, 3)
+	assert.False(t, ok, "no route through a destroyed gate")
+	_, ok = r.NextSector(1, 2)
+	assert.False(t, ok)
+	_, ok = r.Hops(3, 1)
+	assert.False(t, ok, "the reverse direction is severed too")
+
+	// What is still connected stays connected.
+	next, ok = r.NextSector(2, 3)
+	assert.True(t, ok)
+	assert.EqualValues(t, 3, next)
+
+	// GateBetween follows the same graph, so the autopilot cannot resolve a
+	// waypoint through the wreck either.
+	assert.Nil(t, r.GateBetween(1, 2))
+	_, ok = r.GateSidePos(1, 2)
+	assert.False(t, ok)
+}

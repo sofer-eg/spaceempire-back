@@ -10,19 +10,31 @@ import (
 
 // IsStaticTargetKind reports whether k is a destructible static a weapon may
 // lock onto besides ships (phase 6.2b): station, shipyard, trade station,
-// pirbase, laser tower, satellite, jammer. Gates are intentionally excluded —
-// they are not destructible (ЧТЗ C-04, lifted by TASK-110). Exported so the
-// HTTP launch handlers gate on the exact same set the worker enforces
+// pirbase, laser tower, satellite, jammer and — since TASK-110 — gate. Exported
+// so the HTTP launch handlers gate on the exact same set the worker enforces
 // (TASK-113 FR-06, NFR-03 — one source of truth for the targetable-static set).
 func IsStaticTargetKind(k domain.EntityKind) bool {
 	switch k {
 	case domain.EntityKindStation, domain.EntityKindShipyard,
 		domain.EntityKindTradeStation, domain.EntityKindPirbase,
 		domain.EntityKindLaserTower, domain.EntityKindSatellite,
-		domain.EntityKindJammer:
+		domain.EntityKindJammer, domain.EntityKindGate:
 		return true
 	}
 	return false
+}
+
+// staticAttackable reports whether attacker may fire at this static. Owned
+// statics go through the hostility oracle (6.2: friendly/neutral objects are
+// invulnerable). A gate has no owner and belongs to nobody's side, so the oracle
+// would answer "not hostile" and make it invulnerable — which is exactly the
+// pre-TASK-110 state this task removes. Gates are public infrastructure: anyone
+// can shoot one down, and everyone loses the link when they do.
+func (w *Worker) staticAttackable(d *domain.DestructibleStatic, attacker *domain.Ship) bool {
+	if d.Ref.Kind == domain.EntityKindGate {
+		return true
+	}
+	return w.hostile(d.OwnerID, attacker)
 }
 
 // chargeStatics recharges every destructible static's shield one tick, the
@@ -42,7 +54,7 @@ func chargeStatics(s *sectorState) {
 // destroyed target drops the engagement. On a kill the static is removed.
 func (w *Worker) fireLaserAtStatic(ctx context.Context, s *sectorState, attackerID domain.ShipID, attacker *domain.Ship, ref domain.EntityRef) {
 	d, ok := s.destructibles[ref]
-	if !ok || d.HP <= 0 || !w.hostile(d.OwnerID, attacker) {
+	if !ok || d.HP <= 0 || !w.staticAttackable(d, attacker) {
 		// Target gone, dead, or not hostile (friendly/neutral invulnerable,
 		// 6.2 rules) — stop shooting it.
 		attacker.AttackTarget = nil
@@ -104,6 +116,12 @@ func (w *Worker) killStatic(ctx context.Context, s *sectorState, d *domain.Destr
 		if err != nil {
 			w.logger.ErrorContext(ctx, "kill: persist jammer destruction", "err", err, "jammer", ref.ID)
 		}
+	}
+	// A gate's death is not just a removed object: its link is gone, so the sever
+	// happens in the shared topology (which re-routes everything in flight) and is
+	// persisted, while the twin sector's endpoint is reaped by its own worker.
+	if ref.Kind == domain.EntityKindGate {
+		w.killGate(ctx, domain.GateID(ref.ID))
 	}
 	// Static kills carry no killer/victim-player attribution (bounties target
 	// players, not stations) — Killer/VictimPlayer stay 0.

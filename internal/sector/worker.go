@@ -291,6 +291,10 @@ type Worker struct {
 	// Nil makes a kill RAM-only. Wired via WithJammers.
 	jammerRepo JammerRepo
 
+	// gateRepo persists gate destruction (TASK-110). Nil severs the link in the
+	// live topology only, so a restart restores it. Wired via WithGates.
+	gateRepo GateRepo
+
 	// staticInstaller charges the goods and creates the object in one
 	// transaction — the only install path (TASK-144). Nil makes install
 	// commands fail with ErrInstallerUnavailable. Wired via WithStaticInstaller.
@@ -728,6 +732,12 @@ func NewWorker(
 	w.initialContainers = nil
 	w.initialAsteroids = nil
 
+	// Register this sector's side of every live gate as a shootable endpoint
+	// (TASK-110). Runs here, after the options, because it needs the topology.
+	for _, s := range w.sectors {
+		w.seedGateEndpoints(s)
+	}
+
 	// Hydrate AI controllers for every owned sector (always — buildControllers
 	// initializes an empty map when no AI is wired, keeping tickAI a no-op).
 	for id, s := range w.sectors {
@@ -1029,6 +1039,10 @@ func (w *Worker) tickSector(ctx context.Context, s *sectorState, baseDt float64)
 	w.tryAutoDock(s)
 	chargeShields(s)
 	chargeStatics(s)
+	// Drop this sector's gate endpoint when the OTHER side of the gate was shot
+	// down: the twin worker severed the link in the shared topology, and this is
+	// where this sector reconciles its own RAM with it (TASK-110).
+	w.sweepDestroyedGates(s)
 	chargeEnergies(s)
 	w.fireLasers(ctx, s)
 	w.tickPoliceScan(ctx, s)

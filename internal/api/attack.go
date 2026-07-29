@@ -14,8 +14,9 @@ import (
 
 // handleAttack arms the laser tick: sets AttackTarget on the given
 // ship. PlayerID is enforced via session — only the ship's owner can
-// fire. Phase 4.2 only accepts EntityKindShip targets; other kinds get
-// 400.
+// fire. The kind set is the worker's (another ship, or a shoot-downable
+// projectile since TASK-112); anything else comes back as
+// ErrInvalidAttackTarget → 400.
 func (s *Server) handleAttack(w http.ResponseWriter, r *http.Request) {
 	var req dto.AttackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

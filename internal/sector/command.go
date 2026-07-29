@@ -343,11 +343,18 @@ func (c UpdateShipEquipmentCommand) apply(_ *Worker, s *sectorState) {
 	replyOnce(c.Reply, res)
 }
 
-// AttackCommand sets a ship's AttackTarget. Phase 4.2 only supports
-// EntityKindShip targets; other kinds reply ErrInvalidAttackTarget.
-// Self-attack (Target.ID == ShipID) is also rejected. On success the
-// worker writes the new AttackTarget immediately via repo.Save so a
-// crash between ticks does not lose the player's intent.
+// AttackCommand sets a ship's AttackTarget: another ship, or — since TASK-112 — a
+// shoot-downable projectile (isProjectileTargetKind, i.e. a torpedo). Other kinds
+// reply ErrInvalidAttackTarget; statics stay player-unattackable by design
+// (TASK-53.2), and self-attack is rejected. On success the worker writes the new
+// AttackTarget immediately via repo.Save so a crash between ticks does not lose the
+// player's intent.
+//
+// Aiming at a torpedo is deliberately NOT hostility-gated (ЧТЗ doc-1 R-02 keeps
+// splash friendly-fire unselective, and aborting your own torpedo is a legitimate
+// move). Automatic point defence IS gated — see nearestHostileTorpedo. Until this
+// command accepted a projectile the shoot-down mechanism from TASK-100.3.5.6 was
+// structurally present but unreachable: nothing could be told to fire at a torpedo.
 type AttackCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
@@ -363,9 +370,7 @@ func (c AttackCommand) apply(w *Worker, s *sectorState) {
 		res.Err = ErrShipNotFound
 	case ship.PlayerID != c.PlayerID:
 		res.Err = ErrForbidden
-	case c.Target.Kind != domain.EntityKindShip:
-		res.Err = ErrInvalidAttackTarget
-	case domain.ShipID(c.Target.ID) == c.ShipID:
+	case !attackTargetable(c.ShipID, c.Target):
 		res.Err = ErrInvalidAttackTarget
 	default:
 		target := c.Target
@@ -374,6 +379,18 @@ func (c AttackCommand) apply(w *Worker, s *sectorState) {
 		w.immediateSave(ship)
 	}
 	replyOnce(c.Reply, res)
+}
+
+// attackTargetable reports whether ref is something ShipID may point its laser at:
+// another ship, or a shoot-downable projectile (a torpedo). A projectile carries no
+// self-target case — a ship and a torpedo cannot share an id space — and statics
+// remain out of the set on purpose (TASK-53.2: player-unattackable by design, the
+// precedent this task follows in reverse).
+func attackTargetable(shipID domain.ShipID, ref domain.EntityRef) bool {
+	if ref.Kind == domain.EntityKindShip {
+		return domain.ShipID(ref.ID) != shipID
+	}
+	return isProjectileTargetKind(ref.Kind)
 }
 
 // CeaseFireCommand clears a ship's AttackTarget. Idempotent — a

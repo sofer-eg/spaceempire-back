@@ -56,8 +56,9 @@ func chargeEnergies(s *sectorState) {
 // the 4.2 path; static targets (station/shipyard/trade-station/pirbase/
 // tower) go through fireLaserAtStatic (phase 6.2b); shoot-downable
 // projectiles (torpedo, the isProjectileTargetKind set) go through
-// fireLaserAtProjectile (TASK-100.3.5.6); any other kind (e.g. a gate) is
-// treated as "no target" and the attack reference is cleared.
+// fireLaserAtProjectile (TASK-100.3.5.6 for the mechanism, TASK-112 for the
+// AttackCommand that finally reaches it); any other kind (a container, an
+// asteroid) is treated as "no target" and the attack reference is cleared.
 func (w *Worker) fireLasers(ctx context.Context, s *sectorState) {
 	for id, attacker := range s.ships {
 		if attacker.AttackTarget == nil {

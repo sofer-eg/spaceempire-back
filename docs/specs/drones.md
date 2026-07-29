@@ -192,6 +192,15 @@ flying.**
   recall is a WARN line naming how many stayed out, because the button is
   otherwise silent about it.
 
+## 2.4 Point defence (TASK-112)
+
+С TASK-112 дрон, у которого нет живой корабельной цели, перехватывает входящую
+**враждебную** торпеду (`acquireDroneTorpedo`, тот же радиус захвата, что для
+кораблей). Корабли в приоритете — перехват занимает простаивающие тики. Урон
+только по HP, реап торпеды остаётся в `tickTorpedos`. Полное описание, включая
+правило враждебности (автоматика гейтится, приказ — нет), — в
+`point_defense.md`.
+
 ## 3. Persistence (immediate, unlike missiles)
 
 Drones are **persistent state** (acceptance criterion: "при рестарте

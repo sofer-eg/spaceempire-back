@@ -41,6 +41,12 @@ func (w *Worker) tickTowers(ctx context.Context, s *sectorState) {
 		}
 		target := combat.SelectTowerTarget(t, s.ships, towerSpec, pred)
 		if target == nil {
+			// Point defence (TASK-112): with no hostile ship in range, engage an
+			// incoming hostile torpedo instead. Ships first — a tower's job is the
+			// ship threatening what it guards; interception fills the idle ticks.
+			if tp := w.acquireTowerTorpedo(s, t); tp != nil {
+				w.fireTowerAtTorpedo(s, t, tp)
+			}
 			continue
 		}
 		res := combat.ApplyDamage(target, towerSpec.Damage)

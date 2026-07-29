@@ -107,3 +107,11 @@ there is no `BatchUpdate`.
 - "Может разрушиться и восстановиться через ремонт станции" → deferred:
   tower damage/destruction is 4.6, repair-via-station is not in the old
   SP, so it is left for a later balance pass.
+
+## Point defence (TASK-112)
+
+Башня без враждебного корабля в радиусе стреляет по входящей враждебной торпеде
+(`acquireTowerTorpedo` + `fireTowerAtTorpedo`). Враждебность торпеды судится по её
+пусковому кораблю — обе предикат-формы (`w.hostile` у игровых башен,
+`w.raceHostile` у расовых) принимают корабль; если пусковой корабль не в секторе,
+башня не стреляет. Подробности и правило враждебности — `point_defense.md`.

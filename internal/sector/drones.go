@@ -102,9 +102,25 @@ func (w *Worker) tickDrones(ctx context.Context, s *sectorState, dt float64, now
 			}
 		}
 
+		// Point defence (TASK-112): no ship to engage, so look for an incoming
+		// hostile torpedo instead. Ships come first deliberately — a drone screen is
+		// there to fight the enemy, and intercepting is what it does with the time
+		// left over.
+		var targetTorpedo *domain.Torpedo
+		if !targetAlive {
+			if tp := w.acquireDroneTorpedo(s, d); tp != nil {
+				targetTorpedo = tp
+				targetAlive = true
+				activeTarget = domain.EntityRef{Kind: domain.EntityKindTorpedo, ID: int64(tp.ID)}
+			}
+		}
+
 		dest := owner.Pos
-		if targetAlive {
+		switch {
+		case targetShip != nil:
 			dest = targetShip.Pos
+		case targetTorpedo != nil:
+			dest = targetTorpedo.Pos
 		}
 
 		if combat.TickDrone(d, dest, droneSpec, dt, now) == combat.DroneExpired {
@@ -118,6 +134,26 @@ func (w *Worker) tickDrones(ctx context.Context, s *sectorState, dt float64, now
 			continue
 		}
 		s.markDroneDirty(id)
+
+		if targetTorpedo != nil {
+			// Interception: HP-only damage (a torpedo has no shield) and no kill
+			// attribution — a shot-down torpedo pays no bounty. The reap stays in
+			// tickTorpedos, which runs after this and emits impact(killed) with no
+			// splash (ЧТЗ §5.3), the same division fireLaserAtProjectile keeps.
+			if combat.DroneCanFire(d, targetTorpedo.Pos, droneSpec) {
+				res := targetTorpedo.TakeDamage(d.Damage)
+				s.markTorpedoDirty(targetTorpedo.ID)
+				s.addDroneImpact(DroneImpact{
+					DroneID:     id,
+					OwnerShipID: d.OwnerShipID,
+					Target:      activeTarget,
+					Pos:         d.Pos,
+					Damage:      res.HPAbsorbed,
+					Killed:      res.Killed,
+				})
+			}
+			continue
+		}
 
 		if targetAlive && combat.DroneCanFire(d, targetShip.Pos, droneSpec) {
 			res := combat.ApplyDamage(targetShip, d.Damage)

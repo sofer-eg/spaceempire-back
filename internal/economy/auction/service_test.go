@@ -23,12 +23,15 @@ import (
 // error shapes so the service code path is exercised exactly. It doubles
 // as its own TxRunner, serializing whole transactions (see txMu).
 type stubRepo struct {
-	// txMu is held for the whole body of Do, standing in for the row lock
-	// production takes (LockLot = SELECT ... FOR UPDATE, held until COMMIT):
-	// it serializes concurrent "transactions". mu is a separate lock that
-	// each method takes and releases on its own; it guards the maps against
-	// data races but grants no transaction atomicity, so it cannot stop two
-	// bidders from both reading the same CurrentPrice and both winning.
+	// txMu is held for the whole body of Do: it serializes concurrent
+	// "transactions" the way a real COMMIT boundary does. It does so
+	// unconditionally, whether or not the service takes a row lock, which is
+	// why no test built on this fixture can cover the lock itself — see the
+	// note on TestUnit_AuctionService_Bid_RaceSingleWinner. mu is a separate
+	// lock that each method takes and releases on its own; it guards the maps
+	// against data races but grants no transaction atomicity, so on its own it
+	// cannot stop two bidders from both reading the same CurrentPrice and both
+	// winning.
 	txMu sync.Mutex
 	mu   sync.Mutex
 
@@ -66,6 +69,8 @@ func newStubRepo() *stubRepo {
 
 // dockShip registers a ship as docked at the given station, owned by player.
 func (s *stubRepo) dockShip(id domain.ShipID, player domain.PlayerID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.shipDocks[id] = auctionrepo.ShipDock{
 		PlayerID: player,
 		Docked:   &domain.EntityRef{Kind: domain.EntityKindStation, ID: 1},
@@ -82,10 +87,66 @@ func (s *stubRepo) LoadShipDock(_ context.Context, shipID domain.ShipID) (auctio
 	return d, nil
 }
 
+// Do stands in for TxManager.Do: it serializes whole transactions (txMu) and
+// rolls the stub's state back when fn returns an error. The rollback is not
+// decoration — several tests here already assert "nothing moved" after a
+// rejected Create/Bid, and they hold today only because every one of those
+// guards happens to fire before the first write. A case whose failure lands
+// mid-transaction (say InsertBid failing after AdjustCash succeeded) would go
+// red against correct production code without it, since the real
+// TxManager.Do rolls back.
 func (s *stubRepo) Do(ctx context.Context, fn func(context.Context, auction.Repo) error) error {
 	s.txMu.Lock()
 	defer s.txMu.Unlock()
-	return fn(ctx, s)
+	before := s.snapshot()
+	if err := fn(ctx, s); err != nil {
+		s.restore(before)
+		return err
+	}
+	return nil
+}
+
+// stubState copies everything the Repo methods mutate. goodsTypes, ships and
+// shipDocks are left out on purpose: only test setup writes those, never a
+// transaction body.
+type stubState struct {
+	lots      map[int64]auctionrepo.Lot
+	bids      []bidEntry
+	nextLotID int64
+	cash      map[domain.PlayerID]int64
+	stacks    map[domain.EntityRef]map[domain.GoodsTypeID]int64
+}
+
+func (s *stubRepo) snapshot() stubState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := stubState{
+		lots:      make(map[int64]auctionrepo.Lot, len(s.lots)),
+		bids:      append([]bidEntry(nil), s.bids...),
+		nextLotID: s.nextLotID,
+		cash:      make(map[domain.PlayerID]int64, len(s.cash)),
+		stacks:    make(map[domain.EntityRef]map[domain.GoodsTypeID]int64, len(s.stacks)),
+	}
+	for id, lot := range s.lots {
+		st.lots[id] = lot
+	}
+	for player, v := range s.cash {
+		st.cash[player] = v
+	}
+	for owner, byType := range s.stacks {
+		cp := make(map[domain.GoodsTypeID]int64, len(byType))
+		for gtype, qty := range byType {
+			cp[gtype] = qty
+		}
+		st.stacks[owner] = cp
+	}
+	return st
+}
+
+func (s *stubRepo) restore(st stubState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lots, s.bids, s.nextLotID, s.cash, s.stacks = st.lots, st.bids, st.nextLotID, st.cash, st.stacks
 }
 
 func (s *stubRepo) CreateLot(_ context.Context, p auctionrepo.CreateLotParams) (auctionrepo.Lot, error) {
@@ -506,13 +567,21 @@ func TestUnit_AuctionService_Close_UnknownLot(t *testing.T) {
 	require.True(t, errors.Is(err, auction.ErrLotNotFound))
 }
 
-// TestUnit_AuctionService_Bid_RaceSingleWinner is the acceptance race
-// scenario from the task: 10 bidders fire amount=200 at the same lot
-// concurrently. Exactly one must succeed; the rest must see ErrBidTooLow.
-// stubRepo.Do serializes the whole transaction body (see txMu), which is
-// what real Postgres gives Bid via LockLot's SELECT ... FOR UPDATE: the
-// row lock is held until COMMIT, so the read of CurrentPrice and the write
-// that raises it are one indivisible step.
+// TestUnit_AuctionService_Bid_RaceSingleWinner fires 10 concurrent bids of
+// amount=200 at one lot and requires exactly one winner. Read what it proves
+// narrowly: stubRepo.Do wraps the whole transaction body in txMu, so
+// atomicity here is a property of the fixture, not of Bid. What is under test
+// is the sequential guard — amount <= CurrentPrice must reject the nine that
+// arrive after the price moved to 200 — plus the fact that Bid is safe to
+// call concurrently at all (no data race, no deadlock).
+//
+// It does NOT prove that production takes the row lock: with the fixture
+// serializing everything, swapping LockLot for the unlocked GetLot in Bid
+// leaves this test green. That invariant belongs to — and is only checked at
+// — the integration layer, on real Postgres, where the second transaction
+// blocks in SELECT ... FOR UPDATE: see
+// TestIntegration_AuctionService_Bid_ConcurrentBidsSingleWinner in
+// service_integration_test.go.
 func TestUnit_AuctionService_Bid_RaceSingleWinner(t *testing.T) {
 	f := newFixture(t)
 	lot := f.defaultCreate(t)

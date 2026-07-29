@@ -738,6 +738,106 @@ func TestUnit_Kill_SlowSubscriberCannotStarveTheSpacesuit(t *testing.T) {
 		"every dead player must reach the respawn subscriber, whatever another handler is doing")
 }
 
+// TestUnit_Kill_EffectPublishIsCancelledByShutdown is the shutdown half of the
+// side-effect publish contract, and the reason publishEffect takes a parent
+// context instead of using context.Background().
+//
+// bus.InMemory's subscriber goroutine exits the moment its context is cancelled
+// — it does NOT drain what is buffered — and takes the channel's only reader with
+// it. A publisher already blocked on that full channel therefore has exactly one
+// way out: its own context. Under context.Background() there is none, so the
+// sequence "Postgres hangs → subscribers back up → tick blocks in publish →
+// SIGTERM → subscriber goroutine exits" left Run parked forever: no
+// `case <-ctx.Done(): w.flushAll()`, no graceful flush of ship positions, and an
+// app.go wg.Wait() that only SIGKILL ends. Background was not "how it was before
+// TASK-148" either — the pre-TASK-148 publishKilled used the tick's context.
+//
+// The test is deterministic rather than racy: the subscriber's buffer is filled
+// first and the tick's context is cancelled BEFORE the tick runs, so the publish
+// must observe a dead context on a channel that will never drain. With the
+// parent honoured it returns at once; with context.Background() it blocks
+// forever and the tick never returns. EffectPublishTimeout is left at a minute so
+// that a passing run cannot be the deadline rescuing us.
+func TestUnit_Kill_EffectPublishIsCancelledByShutdown(t *testing.T) {
+	t.Parallel()
+	b := bus.NewInMemory(1)
+	subCtx, cancelSub := context.WithCancel(context.Background())
+	defer cancelSub()
+
+	wedged := make(chan struct{})
+	defer close(wedged)
+	ran := make(chan struct{}, 1)
+	require.NoError(t, b.Subscribe(subCtx, sector.EntityKilledTopic, func([]byte) {
+		ran <- struct{}{}
+		<-wedged
+	}))
+	// One payload into the handler (which then wedges), one into the 1-deep
+	// buffer: the next publish to this topic has nowhere to go, ever.
+	require.NoError(t, b.Publish(context.Background(), sector.EntityKilledTopic, []byte(`{}`)))
+	<-ran
+	require.NoError(t, b.Publish(context.Background(), sector.EntityKilledTopic, []byte(`{}`)))
+
+	cfg := stallCfg()
+	cfg.EffectPublishTimeout = time.Minute // must not be what saves this tick
+	w := sector.NewWorker(0, cfg, clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {
+			{ID: 1, PlayerID: 100, SectorID: testSector, HP: 0, MaxHP: 100},
+		}},
+		sector.WithHandoff(handoffTopology(), b))
+
+	// Shutdown has already happened by the time the tick publishes.
+	tickCtx, cancelTick := context.WithCancel(context.Background())
+	cancelTick()
+
+	done := make(chan struct{})
+	go func() {
+		w.Tick(tickCtx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("tick never returned: the side-effect publish ignored its parent context, " +
+			"so a cancelled subscriber leaves it blocked forever and shutdown hangs")
+	}
+	assert.Empty(t, w.Snapshot(testSector).Ships, "the dead ship still left the sector")
+}
+
+// TestUnit_Kill_EffectPublishIsBounded: even with nobody cancelling anything, a
+// wedged subscriber must not park the worker for good. The infinite-block version
+// of publishEffect was rejected for a sharper reason than "unbounded is untidy":
+// SpawnSpacesuit re-enters THIS worker with an AddShipCommand and waits for the
+// ack, so a Run goroutine parked in the kill publish cannot deliver the very
+// spacesuit the block was protecting.
+func TestUnit_Kill_EffectPublishIsBounded(t *testing.T) {
+	t.Parallel()
+	b := bus.NewInMemory(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wedged := make(chan struct{})
+	defer close(wedged)
+	ran := make(chan struct{}, 1)
+	require.NoError(t, b.Subscribe(ctx, sector.EntityKilledTopic, func([]byte) {
+		ran <- struct{}{}
+		<-wedged
+	}))
+	require.NoError(t, b.Publish(context.Background(), sector.EntityKilledTopic, []byte(`{}`)))
+	<-ran
+	require.NoError(t, b.Publish(context.Background(), sector.EntityKilledTopic, []byte(`{}`)))
+
+	cfg := stallCfg()
+	cfg.EffectPublishTimeout = 30 * time.Millisecond
+	w := sector.NewWorker(0, cfg, clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {
+			{ID: 1, PlayerID: 100, SectorID: testSector, HP: 0, MaxHP: 100},
+		}},
+		sector.WithHandoff(handoffTopology(), b))
+
+	tickWithin(t, w) // an uncancelled context: only the deadline can end this
+	assert.Empty(t, w.Snapshot(testSector).Ships)
+}
+
 // TestUnit_Bus_ExpiredContextStillDeliversToSubscribersWithRoom pins the other
 // half of the bus fix at its own level: a subscriber that has room takes the
 // payload even when the context is already dead. Without the non-blocking first
@@ -746,20 +846,25 @@ func TestUnit_Kill_SlowSubscriberCannotStarveTheSpacesuit(t *testing.T) {
 // the resulting flake would have looked like anything but a bus bug.
 func TestUnit_Bus_ExpiredContextStillDeliversToSubscribersWithRoom(t *testing.T) {
 	t.Parallel()
-	b := bus.NewInMemory(4)
+	b := bus.NewInMemory(16)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	got := make(chan []byte, 8)
+	got := make(chan []byte, 32)
 	require.NoError(t, b.Subscribe(ctx, "t", func(p []byte) { got <- p }))
 
 	dead, cancelDead := context.WithCancel(context.Background())
 	cancelDead()
-	for i := 0; i < 4; i++ {
+	// The bug this pins is randomised: a plain select over {send, ctx.Done()}
+	// picks either case when both are ready, so N iterations let it escape with
+	// probability 2^-N. Four was ~6% — about one clean run in twenty. Twelve puts
+	// it at ~0.02%, which is below the noise floor of the rest of the suite.
+	const attempts = 12
+	for i := 0; i < attempts; i++ {
 		require.NoError(t, b.Publish(dead, "t", []byte("x")),
 			"a subscriber with room must receive the payload regardless of the context")
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < attempts; i++ {
 		select {
 		case <-got:
 		case <-time.After(5 * time.Second):
@@ -788,6 +893,13 @@ func TestUnit_Bus_PartialDeliveryNamesWhoMissed(t *testing.T) {
 	require.NoError(t, b.Publish(context.Background(), "t", []byte("warm")))
 	<-ran
 	require.NoError(t, b.Publish(context.Background(), "t", []byte("fill"))) // slow buffer now full
+	// Drain what the warm-up already delivered to the fast subscriber. Without
+	// this, the `<-fast` at the end reads a stale warm-up signal out of the
+	// buffered channel and passes whether or not the bounded publish reached the
+	// subscriber behind the blocked one — which is precisely the behaviour this
+	// test exists to hold, so the assertion was decorative.
+	<-fast
+	<-fast
 
 	short, cancelShort := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancelShort()
@@ -803,6 +915,74 @@ func TestUnit_Bus_PartialDeliveryNamesWhoMissed(t *testing.T) {
 	case <-fast:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the second subscriber was starved by the first")
+	}
+}
+
+// --- production: a loop of transactions under one deadline -------------------
+
+// stubProduction is a sector.ProductionTicker that records the station ids it was
+// handed, in order, and mutates them in place so the test can prove the rotation
+// still writes through to the sector's own slice. failAfter > 0 makes it stop
+// (and report) after that many stations in one Tick call, standing in for the
+// deadline truncating the cycle.
+type stubProduction struct {
+	seen  [][]domain.StationID
+	calls int
+}
+
+func (p *stubProduction) Tick(_ context.Context, stations []domain.Station, _ time.Time) (int, error) {
+	p.calls++
+	ids := make([]domain.StationID, 0, len(stations))
+	for i := range stations {
+		ids = append(ids, stations[i].ID)
+		stations[i].Shield++ // in-place write: must land on the worker's own slice
+	}
+	p.seen = append(p.seen, ids)
+	return len(stations), nil
+}
+
+// TestUnit_Production_RotatesTheCycleStartAndWritesThroughSubslices holds the
+// three things the rotation quietly depends on. production.Service.Tick runs one
+// transaction per station, so cfg.RepoTimeout bounds the whole cycle rather than
+// a round trip; with a fixed entry point a degraded DB truncated the cycle at the
+// same place every tick and the tail simply stopped producing. Rotating the entry
+// point spreads that, but only if:
+//
+//   - the start really advances with the tick counter, and every station is still
+//     visited exactly once per tick (rotation, not omission or duplication);
+//   - the two calls share ONE dbCall, so the bound is unchanged;
+//   - both sub-slices alias the sector's own backing array, so the ticker's
+//     in-place mutation is not written to a copy and thrown away.
+func TestUnit_Production_RotatesTheCycleStartAndWritesThroughSubslices(t *testing.T) {
+	t.Parallel()
+	prod := &stubProduction{}
+	statics := domain.SectorStatics{Stations: []domain.Station{
+		{ID: 10, SectorID: testSector, Built: true},
+		{ID: 11, SectorID: testSector, Built: true},
+		{ID: 12, SectorID: testSector, Built: true},
+	}}
+	w := sector.NewWorker(0, stallCfg(), clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {}},
+		sector.WithProduction(prod),
+		sector.WithStatics(map[domain.SectorID]domain.SectorStatics{testSector: statics}))
+
+	for i := 0; i < 3; i++ {
+		w.Tick(context.Background())
+	}
+
+	require.Equal(t, 6, prod.calls, "two calls per tick: the rotated head and the wrapped tail")
+	// Ticks 0,1,2 start at stations[0], [1], [2] — the truncation point moves.
+	assert.Equal(t, [][]domain.StationID{
+		{10, 11, 12}, {},
+		{11, 12}, {10},
+		{12}, {10, 11},
+	}, prod.seen, "the cycle's entry point must advance with the tick counter")
+
+	// Every station was visited once per tick and the writes landed on the
+	// worker's slice, not on a copy of it.
+	for _, st := range w.Snapshot(testSector).Statics.Stations {
+		assert.EqualValues(t, 3, st.Shield,
+			"station %d: in-place production writes must reach the sector's own slice", st.ID)
 	}
 }
 

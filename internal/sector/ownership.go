@@ -109,9 +109,13 @@ func (w *Worker) logOwnerTransferError(err error, s *sectorState, ship *domain.S
 		"new_owner", int64(newOwner), "sector", int64(s.sectorID))
 }
 
-// publishShipCaptured emits the crew-eject event on the bus. Best-effort: a nil
-// bus (pure unit tests) or a publish error is skipped/logged, never blocking the
-// tick. Mirrors publishKilled / publishPoliceScan.
+// publishShipCaptured emits the crew-eject event on the bus. This is a SIDE-EFFECT
+// topic, not a notification: the ship is already re-owned and this event is what
+// puts the old crew into spacesuits, so it goes through publishEffect and can
+// hold the tick for up to cfg.EffectPublishTimeout when the subscriber is behind
+// (publish's RepoTimeout would drop the eject over a stutter). A nil bus (pure
+// unit tests) is still a no-op and an error is still logged rather than returned.
+// Mirrors publishKilled.
 func (w *Worker) publishShipCaptured(ctx context.Context, s *sectorState, ev ShipCapturedEvent) {
 	if w.bus == nil {
 		return
@@ -121,7 +125,7 @@ func (w *Worker) publishShipCaptured(ctx context.Context, s *sectorState, ev Shi
 		w.logger.ErrorContext(ctx, "capture: marshal event", "err", err, "ship", int64(ev.ShipID))
 		return
 	}
-	if err := w.publishEffect(ShipCapturedTopic, payload); err != nil {
+	if err := w.publishEffect(ctx, ShipCapturedTopic, payload); err != nil {
 		// The ship is already re-owned; this event is what puts the old crew into
 		// spacesuits, and nothing retries it.
 		w.logger.ErrorContext(ctx, "capture: ship_captured not delivered, the old crew was not ejected",

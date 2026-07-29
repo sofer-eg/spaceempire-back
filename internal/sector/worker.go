@@ -1115,7 +1115,7 @@ func (w *Worker) nextSubID() uint64 {
 // synchronously charge their DB time against it and the drain stops once it is
 // spent, leaving the remaining envelopes queued for the next tick / wake-up.
 func (w *Worker) drainInbox() {
-	w.dbBudget = w.cfg.RepoTimeout
+	w.dbBudget = w.repoTimeout()
 	w.drainQueued()
 }
 
@@ -1124,7 +1124,7 @@ func (w *Worker) drainInbox() {
 // may itself be one of the writing commands, so it must be inside the budget
 // rather than ahead of it.
 func (w *Worker) applyAndDrain(env envelope) {
-	w.dbBudget = w.cfg.RepoTimeout
+	w.dbBudget = w.repoTimeout()
 	w.applyEnvelope(env)
 	w.drainQueued()
 }
@@ -1224,21 +1224,38 @@ func (w *Worker) dbCallCost(started time.Time) time.Duration {
 // per call and therefore proportional to how many DB operations a tick performs
 // — finite and self-limiting, unlike the previous "forever".
 func (w *Worker) dbCall(parent context.Context, fn func(ctx context.Context) error) error {
-	timeout := w.cfg.RepoTimeout
-	if timeout <= 0 {
-		// A non-positive timeout is an already-blown deadline: every call would
-		// fail with DeadlineExceeded before touching the DB. withDefaults keeps
-		// production away from that, but the white-box tests build Worker literals
-		// directly and would otherwise run their stubs under a dead context.
-		timeout = defaultRepoTimeout
-	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
+	ctx, cancel := context.WithTimeout(parent, w.repoTimeout())
 	defer cancel()
 
 	started := time.Now()
 	err := fn(ctx)
 	w.spendDBBudget(started)
 	return err
+}
+
+// repoTimeout is the effective per-call DB bound. A non-positive Config value is
+// an already-blown deadline — every call would fail with DeadlineExceeded before
+// touching the DB — so it falls back to the default. withDefaults keeps
+// production away from that, but the white-box tests build Worker literals
+// directly and would otherwise run their stubs under a dead context.
+//
+// Every reader of the bound goes through here, not just dbCall: the drain budget
+// is denominated in the same unit, and a clamp applied to one but not the other
+// let a Config{RepoTimeout: 0} worker give each call a healthy 2 s while resetting
+// the drain budget to zero — silently degrading to one command per wake-up.
+func (w *Worker) repoTimeout() time.Duration {
+	if w.cfg.RepoTimeout <= 0 {
+		return defaultRepoTimeout
+	}
+	return w.cfg.RepoTimeout
+}
+
+// effectPublishTimeout is repoTimeout's counterpart for side-effect publishes.
+func (w *Worker) effectPublishTimeout() time.Duration {
+	if w.cfg.EffectPublishTimeout <= 0 {
+		return defaultEffectPublishTimeout
+	}
+	return w.cfg.EffectPublishTimeout
 }
 
 // publish emits one NOTIFICATION bus message under the same contract as a DB
@@ -1267,9 +1284,8 @@ func (w *Worker) publish(parent context.Context, topic string, payload []byte) e
 	})
 }
 
-// publishEffect emits a bus message whose DELIVERY IS THE STATE CHANGE, and is
-// therefore the one path in this package that deliberately carries no deadline
-// (TASK-148 review). Two topics qualify:
+// publishEffect emits a bus message whose DELIVERY IS THE STATE CHANGE. Two
+// topics qualify:
 //
 //   - EntityKilledTopic — four subscribers in app.go, each doing irreversible DB
 //     work: bounty payout, insurance payout, quest progress, and the spacesuit
@@ -1277,23 +1293,49 @@ func (w *Worker) publish(parent context.Context, topic string, payload []byte) e
 //     account with no ship at all. The victim's row is already gone (RecordKill)
 //     by the time this runs.
 //   - ShipCapturedTopic — ejects the captured ship's old crew into spacesuits.
-//     Same "the ship is already re-owned" one-way street.
+//     Same "the object is already gone/re-owned" one-way street.
 //
 // Nothing retries these. There is no outbox, and the publisher cannot tell a
-// subscriber "you missed one". So the only correct failure mode is the one this
-// bus was built with: block until every subscriber has taken it (back-pressure),
-// and let the tick pay for it. A bounded publish here would trade a recoverable
-// stall for permanently broken player state — which is exactly the regression
-// TASK-148's first cut introduced, and why these two topics are carved out
-// rather than sharing publish's deadline.
+// subscriber "you missed one" — so this must not share publish's RepoTimeout,
+// which is sized for a DB round trip and would drop an effect over a two-second
+// stutter. It gets cfg.EffectPublishTimeout instead: ~20 s, three orders of
+// magnitude above a healthy subscriber hop.
 //
-// The stall is still bounded in practice by the subscribers' own progress: with
-// bus.InMemory's fixed per-subscriber buffer, this blocks only once a handler is
-// SubscriberBuffer events behind. The real fix — a transactional outbox, so the
-// effect is durable before the tick moves on — is a separate change.
-func (w *Worker) publishEffect(topic string, payload []byte) error {
+// It is bounded, and NOT infinite — the intermediate answer, which looked like
+// "back-pressure, the failure mode this bus was built with" and was wrong twice
+// over:
+//
+//   - it buys nothing in the scenario it was for. A hung Postgres is what backs
+//     the subscribers up, and the spacesuit respawn writes its own row through
+//     that same Postgres. Blocking here does not conjure a spacesuit; it loses
+//     the spacesuit AND parks every sector this worker owns.
+//   - it actively causes the failure. SpawnSpacesuit sends AddShipCommand back
+//     into THIS worker (the death sector is the publishing sector) and waits for
+//     the ack. A Run goroutine parked in a publish is not draining its inbox, so
+//     the ack never comes, the respawn fails with "ack timeout" and SetActiveShip
+//     never runs: the suit exists as a row and nowhere else. The mechanism meant
+//     to guarantee delivery broke it on the one path that mattered.
+//
+// And the reachability is not exotic: bus.InMemory's buffer is per subscriber but
+// the topic is global (one bus for the whole game), so the block arrives around
+// the 65th death after Postgres goes, which an NPC war reaches in minutes.
+//
+// parent MUST be the tick's context, never context.Background(). A cancelled
+// subscriber goroutine exits and stops reading its channel, so a publish already
+// blocked on that full channel is blocked forever unless its own context can
+// cancel it — which is how a background context turned SIGTERM into "hangs until
+// SIGKILL, graceful flush skipped".
+//
+// What this still does NOT give is durability: a deadline that fires is a lost
+// effect, the large bound only makes that vanishingly unlikely for transient
+// slowness. Making the effect durable before the tick moves on needs a
+// transactional outbox — TASK-162.
+func (w *Worker) publishEffect(parent context.Context, topic string, payload []byte) error {
+	ctx, cancel := context.WithTimeout(parent, w.effectPublishTimeout())
+	defer cancel()
+
 	started := time.Now()
-	err := w.bus.Publish(context.Background(), topic, payload)
+	err := w.bus.Publish(ctx, topic, payload)
 	w.spendDBBudget(started)
 	return err
 }

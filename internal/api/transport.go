@@ -72,6 +72,7 @@ func (s *Server) handleTransport(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "source ship out of transporter range")
 		case errors.Is(res.Err, sector.ErrNotEnoughEnergy):
 			writeError(w, http.StatusUnprocessableEntity, "not enough energy for the teleport")
+		case writeIfTransient(w, res.Err, "cargo teleport could not be recorded, try again"):
 		case res.Err != nil:
 			writeError(w, http.StatusInternalServerError, res.Err.Error())
 		default:

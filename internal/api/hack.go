@@ -90,6 +90,7 @@ func (s *Server) handleHack(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "not enough energy to hack")
 		case errors.Is(res.Err, sector.ErrHackTooLittleGoods):
 			writeError(w, http.StatusUnprocessableEntity, "station has too little goods to hack")
+		case writeIfTransient(w, res.Err, "hack could not be recorded, try again"):
 		case res.Err != nil:
 			writeError(w, http.StatusInternalServerError, res.Err.Error())
 		default:

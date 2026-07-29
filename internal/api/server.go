@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -266,4 +268,22 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// writeIfTransient answers 503 for a command the worker refused because its
+// in-tick DB call ran out of time (TASK-148: every such call is bounded by
+// sector Config.RepoTimeout, and an expired deadline surfaces on the ack as
+// context.DeadlineExceeded / Canceled). It reports whether it wrote a response.
+//
+// This is a failure of ours, not of the request, so it must not read as 500
+// "internal error" — the client can and should retry, and the distinction is
+// what tells an operator "the DB is unwell" apart from "the server has a bug".
+// Every command path that can surface a bounded DB failure calls this before its
+// default branch.
+func writeIfTransient(w http.ResponseWriter, err error, message string) bool {
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		return false
+	}
+	writeError(w, http.StatusServiceUnavailable, message)
+	return true
 }

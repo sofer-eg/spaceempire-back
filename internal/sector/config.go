@@ -14,6 +14,12 @@ import (
 // deadline.
 const defaultRepoTimeout = 2 * time.Second
 
+// defaultEffectPublishTimeout is the fallback bound on a side-effect publish
+// (Worker.publishEffect). Three orders of magnitude above a healthy subscriber
+// hop, so it never fires on a transient stutter, and still finite so a wedged
+// subscriber cannot park the worker for good.
+const defaultEffectPublishTimeout = 20 * time.Second
+
 // Config tunes a single Worker. PoolConfig embeds this so every worker in a
 // Pool gets the same per-tick parameters.
 type Config struct {
@@ -69,6 +75,21 @@ type Config struct {
 	// single round trip. runProduction rotates the cycle's starting station every
 	// tick so a truncated cycle does not defer the same tail forever.
 	RepoTimeout time.Duration
+	// EffectPublishTimeout bounds a publish to a SIDE-EFFECT bus topic
+	// (Worker.publishEffect): EntityKilledTopic and ShipCapturedTopic, whose
+	// subscribers perform irreversible work — bounty and insurance payouts, quest
+	// credit, and the spacesuit respawn a dead player depends on. Deliberately far
+	// larger than RepoTimeout (default 20 s vs 2 s): a missed delivery there is
+	// lost game state with no retry, so the bound exists only to stop a wedged
+	// subscriber parking the worker, not to keep the tick snappy. A transient
+	// stutter has three orders of magnitude of headroom before it bites.
+	//
+	// It is NOT infinite, which was the first answer and the wrong one: with a
+	// hung Postgres the respawn cannot write its spacesuit row anyway, and worse,
+	// SpawnSpacesuit re-enters this very worker with an AddShipCommand and waits
+	// for the ack — so a parked Run guarantees the failure it was meant to
+	// prevent. See docs/specs/tick_db_timeouts.md §3a.
+	EffectPublishTimeout time.Duration
 	// ContainerTTL is how long a loot container (dropped by a ship death,
 	// phase 4.6) survives before the tick sweeps it. Default 600 s.
 	ContainerTTL time.Duration
@@ -188,6 +209,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RepoTimeout <= 0 {
 		c.RepoTimeout = defaultRepoTimeout
+	}
+	if c.EffectPublishTimeout <= 0 {
+		c.EffectPublishTimeout = defaultEffectPublishTimeout
 	}
 	if c.ContainerTTL <= 0 {
 		c.ContainerTTL = 600 * time.Second

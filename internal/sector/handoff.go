@@ -196,6 +196,13 @@ func executeJump(w *Worker, s *sectorState, ship *domain.Ship, targetSector doma
 		// on the publish, back-pressure makes it a routine outcome, and the
 		// compensation has to be routine too. Best-effort: if this save fails as
 		// well the divergence stands, which is what the ERROR above is for.
+		//
+		// It restores ships.sector_id only. The ai_state row re-homed above still
+		// names the target sector; persistAIState rewrites it on the next snapshot
+		// interval, so the window is bounded by cfg.SnapshotInterval, and a crash
+		// inside that window leaves an NPC controller pointing at a sector its ship
+		// is not in (cold start prunes it). Not worth a second compensating write
+		// for a self-healing row.
 		if err := w.saveShip(*ship); err != nil {
 			w.logger.Error("handoff rollback save failed: the ship row still names the sector it never reached",
 				"err", err, "ship", int64(ship.ID), "from", int64(s.sectorID), "to", int64(targetSector))

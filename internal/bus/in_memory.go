@@ -52,10 +52,13 @@ func NewInMemory(subscriberBuffer int) *InMemory {
 //     handler silently starved every handler registered after it. On
 //     EntityKilledTopic that meant a slow bounty payout could cost a dead player
 //     his spacesuit.
-//   - A subscriber with room in its buffer ALWAYS receives the payload, even
-//     when ctx is already expired. That is why the send is tried non-blocking
-//     first: a plain `select` over both cases picks randomly when both are
-//     ready, so an expired context would rob ready subscribers half the time.
+//   - A subscriber with room in its buffer receives the payload even when ctx is
+//     already expired. That is why the send is tried non-blocking first: a plain
+//     `select` over both cases picks randomly when both are ready, so an expired
+//     context would rob ready subscribers half the time. Strictly this holds for
+//     room observed at the moment of that attempt, so the ctx.Done branch retries
+//     non-blocking once more before giving up — a subscriber that drained while
+//     we were waiting should not be recorded as missed.
 //   - Only a subscriber whose buffer is full for the remainder of ctx misses
 //     the payload, and it is named (by index within the topic) in the returned
 //     PartialDelivery so the caller can log who.
@@ -93,7 +96,13 @@ func (b *InMemory) Publish(ctx context.Context, topic string, payload []byte) er
 		select {
 		case sub.ch <- cp:
 		case <-ctx.Done():
-			undelivered = append(undelivered, i)
+			// Last chance: the subscriber may have drained between the deadline
+			// firing and this branch being taken.
+			select {
+			case sub.ch <- cp:
+			default:
+				undelivered = append(undelivered, i)
+			}
 		}
 	}
 	if len(undelivered) > 0 {
@@ -108,9 +117,16 @@ func (b *InMemory) Publish(ctx context.Context, topic string, payload []byte) er
 }
 
 // Subscribe registers handler for topic and returns once the subscription
-// is live. handler is invoked from a dedicated goroutine in payload-order;
-// when ctx is canceled the goroutine drains pending messages and exits,
-// and the subscription is removed from the topic.
+// is live. handler is invoked from a dedicated goroutine in payload-order.
+//
+// When ctx is canceled the goroutine exits AT ONCE and the subscription is
+// removed from the topic. It does NOT drain what is already buffered — those
+// payloads are dropped, and any publisher currently blocked on this
+// subscriber's full channel loses its last reader. That is why a publish must
+// never run under a context that cannot be cancelled: with the reader gone,
+// nothing will ever free the channel again. (This comment used to claim the
+// goroutine drained on the way out, which is exactly the misreading that let a
+// context.Background() publish turn SIGTERM into a hang.)
 func (b *InMemory) Subscribe(ctx context.Context, topic string, handler func([]byte)) error {
 	b.mu.Lock()
 	if b.closed {

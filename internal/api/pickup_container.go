@@ -77,13 +77,16 @@ func writePickupError(w http.ResponseWriter, err error) {
 	case errors.Is(err, sector.ErrContainerOutOfRange):
 		writeError(w, http.StatusBadRequest, "container out of range")
 	case errors.Is(err, containers.ErrContainerNotFound):
-		// The worker normally converts this into sector.ErrContainerNotFound (and
-		// sweeps the stale RAM entry), but the persistence sentinel must map to 404
-		// on its own too: falling through to the default turned "this is not there"
-		// into a 500.
+		// Defence in depth, and currently unreachable: the worker translates this
+		// sentinel into sector.ErrContainerNotFound (and sweeps the stale RAM entry)
+		// before the ack is sent, so the case above catches it. Kept because the
+		// translation lives in another package and losing it would silently turn
+		// "this is not there" back into a 500 — do not delete it just because the
+		// caller is not obvious.
 		writeError(w, http.StatusNotFound, "container not found")
 	case errors.Is(err, containers.ErrNoSpace):
 		writeError(w, http.StatusConflict, "not enough cargo space")
+	case writeIfTransient(w, err, "pickup could not be recorded, try again"):
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}

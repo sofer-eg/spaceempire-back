@@ -59,6 +59,7 @@ func (s *Server) handleJump(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "out of gate range")
 		case errors.Is(res.Err, sector.ErrHandoffUnavailable):
 			writeError(w, http.StatusServiceUnavailable, "handoff unavailable")
+		case writeIfTransient(w, res.Err, "jump could not be recorded, try again"):
 		case res.Err != nil:
 			writeError(w, http.StatusInternalServerError, res.Err.Error())
 		default:

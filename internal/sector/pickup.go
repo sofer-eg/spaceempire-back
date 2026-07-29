@@ -86,8 +86,9 @@ func (w *Worker) pickupContainer(s *sectorState, ship *domain.Ship, id domain.Co
 //     cargo safely in the hold, with the only residue a container still sitting
 //     in the sector's RAM. That ghost is picked up again at worst once: the retry
 //     re-enters the same transaction, finds no container row and returns
-//     ErrContainerNotFound, so it cannot duplicate the goods. The ghost then
-//     leaves RAM with the TTL sweep;
+//     ErrContainerNotFound, so it cannot duplicate the goods — and that refusal
+//     is also what sweeps the ghost out of RAM on the spot (see the not-found
+//     branch above), so it does not linger on the radar for its whole TTL;
 //   - the opposite order (drop from RAM first, then commit) would make the same
 //     deadline delete the container from the sector while the transaction rolled
 //     back — cargo that existed a moment ago, gone from the game with its row

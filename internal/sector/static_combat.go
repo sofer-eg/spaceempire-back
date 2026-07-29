@@ -122,7 +122,7 @@ func (w *Worker) publishKilled(ctx context.Context, s *sectorState, ev EntityKil
 		w.logger.ErrorContext(ctx, "kill: marshal entity_killed", "err", err, "victim_kind", ev.Victim.Kind, "victim_id", ev.Victim.ID)
 		return
 	}
-	if err := w.publishEffect(EntityKilledTopic, payload); err != nil {
+	if err := w.publishEffect(ctx, EntityKilledTopic, payload); err != nil {
 		// Nothing retries this, and the subscribers own the bounty payout, the
 		// insurance payout, the quest credit and the victim's spacesuit — so a
 		// failure here is lost game state, not a missed notification.

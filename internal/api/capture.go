@@ -92,11 +92,9 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "capture target shield is up")
 		case errors.Is(res.Err, sector.ErrNotEnoughEnergy):
 			writeError(w, http.StatusUnprocessableEntity, "not enough energy to capture")
-		case errors.Is(res.Err, context.DeadlineExceeded):
+		case writeIfTransient(w, res.Err, "capture could not be recorded, try again"):
 			// The roll landed but the ownership transfer could not be persisted, so
-			// the worker refused it (TASK-148). That is a transient failure of ours,
-			// not a malformed request: say so instead of reporting an internal error.
-			writeError(w, http.StatusServiceUnavailable, "capture could not be recorded, try again")
+			// the worker refused it (TASK-148).
 		case res.Err != nil:
 			writeError(w, http.StatusInternalServerError, res.Err.Error())
 		default:

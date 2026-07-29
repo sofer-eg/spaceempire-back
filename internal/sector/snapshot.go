@@ -210,10 +210,11 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 	// Static-combat deltas (HP/Shield + destruction) are sector-global (rare
 	// events): compute once and attach to every subscriber's patch.
 	staticUpdates := s.collectDirtyDestructibles()
-	var staticsRemoved []domain.EntityRef
-	if len(s.staticsRemoved) > 0 {
-		staticsRemoved = append(staticsRemoved, s.staticsRemoved...)
-	}
+	// The fifth per-tick buffer with the same [:0]-and-append lifecycle (see
+	// cloneTickBuffer): it only reaches patches today, not the published
+	// Snapshot, but it is copied for the same reason and through the same
+	// helper — so there stays exactly one place where this contract lives.
+	staticsRemoved := cloneTickBuffer(s.staticsRemoved)
 	for _, sub := range s.subs {
 		// Personal radar (phase 10.20 L1): center + small-radar radius track the
 		// player's own ship in this sector. Ships without a class radar (legacy/

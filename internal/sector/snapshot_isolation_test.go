@@ -23,9 +23,12 @@ import (
 // earlier snapshot still carries. TorpedoImpacts has the same guard in
 // TestUnit_Torpedo_SnapshotCarriesFlightAndImpacts (TASK-114).
 //
-// The guards deliberately keep exactly ONE event in flight per tick: the buffer
-// then never grows past a single element, so an aliased snapshot is overwritten
-// in place at index 0 instead of surviving a reallocation.
+// The guards deliberately keep exactly ONE event in flight per tick, for
+// determinism and readability — NOT because detection depends on it. The
+// producers append one event at a time, so after [:0] the very first append
+// overwrites index 0 of the same backing array no matter how many follow;
+// a later reallocation only rescues elements past the old cap, never the one
+// these guards read. A second concurrent event would not blunt them.
 
 // snapshotWhen returns the sector's current snapshot if it already satisfies
 // want, otherwise ticks the worker until one does. Fails the test when nothing

@@ -1478,12 +1478,13 @@ func publishSnapshotFor(s *sectorState, elapsed time.Duration) {
 // [:0] and the next event appends straight back into the same backing array, so
 // handing the argument itself out would silently rewrite an already-published
 // snapshot under its holder while keeping its len() intact. All four buffers go
-// through here on purpose — one implementation to protect instead of four
-// copy-paste blocks. Guarded by the *AreCopiedNotAliased tests in
-// snapshot_isolation_test.go (laser/missile/drone) and
-// TestUnit_Torpedo_SnapshotCarriesFlightAndImpacts (torpedo); each asserts the
-// VALUE a held snapshot still carries after a later tick, since the length
-// survives aliasing.
+// through here on purpose — one implementation to protect instead of the
+// copy-paste blocks it replaced. Guarded by snapshot_isolation_test.go
+// (laser/missile/drone) and by the torpedo guard in torpedos_test.go; each
+// asserts the VALUE a held snapshot still carries after a later tick, since
+// the length survives aliasing. Named by file, not by test: a renamed test
+// would leave this comment pointing at nothing, and neither the compiler nor
+// the linter would notice.
 func cloneTickBuffer[T any](src []T) []T {
 	if len(src) == 0 {
 		return nil

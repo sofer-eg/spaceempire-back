@@ -21,10 +21,16 @@ import (
 // stubRepo is an in-memory auction.Repo: lots are mutated through the
 // service the way the real repository would let them be, with the same
 // error shapes so the service code path is exercised exactly. It doubles
-// as its own TxRunner (single-goroutine consistency is enough for these
-// tests).
+// as its own TxRunner, serializing whole transactions (see txMu).
 type stubRepo struct {
-	mu sync.Mutex
+	// txMu is held for the whole body of Do, standing in for the row lock
+	// production takes (LockLot = SELECT ... FOR UPDATE, held until COMMIT):
+	// it serializes concurrent "transactions". mu is a separate lock that
+	// each method takes and releases on its own; it guards the maps against
+	// data races but grants no transaction atomicity, so it cannot stop two
+	// bidders from both reading the same CurrentPrice and both winning.
+	txMu sync.Mutex
+	mu   sync.Mutex
 
 	lots       map[int64]auctionrepo.Lot
 	bids       []bidEntry
@@ -77,6 +83,8 @@ func (s *stubRepo) LoadShipDock(_ context.Context, shipID domain.ShipID) (auctio
 }
 
 func (s *stubRepo) Do(ctx context.Context, fn func(context.Context, auction.Repo) error) error {
+	s.txMu.Lock()
+	defer s.txMu.Unlock()
 	return fn(ctx, s)
 }
 
@@ -501,8 +509,10 @@ func TestUnit_AuctionService_Close_UnknownLot(t *testing.T) {
 // TestUnit_AuctionService_Bid_RaceSingleWinner is the acceptance race
 // scenario from the task: 10 bidders fire amount=200 at the same lot
 // concurrently. Exactly one must succeed; the rest must see ErrBidTooLow.
-// The stubRepo's Do is single-fn and the mutex serializes mutations the
-// way SELECT FOR UPDATE would in real Postgres.
+// stubRepo.Do serializes the whole transaction body (see txMu), which is
+// what real Postgres gives Bid via LockLot's SELECT ... FOR UPDATE: the
+// row lock is held until COMMIT, so the read of CurrentPrice and the write
+// that raises it are one indivisible step.
 func TestUnit_AuctionService_Bid_RaceSingleWinner(t *testing.T) {
 	f := newFixture(t)
 	lot := f.defaultCreate(t)

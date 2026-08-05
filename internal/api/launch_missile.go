@@ -13,18 +13,43 @@ import (
 	"spaceempire/back/internal/sector"
 )
 
-// MissileGoodsType is the goods_type id consumed by every missile launch:
-// «Ракета Москит» (space 1), the catalog's class-1 missile. Mirrors
-// `app.MissileGoodsType`, which seeds the starter magazine.
+// Missile ammunition goods types, one per ct_missiles class. Mirrors
+// `app.MissileGoodsType`, which seeds the starter magazine with class 1.
 //
-// The id comes from the legacy schema's own mapping, ct_missiles.cargo_id
-// (class 1 «Москит» → 10). Until TASK-167 it was 50, an English-named duplicate
-// migration 0017 minted next to the real catalog: no station ever sold 50, so a
-// spent magazine could not be refilled, while the 10-14 missiles on 62-72 markets
-// were consumed by nothing. Phase 4.3 still flies exactly one class
-// (combat.DefaultMissileSpec), so only class 1 is wired; 11-14 wait for a per-class
-// spec catalog.
-const MissileGoodsType = domain.MissileGoodsType
+// The ids come from the legacy schema's own mapping, ct_missiles.cargo_id. Until
+// TASK-167 class 1 was 50, an English-named duplicate migration 0017 minted next to
+// the real catalog: no station ever sold 50, so a spent magazine could not be
+// refilled, while the 10-14 missiles on 62-72 markets were consumed by nothing.
+// TASK-167 fixed class 1 and TASK-175 wired 2-5, so no missile good is on sale and
+// unusable any more.
+const (
+	MissileGoodsType            = domain.MissileGoodsType            // gt10 «Ракета Москит», class 1
+	MissileOsaGoodsType         = domain.MissileOsaGoodsType         // gt11 «Ракета Оса», class 2
+	MissileStrekozaGoodsType    = domain.MissileStrekozaGoodsType    // gt12 «Ракета Стрекоза», class 3
+	MissileShelkopryadGoodsType = domain.MissileShelkopryadGoodsType // gt13 «Ракета Шелкопряд», class 4
+	MissileShershenGoodsType    = domain.MissileShershenGoodsType    // gt14 «Ракета Шершень», class 5
+)
+
+// missileGoodsType maps a launch class to the goods type its ammunition is stored
+// as. Only classes 1-5 exist (ct_missiles); any other value is rejected by the
+// handler with 400. Mirrors torpedoGoodsType — the missile object's balance profile
+// is selected from the same class inside the sector worker
+// (combat.DefaultMissileSpec), so here the class only picks the cargo row to debit.
+func missileGoodsType(class int) (domain.GoodsTypeID, bool) {
+	switch class {
+	case 1:
+		return MissileGoodsType, true
+	case 2:
+		return MissileOsaGoodsType, true
+	case 3:
+		return MissileStrekozaGoodsType, true
+	case 4:
+		return MissileShelkopryadGoodsType, true
+	case 5:
+		return MissileShershenGoodsType, true
+	}
+	return 0, false
+}
 
 // launchActionEnergyCost resolves the "action" energy a missile launch spends
 // (phase 10.3.1) from the up_launcher catalog row. energy_usage is uniform
@@ -45,8 +70,8 @@ func launchActionEnergyCost(cat EquipmentCatalog) int {
 
 // handleLaunchMissile fires one missile from the player's ship at a target
 // (phase 4.3). The handler is a pure orchestrator — it owns no cargo:
-//  1. parse + validate,
-//  2. send LaunchMissileCommand (carrying the goods id) to the worker,
+//  1. parse + validate and resolve the class's goods type,
+//  2. send LaunchMissileCommand (carrying the class + goods id) to the worker,
 //  3. wait for ack and map the outcome.
 //
 // The ammunition debit lives inside the worker's apply, through sector.Ordnance
@@ -61,6 +86,11 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ShipID <= 0 || req.TargetRef.ID <= 0 {
 		writeError(w, http.StatusBadRequest, "invalid request fields")
+		return
+	}
+	goodsType, ok := missileGoodsType(req.Class)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid missile class")
 		return
 	}
 	// TASK-113 FR-06 / TASK-110 / TASK-111: a missile may strike a ship (not
@@ -100,7 +130,8 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 		PlayerID:   playerID,
 		ShipID:     domain.ShipID(req.ShipID),
 		Target:     target,
-		GoodsType:  MissileGoodsType,
+		Class:      req.Class,
+		GoodsType:  goodsType,
 		EnergyCost: s.launchEnergyCost,
 		Reply:      reply,
 	})

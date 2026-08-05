@@ -46,14 +46,39 @@ type Missile struct {
 4.3). При рестарте сервера все ракеты исчезают. Хранятся только в RAM
 сектора (`sectorState.missiles`).
 
-**Параметры (Damage/Speed/Accel/TurnRate/HitRadius/TTL)** в 4.3 берутся
-из единого `combat.MissileSpec` (один класс ракет). Будущие фазы могут
-ввести каталог классов; до этого hard-coded дефолты в combat-пакете.
+**Параметры (Damage/Speed/Accel/TurnRate/HitRadius)** копируются в саму
+ракету на запуске из `combat.MissileSpec` выбранного класса, а `TTL` --
+в `ExpiresAt`. `TickMissile` читает магнитуды **из ракеты**, спека ему не
+передаётся: до TASK-175 она передавалась, а sector держал один
+package-level `missileSpec`, поэтому любая запущенная ракета летела по
+профилю класса 1 независимо от израсходованного боеприпаса.
+
+`Class` в `domain.Missile` **не хранится**: ракета RAM-only, класс нужен
+только в момент запуска (выбор спеки + строки cargo), после старта ни
+один потребитель его не спрашивает -- ни persistence (её нет), ни DTO
+(иконка одна). Торпеда класс несёт, потому что персистится и
+восстанавливается из БД.
 
 ## 2. Goods integration
 
-Стрельба расходует одну единицу goods_type `id = 10`
-(«Ракета Москит», space=1) из cargo стреляющего корабля.
+Стрельба расходует одну единицу боеприпаса выбранного класса из cargo
+стреляющего корабля. Маппинг класс -> товар -- это `ct_missiles.cargo_id`
+(TASK-175, до неё был провязан только класс 1):
+
+| class | название         | goods_type | space | ст. продают | ср. цена |
+|-------|------------------|-----------|-------|-------------|----------|
+| 1     | Ракета Москит    | 10        | 1     | 62          | 392      |
+| 2     | Ракета Оса       | 11        | 1     | 71          | 1151     |
+| 3     | Ракета Стрекоза  | 12        | 1     | 72          | 2309     |
+| 4     | Ракета Шелкопряд | 13        | 2     | 72          | 5778     |
+| 5     | Ракета Шершень   | 14        | 3     | 67          | 11651    |
+
+(«ст. продают»/«ср. цена» -- замер на dev-БД, `station_goods`.) Все пять
+space <= 3, т.е. влезают даже в стартовый `cargobay` 50 -- в отличие от
+дрона (290). Константы -- `domain.Missile*GoodsType`, потому что на них
+должны сойтись три слоя: `app` (стартовый магазин, класс 1), `api`
+(расход при запуске) и `sector` (kill-drop). Список целиком --
+`domain.MissileGoodsTypes()`.
 
 ### Миграция `0017_missile_goods.sql` -> `0063` (TASK-167)
 
@@ -120,7 +145,7 @@ shipRef, MissileGoodsType, 5)`. Spawner получает `cargo.Repo` через
 ### `combat/missile.go`
 
 ```go
-// MissileSpec — параметры одного класса ракет. На 4.3 единственный класс.
+// MissileSpec — параметры одного класса ракет (их пять, см. §3.1).
 type MissileSpec struct {
     Damage    int           // damage on hit
     Speed     float64       // максимальная |Vel|
@@ -128,12 +153,17 @@ type MissileSpec struct {
     TurnRate  float64       // макс. угловая скорость (rad/tick когда dt=1)
     HitRadius float64       // радиус попадания (≤ → MissileHit)
     TTL       time.Duration // время жизни до expire
-    StrafeK   float64       // SP `mis_strafe = 0.8*acceleration`
-    FrictionK float64       // SP `mis_rub = -0.1*|speed|` → friction coef
 }
 
-// DefaultMissileSpec — дефолт для 4.3. Один класс, hard-coded.
-func DefaultMissileSpec() MissileSpec
+// StrafeK/FrictionK полей нет: SP считает их из speed/acceleration
+// класса фиксированными коэффициентами (0.8 и 0.1), т.е. они
+// униформны -- живут как package-константы missileStrafeK /
+// missileFrictionK (та же форма, что у торпед).
+
+// DefaultMissileSpec — профиль класса 1..5; неизвестный класс (в т.ч. 0)
+// откатывается на класс 1, чтобы аксессор никогда не отдал
+// вырожденную спеку.
+func DefaultMissileSpec(class int) MissileSpec
 
 // LaunchMissile создаёт ракету в точке корабля с его направлением;
 // начальная Vel = attacker.Vel (как в SP — наследует импульс).
@@ -165,11 +195,58 @@ func TickMissile(
     m *domain.Missile,
     targetPos domain.Vec2,
     targetAlive bool,
-    spec MissileSpec,
     dt float64,
     now time.Time,
 ) MissileOutcome
 ```
+
+### §3.1 Каталог классов и калибровка (TASK-175)
+
+`missileSpecsByClass` -- по строке на класс `ct_missiles`. Оси
+калибровались **по-разному**, и это осознанно:
+
+| class | Damage | Speed | Accel | TurnRate (rad/s) | HitRadius | TTL  |
+|-------|--------|-------|-------|------------------|-----------|------|
+| 1     | 1000   | 90    | 108.0 | 2.1596           | 12        | 15 s |
+| 2     | 2500   | 78    | 70.2  | 1.5522           | 12        | 18 s |
+| 3     | 5000   | 60    | 48.0  | 1.3497           | 12        | 18 s |
+| 4     | 12000  | 28    | 21.0  | 0.9448           | 12        | 27 s |
+| 5     | 25000  | 22    | 16.0  | 0.5397           | 12        | 30 s |
+
+* **Damage = `ct_missiles.power` буквально.** Класс 1 до TASK-175 был 30 --
+  реликт 4.3, когда ничего ещё не было откалибровано. Корпуса, щиты и
+  лазеры перенесены из StarWind буквально (Разведчик кл. 77: hull 4040,
+  shield 6900, ~146 урона лазера за выстрел; Кентавр 78: 66000 + 161000),
+  так что 30 -- пятая часть ОДНОГО выстрела лазера: оружие было
+  декоративным. Рыночные цены подтверждают шкалу power:
+  392/1151/2309/5778/11651 кр ≈ 1 : 2.9 : 5.9 : 14.7 : 29.7 против
+  1 : 2.5 : 5 : 12 : 25.
+* **Speed/Accel = `ct_missiles.speed`/`.acceleration` буквально**, и это
+  сдвиг единиц по решению, а не по недосмотру: SP прибавляет их раз в
+  тик (т.е. они per-tick), а `MissileSpec` -- per-second; корабельный
+  `MaxSpeed` при этом остался per-tick (`moveShip` делает `Pos += Vel`).
+  Значит буквальное чтение делает ракету в 3 раза быстрее относительно
+  корабля. Почему так: дальность ракеты = Speed × TTL, а самый широкий
+  радар -- 500 units, и при per-tick чтении у класса 5 дальность была бы
+  ~220 -- он не дотягивался бы ни до чего, что видит владелец, т.е. ровно
+  тот дефект («продаётся и бесполезно»), который задача и закрывает.
+  Лестница сохраняется при любом чтении (класс 1 в 4 раза быстрее класса
+  5), и замысел оригинала «тяжёлые классы не догоняют быструю цель» тоже:
+  28 и 22 u/s -- это 84 и 66 units за 3-секундный тик, ниже 130.6 (141 с
+  up_engine) у топовых классов кораблей.
+* **TurnRate** выводится формулой самого SP:
+  `maneureability × mob_to_grad_eq (1.16)` = градусы **за тик**, делим на
+  номинальный тик 3 s. Порог «мгновенного доворота» ложится там же, где в
+  оригинале: SP снапит при `grad_speed > 180°/тик`, `TickMissile` -- при
+  `TurnRate*dt >= π`; классы 1-3 (371/267/232 °/тик) снапят в обоих,
+  классы 4-5 (162/93) доворачивают постепенно в обоих.
+* **TTL = `ct_missiles.ttl`, но с конвертацией**, потому что единица SP
+  для него однозначно тики (`mis_ttl >= mis_std_ttl` против `ttl = ttl+1`
+  раз в тик): 5/6/6/9/10 тиков × 3 s = 15/18/18/27/30 s. Класс 1
+  сохраняет свои 15 s -- это была та же самая конвертация.
+* **HitRadius** одинаков: в `ct_missiles` нет такой колонки (SP стартует с
+  `std_hit_distance = 10` и накладывает модификаторы пилота/размера,
+  которые не портированы -- см. §11), портировать по классам нечего.
 
 **Алгоритм TickMissile (порт SP):**
 
@@ -206,8 +283,7 @@ func TickMissile(
 
 **Замечание по `speed_k` из SP.** В SP `pos = pos + speed*speed_k`
 (speed_k=4.5). У нас `dt` в `tickSector` уже в секундах (cfg.TickInterval),
-поэтому `speed_k` отображается в `DefaultMissileSpec.Speed/Accel`
-(калибрация под текущий tick rate).
+поэтому `speed_k` растворён в калибровке Speed/Accel (см. §3.1).
 
 ## 4. Sector integration
 
@@ -278,6 +354,8 @@ type LaunchMissileCommand struct {
     PlayerID  domain.PlayerID
     ShipID    domain.ShipID
     Target    domain.EntityRef
+    Class     int                  // 1..5, выбирает combat.DefaultMissileSpec
+    GoodsType domain.GoodsTypeID   // 10..14, строка cargo к списанию
     Reply     chan<- LaunchMissileResult
 }
 
@@ -363,9 +441,12 @@ AOI-фильтрация ракет: точка `m.Pos` в радиусе sub.Ra
 Handler боеприпасом не владеет вообще -- он только маршрутизирует и
 маппит исход (как `install-jammer`):
 
-1. handler принимает запрос, валидирует цель (`missileTargetable`-набор);
-2. `sector.Send(LaunchMissileCommand{..., GoodsType: 10})` -- id товара
-   несёт команда, чтобы sector не знал каталога;
+1. handler принимает запрос, валидирует цель (`missileTargetable`-набор) и
+   класс (`missileGoodsType(class)`; вне 1..5, включая 0, -- 400
+   «invalid missile class»);
+2. `sector.Send(LaunchMissileCommand{..., Class: N, GoodsType: 10..14})` --
+   id товара несёт команда, чтобы sector не знал каталога; класс -- чтобы
+   воркер выбрал спеку;
 3. ждёт ack (`AckTimeout`) и маппит: `ErrShipNotFound` → 404,
    `ErrForbidden` → 403, `ErrShipDocked` → 400, `ErrEquipmentRequired` →
    422, `ErrNotEnoughEnergy` → 422, `ErrInvalidAttackTarget` → 400,
@@ -454,8 +535,11 @@ func RefundIn(ctx context.Context, repo Repo, owner EntityRef, gtype GoodsTypeID
 
 Request:
 ```json
-{ "shipID": 17, "targetRef": { "kind": 1, "id": 23 } }
+{ "shipID": 17, "targetRef": { "kind": 1, "id": 23 }, "class": 3 }
 ```
+
+`class` обязателен (1..5). Ноль -- то, что пришлёт клиент, не знающий про
+поле, -- отклоняется как невалидный класс, а не молча стреляет «Москитом».
 
 Response (200):
 ```json
@@ -463,7 +547,8 @@ Response (200):
 ```
 
 Ошибки:
-- `400` invalid json / invalid target (non-ship / self) / no missile in cargo
+- `400` invalid json / invalid missile class / invalid target (non-ship /
+  self) / no missile in cargo
 - `403` ship belongs to another player
 - `404` ship not found / target not found
 - `503` sector busy / cargo service unavailable
@@ -516,13 +601,21 @@ DTO для Missile:
 
 Минимальный обвес, как у лазеров в 4.2:
 
-- `api.ts`: тип `Missile`, `MissileImpact`, метод `sendLaunchMissile`.
+- `api.ts`: тип `Missile`, `MissileImpact`, метод
+  `sendLaunchMissile(shipID, targetRef, missileClass)`.
 - `SectorCanvas`: render слой missiles (точка + короткий хвост по
   direction); render слой missileImpacts (короткая вспышка взрыва,
   один кадр).
-- `ObjectActionsMenu`: пункт «Запустить ракету» виден когда выбранная
-  цель — корабль (kind=1) и **не наш**. Цвет акцентный (магента),
-  отличается от «Атаковать (лазер)».
+- `CombatHUD`: **кнопка на каждый класс** («Ракета: Москит» ... «Ракета:
+  Шершень») со своим счётчиком трюма и своим disable-гейтом по нему --
+  та же форма, что у двух торпедных кнопок. Селектор класса не заводили:
+  боеприпас выбирают по остатку в трюме, а он у каждого класса свой, так
+  что счётчик и есть выбор (TASK-175 AC-9).
+- `ObjectActionsMenu`: пункт на класс, гейт только по `up_launcher` --
+  счётчиков у этого меню нет (своего cargo оно не знает), ровно как у
+  торпед. Виден когда цель в наборе ракеты (корабль/статика/ворота/
+  контейнер). Цвет акцентный (магента), отличается от «Атаковать
+  (лазер)».
 - `useWorldState`: накатывать missilesAdded/Updated/Removed в локальный
   state; missileImpacts кадрить один tick.
 
@@ -540,6 +633,12 @@ DTO для Missile:
 | TickMissile_TargetLost_KeepFlying | targetAlive=false | летит к LastTargetPos, не Hit |
 | TickMissile_Turning | target слева 90°; TurnRate small | direction поворачивается |
 | TickMissile_AllowsInstantTurnIfFastEnough | TurnRate*dt > π | direction = targetDir сразу |
+| LaunchMissile_CopiesClassProfile | spec класса 5 | Damage/Speed/Accel/TurnRate/HitRadius попали в ракету |
+| TickMissile_HeavyClassFliesItsOwnProfile | класс 1 и 5 тикают рядом | каждый насыщает СВОЙ Speed; класс 1 ушёл дальше |
+| MissileSpecs_MatchCtMissiles | все 5 классов | Damage/Speed/Accel/TTL/TurnRate == `ct_missiles` (числа выписаны из дампа) |
+| MissileSpecs_HeavierClassIsSlowerAndHarder | пары соседних классов | Damage ↑, Speed ↓, TurnRate ↓, TTL не убывает |
+| MissileSpecs_ReachExceedsRadar | Speed × TTL каждого класса | > 500 (самый широкий радар) -- инвариант калибровки §3.1 |
+| DefaultMissileSpec_UnknownClassFallsBack | class 0 / 99 | профиль класса 1, не вырожденный |
 
 ### Sector tick (`sector/missiles_test.go`)
 
@@ -553,6 +652,7 @@ DTO для Missile:
 | LaunchCommand_SelfTarget | target.ID == ShipID | ErrInvalidAttackTarget |
 | LaunchCommand_NotOwner | playerID не владеет ship | ErrForbidden |
 | LaunchCommand_Docked | ship.Docked != nil | ErrShipDocked |
+| LaunchMissile_ClassSelectsProfile | `Class: 5` | ракета в snapshot несёт Damage 25000 / Speed 22 (шов «класс команды → спека») |
 
 ### HTTP (`api/launch_missile_test.go`)
 
@@ -565,6 +665,15 @@ DTO для Missile:
 | LaunchMissile_SectorRejectsKeepsCargo | sector reply Err=ErrInvalidAttackTarget | трюм не тронут (гейт до списания), refund не нужен |
 | LaunchMissile_NoOrdnanceWired | воркер без `WithOrdnance` | 503, ракеты нет |
 | LaunchMissile_AckTimeoutChargesOnce | ack потерян (504), команда применяется позже | HTTP не делает ни одного cargo-вызова; списано ровно 1, ракета ровно 1; повтор на пустом трюме -- ничего бесплатно |
+| LaunchMissile_ClassPicksItsOwnGoods | class 1..5, в трюме только «свой» боеприпас | списан ровно товар 10..14 своего класса И взлетевшая ракета несёт power своего класса |
+| LaunchMissile_InvalidClass | class 0 / -1 / 6 / 99 | 400 «invalid missile class», ordnance не тронут |
+
+Плюс в других пакетах: `api.AmmunitionGoodsIDsAreInTheCatalog` (все пять
+id есть в `configs/balance.yaml` под своими именами),
+`domain.MissileGoodsTypes_AllFiveClassesInOrder`,
+`combat.PlanShipDrops_EveryMissileClassRollsSeparately` и
+`sector.KillShip_EveryMissileClassCargoBurnsUp` (сгорание стека -- правило
+про класс предметов, а не про один товар, см. `kill_object.md` §3).
 
 ## 10. Критерии приёмки (из задачи 4.3)
 
@@ -581,7 +690,8 @@ DTO для Missile:
 - **Random hit roll + ship-size + pro-level modifier** из SP — для
   simplification в 4.3 ракета попадает детерминированно если в
   HitRadius. Pro-level апгрейды появятся в фазе 5.
-- **Несколько классов ракет** (`ct_missiles`). Один тип в 4.3.
+- ~~**Несколько классов ракет** (`ct_missiles`)~~ -- сделано в TASK-175: все
+  пять классов провязаны на товары 10-14, спеки в §3.1.
 - **Самоуничтожение при `TTL`** не пишет system message игроку (нет
   пока инфраструктуры messages_sys).
 - **Friendly fire / hostility relations** — фаза 6.2.

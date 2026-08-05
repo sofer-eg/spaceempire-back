@@ -88,7 +88,12 @@ func TestUnit_LaunchMissile_StaticTargetGate(t *testing.T) {
 func TestUnit_TickMissiles_DamagesStatic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	const startHP = 100
+	// "Tough" has to mean tough against the missile that actually flies: 100 HP was
+	// set when a missile did 30 damage, and TASK-175 put class 1 on
+	// ct_missiles.power (1000), which made this station a one-shot kill and the
+	// "survives the single hit" assertion below false. A real station's hull is in
+	// this range anyway (the gate fixture next door uses 100 000).
+	const startHP = 100000
 	station := stationStatic(9, nil, domain.Vec2{X: 200, Y: 0}, startHP, 0, 0, 0)
 	w := missileStaticWorker(t, clock.NewRealClock(),
 		[]domain.Ship{missileShip(1, 100, domain.Vec2{X: 0, Y: 0})},

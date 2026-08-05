@@ -72,10 +72,15 @@ The SP runs two cargo loops over the dead ship's stacks (`cargo` rows
 with `location = ship_full_id`):
 
 **Missile stacks** (`cargo_missiles` cursor — cargo whose goods type is a
-missile; in Go that is `domain.MissileGoodsType` — goods type id `10`
-«Ракета Москит», the catalog's class-1 missile. It was `50` until TASK-167,
-an English-named duplicate `0017_missile_goods` minted beside the real
-catalog; `0063_consolidate_ammunition_goods` removed it):
+missile. The cursor selects them with
+`inner join ct_missiles ctm on ctm.cargo_id = c.type`, so the rule covers
+**every** missile class, not one good; in Go that is
+`domain.MissileGoodsTypes()` — ids `10`-`14`, «Москит» … «Шершень». Class 1
+was `50` until TASK-167, an English-named duplicate `0017_missile_goods`
+minted beside the real catalog; `0063_consolidate_ammunition_goods` removed
+it. Classes 2-5 joined the rule in TASK-175, together with becoming
+launchable — leaving them out would have had a «Шершень» stack, thirty times
+dearer than a «Москит», drop in full off every wreck):
 
 ```
 chance = round(16 * rand())          # 0..16
@@ -92,7 +97,7 @@ one container per stack, positioned at the ship's death point with a
 So a destroyed freighter with N non-missile stacks leaves **N
 containers** (one per goods type); missile stacks usually burn up.
 
-`combat.PlanShipDrops(items, missileType, rng) []combat.Drop` is the pure
+`combat.PlanShipDrops(items, missileTypes, rng) []combat.Drop` is the pure
 port of both loops (`rng.Float64()` stands in for `rand()`); it returns
 one `Drop{GoodsType, Quantity}` per surviving stack. The worker turns
 each `Drop` into a `domain.ContainerDrop` by attaching the jittered

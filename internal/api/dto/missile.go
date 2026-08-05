@@ -7,11 +7,16 @@ import (
 )
 
 // LaunchMissileRequest is the body of POST /api/cmd/launch-missile.
-// PlayerID is sourced from the session cookie; the body only carries
-// the launching ship and the target.
+// PlayerID is sourced from the session cookie; the body carries the launching
+// ship, the target, and the ammunition Class (1-5 per ct_missiles: 1 = gt10
+// «Москит», 2 = gt11 «Оса», 3 = gt12 «Стрекоза», 4 = gt13 «Шелкопряд»,
+// 5 = gt14 «Шершень»). The class picks both the cargo row to debit and the
+// missile's balance profile; an unknown class — the zero value included — is
+// rejected with 400.
 type LaunchMissileRequest struct {
 	ShipID    int64     `json:"shipID"`
 	TargetRef EntityRef `json:"targetRef"`
+	Class     int       `json:"class"`
 }
 
 // LaunchMissileResponse echoes the worker-allocated missile id so the

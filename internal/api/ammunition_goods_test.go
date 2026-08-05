@@ -44,7 +44,11 @@ func TestUnit_AmmunitionGoodsIDsAreInTheCatalog(t *testing.T) {
 		id   domain.GoodsTypeID
 		name string
 	}{
-		{"missile launch + starter magazine", domain.MissileGoodsType, "Ракета Москит"},
+		{"missile class 1 + starter magazine", domain.MissileGoodsType, "Ракета Москит"},
+		{"missile class 2", domain.MissileOsaGoodsType, "Ракета Оса"},
+		{"missile class 3", domain.MissileStrekozaGoodsType, "Ракета Стрекоза"},
+		{"missile class 4", domain.MissileShelkopryadGoodsType, "Ракета Шелкопряд"},
+		{"missile class 5", domain.MissileShershenGoodsType, "Ракета Шершень"},
 		{"drone salvo", domain.DroneGoodsType, "Боевой дрон"},
 		{"satellite install", api.SatelliteGoodsType, "Навигационный спутник"},
 		{"jammer install", api.JammerGoodsType, "Генератор гипер-помех"},

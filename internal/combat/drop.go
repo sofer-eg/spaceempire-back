@@ -33,19 +33,24 @@ const (
 // PlanShipDrops decides which of a dead ship's cargo stacks drop into
 // containers, porting KillObject's two loops:
 //
-//   - a missile stack (GoodsType == missileType) survives only on a high
+//   - a missile stack (GoodsType listed in missileTypes) survives only on a high
 //     roll, and then only a bit-shifted fraction of its count drops;
 //   - every other stack drops in full.
 //
+// missileTypes is a set, not one id (TASK-175): the SP's `cargo_missiles` cursor
+// joins cargo to ct_missiles on cargo_id, so EVERY missile class is subject to the
+// throw. The caller passes the ids (domain.MissileGoodsTypes) so this stays a
+// pure, table-testable function with no catalog knowledge of its own.
+//
 // One returned Drop == one container the caller will spawn. rng.Float64
 // is consumed exactly once per missile stack and never for other stacks.
-func PlanShipDrops(items []domain.CargoItem, missileType domain.GoodsTypeID, rng RNG) []Drop {
+func PlanShipDrops(items []domain.CargoItem, missileTypes []domain.GoodsTypeID, rng RNG) []Drop {
 	var drops []Drop
 	for _, item := range items {
 		if item.Quantity <= 0 {
 			continue
 		}
-		if item.GoodsType == missileType {
+		if isMissileGoods(item.GoodsType, missileTypes) {
 			if qty, ok := missileThrow(item.Quantity, rng); ok {
 				drops = append(drops, Drop{GoodsType: item.GoodsType, Quantity: qty})
 			}
@@ -54,6 +59,17 @@ func PlanShipDrops(items []domain.CargoItem, missileType domain.GoodsTypeID, rng
 		drops = append(drops, Drop{GoodsType: item.GoodsType, Quantity: item.Quantity})
 	}
 	return drops
+}
+
+// isMissileGoods reports whether a stack is missile ammunition. A linear scan:
+// the set is the five ct_missiles classes and a wreck carries a handful of stacks.
+func isMissileGoods(id domain.GoodsTypeID, missileTypes []domain.GoodsTypeID) bool {
+	for _, t := range missileTypes {
+		if id == t {
+			return true
+		}
+	}
+	return false
 }
 
 // slavesPctMin / slavesPctMax bound the share of a killed passenger ship's

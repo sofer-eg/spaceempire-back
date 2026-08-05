@@ -16,12 +16,6 @@ func sortMissiles(ms []domain.Missile) {
 	sort.Slice(ms, func(i, j int) bool { return ms[i].ID < ms[j].ID })
 }
 
-// missileSpec is the spec the sector tick passes into combat.TickMissile.
-// Phase 4.3 has exactly one class of missile (see spec §1), so the spec
-// is a package-level constant. When the balance catalog arrives this will
-// move into per-missile state.
-var missileSpec = combat.DefaultMissileSpec()
-
 // MissileImpact is a per-tick missile event broadcast in the same
 // Snapshot as the missile's removal: it tells the SPA whether the
 // missile detonated on a target or just expired. Pos is the missile's
@@ -50,11 +44,16 @@ type MissileImpact struct {
 // (there is no static sweep). Unlike a torpedo a missile deals POINT
 // damage only — no splash (ЧТЗ C-02). A missile whose target left the
 // sector / died falls back to its LastTargetPos and can only expire via TTL.
+//
+// Each missile carries its own class profile (Damage/Speed/Accel/TurnRate/
+// HitRadius, copied in at launch), so no spec is passed here — until TASK-175 the
+// tick handed combat.TickMissile one package-level spec and every missile in the
+// world flew the class-1 profile whatever the player fired.
 func (w *Worker) tickMissiles(ctx context.Context, s *sectorState, dt float64, now time.Time) {
 	for id, m := range s.missiles {
 		targetPos, targetAlive := s.resolveTargetPos(m.Target)
 
-		outcome := combat.TickMissile(m, targetPos, targetAlive, missileSpec, dt, now)
+		outcome := combat.TickMissile(m, targetPos, targetAlive, dt, now)
 		switch outcome {
 		case combat.MissileKeep:
 			continue

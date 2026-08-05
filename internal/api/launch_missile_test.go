@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -74,6 +75,7 @@ func TestUnit_LaunchMissile_OK(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+		Class:     1,
 	})
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -104,6 +106,7 @@ func TestUnit_LaunchMissile_NoCargo(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+		Class:     1,
 	})
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
@@ -125,6 +128,7 @@ func TestUnit_LaunchMissile_NonTargetableKind(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindDrone), ID: 7},
+		Class:     1,
 	})
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -144,6 +148,7 @@ func TestUnit_LaunchMissile_ContainerTargetForwarded(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindContainer), ID: 7},
+		Class:     1,
 	})
 
 	// 400 from the WORKER (no such container in the sector), which is what proves
@@ -170,6 +175,7 @@ func TestUnit_LaunchMissile_StaticTargetForwarded(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindStation), ID: 7},
+		Class:     1,
 	})
 
 	// 400 from the worker (not from the handler boundary) is what proves the
@@ -190,6 +196,7 @@ func TestUnit_LaunchMissile_SelfTarget(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 1},
+		Class:     1,
 	})
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -211,6 +218,7 @@ func TestUnit_LaunchMissile_SectorRejectsKeepsCargo(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+		Class:     1,
 	})
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
@@ -242,6 +250,7 @@ func TestUnit_LaunchMissile_NoOrdnanceWired(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+		Class:     1,
 	})
 
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
@@ -273,6 +282,7 @@ func TestUnit_LaunchMissile_AckTimeoutChargesOnce(t *testing.T) {
 	rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+		Class:     1,
 	})
 	require.Equal(t, http.StatusGatewayTimeout, rec.Code, rec.Body.String())
 
@@ -294,6 +304,7 @@ func TestUnit_LaunchMissile_AckTimeoutChargesOnce(t *testing.T) {
 	rec = postLaunchMissile(t, srv, dto.LaunchMissileRequest{
 		ShipID:    1,
 		TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+		Class:     1,
 	})
 	require.Equal(t, http.StatusGatewayTimeout, rec.Code, rec.Body.String())
 	router.release(t)
@@ -312,4 +323,102 @@ func TestUnit_LaunchMissile_InvalidJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// TestUnit_LaunchMissile_ClassPicksItsOwnGoods is the AC-1 check: the launch class
+// selects which of the five ct_missiles ammunition rows is debited. Asserted
+// against literal ids (10..14 from ct_missiles.cargo_id) rather than the handler's
+// own constants — comparing a constant with itself would pass even if the whole
+// table pointed at the drone's 21.
+func TestUnit_LaunchMissile_ClassPicksItsOwnGoods(t *testing.T) {
+	t.Parallel()
+
+	for class, want := range map[int]struct {
+		goods  domain.GoodsTypeID
+		damage int
+	}{
+		1: {10, 1000}, 2: {11, 2500}, 3: {12, 5000}, 4: {13, 12000}, 5: {14, 25000},
+	} {
+		class, want := class, want
+		t.Run(strconv.Itoa(class), func(t *testing.T) {
+			t.Parallel()
+			target := missileTestShip()
+			target.ID = 2
+			target.PlayerID = 999
+			// Far out so the missile is still in flight when the snapshot below is
+			// read (the test worker ticks every 10 ms, i.e. ~0.9 units per tick for
+			// the fastest class).
+			target.Pos = domain.Vec2{X: 1000, Y: 0}
+
+			// Only this class's ammunition is aboard, so a launch that reached for any
+			// other row would fail the debit instead of quietly spending the wrong good.
+			ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{want.goods: 1})
+			w := ordnanceTestWorker(ord, []domain.Ship{missileTestShip(), target})
+			srv := api.NewServer(workerRouter{w}, api.Config{
+				SnapshotInterval: 10 * time.Millisecond,
+				AckTimeout:       time.Second,
+				SectorID:         1,
+			}, nil)
+			runWorker(t, w)
+
+			rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
+				ShipID:    1,
+				TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+				Class:     class,
+			})
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, []domain.GoodsTypeID{want.goods}, ord.chargedGoods(),
+				"class %d must spend goods %d", class, want.goods)
+			assert.EqualValues(t, 0, ord.left(want.goods))
+
+			// The class must reach the worker, not just the cargo debit: the missile
+			// that took off carries its own class's ct_missiles.power. Without this
+			// the handler could send Class: 1 with the right goods id and every shot
+			// would fly a Москит while the player paid for a Шершень.
+			// Eventually, not an immediate read: the worker replies from inside apply
+			// (start of a tick) while the snapshot this reads is published at the end
+			// of it, so a bare read races the tick boundary. The missile itself is not
+			// in doubt — at 10 ms ticks it needs thousands of them to cover the 1000
+			// units to the target.
+			var damage int
+			require.Eventually(t, func() bool {
+				missiles := w.Snapshot(domain.SectorID(1)).Missiles
+				if len(missiles) != 1 {
+					return false
+				}
+				damage = missiles[0].Damage
+				return true
+			}, time.Second, 5*time.Millisecond, "the launched missile must appear in the snapshot")
+			assert.Equal(t, want.damage, damage,
+				"class %d must fly with ct_missiles.power %d", class, want.damage)
+		})
+	}
+}
+
+// TestUnit_LaunchMissile_InvalidClass: only 1-5 exist (ct_missiles), so anything
+// else is refused with 400 before the command is built — including 0, which is what
+// a client that never learned about the class field would send (AC-3). Nothing is
+// charged.
+func TestUnit_LaunchMissile_InvalidClass(t *testing.T) {
+	t.Parallel()
+
+	for _, class := range []int{0, -1, 6, 99} {
+		class := class
+		t.Run(strconv.Itoa(class), func(t *testing.T) {
+			t.Parallel()
+			srv, _, ord := newMissileTestServer(t, []domain.Ship{missileTestShip()}, 5)
+
+			rec := postLaunchMissile(t, srv, dto.LaunchMissileRequest{
+				ShipID:    1,
+				TargetRef: dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 2},
+				Class:     class,
+			})
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "invalid missile class")
+			assert.Empty(t, ord.chargedGoods(), "rejected before the ordnance is reached")
+			assert.EqualValues(t, 5, ord.left(api.MissileGoodsType))
+		})
+	}
 }

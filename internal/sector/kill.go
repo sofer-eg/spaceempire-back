@@ -35,15 +35,22 @@ type EntityKilledEvent struct {
 	VictimPassengers []domain.PlayerID
 }
 
-// missileGoodsType is the cargo goods-type the SP treats specially in the
-// kill drop (probabilistic throw, see kill_object.md §3).
+// missileGoodsTypes are the cargo goods-types the SP treats specially in the kill
+// drop (probabilistic throw, see kill_object.md §3).
 //
-// Aliased from domain rather than spelled out: this constant carried its own
-// literal 50 until TASK-167, and when the consolidation moved the launch handlers
-// onto the real catalog id it was the one copy left behind. A stale id does not
-// fail loudly here — the stack simply stops matching and drops in full, every
-// time, with missileThrow never reached. Alias, so there is nothing left to drift.
-const missileGoodsType = domain.MissileGoodsType
+// All five missile classes, not one (TASK-175): SP KillObject's `cargo_missiles`
+// cursor selects the stacks to throw with
+// `inner join ct_missiles ctm on ctm.cargo_id = c.type`, i.e. the rule is about
+// missile ammunition as a class of item. Once classes 2-5 became launchable,
+// leaving this at class 1 would have split the rule — a Москит stack burning off a
+// wreck while a Шершень stack, thirty times dearer, dropped in full.
+//
+// Taken from domain rather than spelled out: this constant carried its own literal
+// 50 until TASK-167, and when the consolidation moved the launch handlers onto the
+// real catalog id it was the one copy left behind. A stale id does not fail loudly
+// here — the stack simply stops matching and drops in full, every time, with
+// missileThrow never reached.
+var missileGoodsTypes = domain.MissileGoodsTypes()
 
 // slavesGoodsType is the contraband a killed passenger ship spills — matches
 // the "Slaves" seed in migration 0027. Phase 5.6.
@@ -149,7 +156,7 @@ func (w *Worker) dropLoot(ctx context.Context, s *sectorState, ship *domain.Ship
 		items = nil
 	}
 
-	plan := combat.PlanShipDrops(items, missileGoodsType, w.rng)
+	plan := combat.PlanShipDrops(items, missileGoodsTypes, w.rng)
 	// Passenger ships (5.5) spill a fraction of their passengers as a Slaves
 	// container (5.6 / SP drop_slaves_on_kill). It rides the same drop list,
 	// so it gets a ring slot and one container like any other stack.

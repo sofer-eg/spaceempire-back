@@ -95,8 +95,10 @@ type Config struct {
 	ContainerTTL time.Duration
 	// ContainerHP is the hull a loot container floats with (TASK-111): a crate is
 	// a soft target, and the point of shooting one is denial, so it must not take a
-	// salvo — the default 25 sits below one missile's 30 damage
-	// (combat.DefaultMissileSpec), i.e. one hit destroys it with its cargo.
+	// salvo — the default 25 sits far below the weakest missile's damage (1000, the
+	// class-1 «Москит» of combat.DefaultMissileSpec — it was 30 until TASK-175
+	// raised every class to its ct_missiles.power), i.e. one hit of any class
+	// destroys it with its cargo.
 	// RAM-only: containers have no HP column, so this seeds every container at
 	// cold start and at spawn.
 	ContainerHP int

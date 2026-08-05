@@ -46,7 +46,9 @@ type DroneSpec struct {
 // calibrated against a 3-second tick and the starter ship's MaxSpeed≈20:
 // the drone is ~3× faster so it keeps up with and orbits its target,
 // holds station at StandoffRange, and chips the target down at Damage per
-// tick (weaker than a missile's 30 one-shot, but it fires every tick).
+// tick rather than in one blow like a missile. (Damage is far below a
+// missile's — much further since TASK-175 put missiles on ct_missiles.power —
+// but a drone keeps firing every tick for its whole TTL.)
 func DefaultDroneSpec() DroneSpec {
 	return DroneSpec{
 		Damage:        8,

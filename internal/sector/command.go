@@ -442,8 +442,12 @@ type LaunchMissileCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
 	Target   domain.EntityRef
-	// GoodsType is the goods id one missile costs (10); the handler owns that
-	// constant so the sector package stays free of the goods catalog.
+	// Class is the ammunition class 1-5 (ct_missiles), which selects the missile's
+	// balance profile via combat.DefaultMissileSpec. The handler validates it
+	// before sending; the zero value a fixture leaves falls back to class 1.
+	Class int
+	// GoodsType is the goods id one missile of Class costs (10-14); the handler
+	// owns that mapping so the sector package stays free of the goods catalog.
 	GoodsType domain.GoodsTypeID
 	// Now lets tests inject a deterministic clock; production wiring leaves
 	// it zero and the worker substitutes its own clock.Now(). Keeping the
@@ -524,7 +528,7 @@ func (c LaunchMissileCommand) apply(w *Worker, s *sectorState) {
 		now = w.clock.Now()
 	}
 	id := s.allocMissileID()
-	m := combat.LaunchMissile(id, missileSpec, ship, c.Target, targetPos, now)
+	m := combat.LaunchMissile(id, combat.DefaultMissileSpec(c.Class), ship, c.Target, targetPos, now)
 	s.missiles[id] = m
 
 	// Debit the action energy only once the launch has committed, so a rejected or

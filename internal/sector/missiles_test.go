@@ -5,11 +5,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/pkg/clock"
 	"spaceempire/back/internal/sector"
+)
+
+// missileShipHP / missileShipShield are the vitals every missile fixture ship
+// carries. They were 200/50 while a missile did 30 damage; TASK-175 put every
+// class on ct_missiles.power, so the weakest missile now deals 1000 and those
+// numbers stopped meeting the helper's own contract — a single hit wiped the
+// target, and tests that fire twice at it then failed on the *second* launch with
+// ErrInvalidAttackTarget instead of what they were checking. Sized like a real
+// hull instead (Разведчик, class 77: hull 4040, shield 6900) so a class-1 hit is a
+// dent, not a kill.
+const (
+	missileShipHP     = 10000
+	missileShipShield = 5000
 )
 
 // missileShip mirrors laserShip but defaults Energy/Shield/HP big enough
@@ -22,10 +36,10 @@ func missileShip(id int64, playerID int64, pos domain.Vec2) domain.Ship {
 		SectorID:  testSector,
 		Pos:       pos,
 		Direction: domain.Vec2{X: 1, Y: 0},
-		HP:        200,
-		MaxHP:     200,
-		Shield:    50,
-		MaxShield: 50,
+		HP:        missileShipHP,
+		MaxHP:     missileShipHP,
+		Shield:    missileShipShield,
+		MaxShield: missileShipShield,
 		// up_launcher: phase 10.14b gates missile launch on this module.
 		Equipment: []domain.InstalledEquipment{{Type: "up_launcher", Level: 1}},
 		// no shield/energy recharge — keeps the math predictable across
@@ -64,7 +78,11 @@ func TestUnit_LaunchMissile_OK(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	a := missileShip(1, 100, domain.Vec2{X: 0, Y: 0})
-	b := missileShip(2, 200, domain.Vec2{X: 100, Y: 0})
+	// 500 units out, not 100: a class-1 missile covers ~90 units a tick, so a
+	// target within one tick's reach is hit and the missile removed before the
+	// snapshot this test reads (TASK-175 raised Speed 80 → 90 and Accel 40 → 108,
+	// which saturates the cap on the first tick).
+	b := missileShip(2, 200, domain.Vec2{X: 500, Y: 0})
 	w := newSingleSectorWorker(t,
 		sector.Config{TickInterval: time.Second, AOIRadius: 1000},
 		clock.NewRealClock(),
@@ -100,7 +118,9 @@ func TestUnit_LaunchMissile_ActionEnergy(t *testing.T) {
 	a := missileShip(1, 100, domain.Vec2{X: 0, Y: 0})
 	a.Energy = 50
 	a.MaxEnergy = 1000
-	b := missileShip(2, 200, domain.Vec2{X: 100, Y: 0})
+	// Far enough that the first missile is still in flight for the assertion
+	// below (see TestUnit_LaunchMissile_OK).
+	b := missileShip(2, 200, domain.Vec2{X: 500, Y: 0})
 	w := newSingleSectorWorker(t,
 		sector.Config{TickInterval: time.Second, AOIRadius: 1000},
 		clock.NewRealClock(), nil, []domain.Ship{a, b})
@@ -167,8 +187,8 @@ func TestUnit_LaunchMissile_HitsTarget(t *testing.T) {
 		Reply:    reply,
 	}))
 
-	// Run up to TTL/tick ticks; default TTL=15s, Speed=80 — distance 100
-	// closes within 2 ticks comfortably.
+	// Run up to TTL/tick ticks; class-1 TTL=15s, Speed=90 — distance 100 closes
+	// within the first tick comfortably.
 	var hit bool
 	for i := 0; i < 6 && !hit; i++ {
 		w.Tick(ctx)
@@ -187,7 +207,8 @@ func TestUnit_LaunchMissile_HitsTarget(t *testing.T) {
 	require.Empty(t, snap.Missiles)
 	for _, s := range snap.Ships {
 		if s.ID == 2 {
-			require.True(t, s.Shield < 50 || s.HP < 200, "target absorbed damage")
+			require.True(t, s.Shield < missileShipShield || s.HP < missileShipHP,
+				"target absorbed damage")
 		}
 	}
 }
@@ -200,8 +221,8 @@ func TestUnit_LaunchMissile_Expires(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	a := missileShip(1, 100, domain.Vec2{X: 0, Y: 0})
-	// 10 000 units away — at Speed=80 and TTL=15s the missile travels at
-	// most ~1200 units before timing out.
+	// 10 000 units away — at class-1 Speed=90 and TTL=15s the missile travels at
+	// most ~1350 units before timing out.
 	b := missileShip(2, 200, domain.Vec2{X: 10000, Y: 0})
 	clk := clock.NewFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	w := newSingleSectorWorker(t,
@@ -232,8 +253,8 @@ func TestUnit_LaunchMissile_Expires(t *testing.T) {
 	require.Empty(t, w.Snapshot(testSector).Missiles)
 	for _, s := range w.Snapshot(testSector).Ships {
 		if s.ID == 2 {
-			require.Equal(t, 50, s.Shield, "target untouched")
-			require.Equal(t, 200, s.HP)
+			require.Equal(t, missileShipShield, s.Shield, "target untouched")
+			require.Equal(t, missileShipHP, s.HP)
 		}
 	}
 }
@@ -336,4 +357,44 @@ func TestUnit_LaunchMissile_Docked(t *testing.T) {
 	w.Tick(ctx)
 	res := <-reply
 	require.ErrorIs(t, res.Err, sector.ErrShipDocked)
+}
+
+// TestUnit_LaunchMissile_ClassSelectsProfile pins the seam between the command's
+// ammunition class and the missile that actually flies: the worker must look the
+// class up in combat.DefaultMissileSpec, so a class-5 «Шершень» spawns with 25 000
+// damage at Speed 22 and not with the class-1 profile.
+//
+// This is the wiring the whole per-class feature rests on and it was the one thing
+// no test covered while it was wrong: before TASK-175 the worker held a single
+// package-level spec, so every launch — whatever the player paid for — flew a
+// Москит. Swapping the lookup back to a fixed class here must fail.
+func TestUnit_LaunchMissile_ClassSelectsProfile(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := missileShip(1, 100, domain.Vec2{X: 0, Y: 0})
+	// 500 units out: a class-5 missile crawls at 22 units a tick, so it is still
+	// airborne in the snapshot below.
+	b := missileShip(2, 200, domain.Vec2{X: 500, Y: 0})
+	w := newSingleSectorWorker(t,
+		sector.Config{TickInterval: time.Second, AOIRadius: 1000},
+		clock.NewRealClock(), nil, []domain.Ship{a, b})
+
+	reply := make(chan sector.LaunchMissileResult, 1)
+	require.NoError(t, w.Send(testSector, sector.LaunchMissileCommand{
+		PlayerID: 100,
+		ShipID:   1,
+		Target:   domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+		Class:    5,
+		Reply:    reply,
+	}))
+	w.Tick(ctx)
+	require.NoError(t, (<-reply).Err)
+
+	snap := w.Snapshot(testSector)
+	require.Len(t, snap.Missiles, 1)
+	// Literal ct_missiles values for class 5, not combat.DefaultMissileSpec(5):
+	// asking the catalog what it says would pass even if the worker never consulted
+	// the class at all.
+	assert.Equal(t, 25000, snap.Missiles[0].Damage, "class-5 damage is ct_missiles.power")
+	assert.Equal(t, 22.0, snap.Missiles[0].Speed, "class-5 speed is ct_missiles.speed")
 }

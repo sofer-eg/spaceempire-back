@@ -23,13 +23,20 @@ func TestUnit_TorpedoSpecs_Profile(t *testing.T) {
 	c2 := combat.DefaultTorpedoSpec(2)
 	c3 := combat.DefaultTorpedoSpec(3)
 
-	mis := combat.DefaultMissileSpec()
+	mis := combat.DefaultMissileSpec(1)
 	for name, s := range map[string]combat.TorpedoSpec{"class2": c2, "class3": c3} {
-		// "≫", not just ">": a torpedo is the kratno-mocnee heavy-hitter of
-		// §5.1, so pin a several-times margin over a missile rather than a
-		// one-point edge that a rebalance could erode while still passing.
-		assert.GreaterOrEqualf(t, s.Damage, 3*mis.Damage,
-			"%s: Damage must be >> missile (at least 3×%d)", name, mis.Damage)
+		// Damage is asserted positive, NOT against a missile's, and that is a
+		// deliberate step back from what this line used to claim ("≫ missile, at
+		// least 3×"). TASK-175 calibrated missiles to ct_missiles.power — class 1
+		// alone went 30 → 1000 — so a torpedo no longer out-damages a missile at
+		// all: 150 and 600 against 1000…25000. Raising the torpedoes to keep the
+		// old inequality is exactly the "adjust the number until it passes" move,
+		// and it would also be wrong on price: the live market wants 97 596 cr for
+		// an «Огненная Буря» (650 cr per point of damage) and 1 210 000 cr for a
+		// «Святая Торпеда» (2017 cr/point) against a «Москит»'s ~0.4 cr/point.
+		// Torpedo calibration is its own task (TASK-190); until it lands, the
+		// honest thing here is to stop asserting an ordering that is false.
+		assert.Positivef(t, s.Damage, "%s: Damage must be > 0", name)
 		assert.Lessf(t, s.Speed, mis.Speed, "%s: Speed must be < missile (slower)", name)
 		assert.Lessf(t, s.TurnRate, mis.TurnRate, "%s: TurnRate must be < missile (less nimble)", name)
 		assert.Positivef(t, s.SplashRadius, "%s: SplashRadius must be > 0 (area weapon)", name)

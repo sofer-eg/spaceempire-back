@@ -45,11 +45,16 @@ type TorpedoSpec struct {
 // torpedoSpecsByClass holds the balance profile for each torpedo ammunition
 // class: 2 = gt23 "Огненная Буря", 3 = gt24 "Святая Торпеда". The magnitudes
 // are a spaceempire balance decision — relative parity with StarWind ct_drones,
-// not the literal 100k/1M numbers (ЧТЗ §5.1, C-01). A torpedo hits far harder
-// than a missile (DefaultMissileSpec.Damage = 30) but is slower, less nimble,
-// has a finite TTL, carries its own HP and deals area damage. Class 3 beats
-// class 2 on every axis (faster, harder-hitting, longer-lived, bigger blast)
-// and is the pricier fit. Sub-task .4 consumes this via DefaultTorpedoSpec.
+// not the literal 100k/1M numbers (ЧТЗ §5.1, C-01). A torpedo is slower and less
+// nimble than a missile, has a finite TTL, carries its own HP and deals area
+// damage. Class 3 beats class 2 on every axis (faster, harder-hitting,
+// longer-lived, bigger blast) and is the pricier fit. Sub-task .4 consumes this
+// via DefaultTorpedoSpec.
+//
+// These magnitudes are UNDER-calibrated as of TASK-175 and knowingly left alone:
+// they were set against a missile that did 30 damage, and missiles are now on
+// ct_missiles.power (1000…25000), so a torpedo costing 97 596 / 1 210 000 cr hits
+// for less than the cheapest missile. Recalibration is TASK-190.
 var torpedoSpecsByClass = map[int]TorpedoSpec{
 	2: {
 		Damage:       150, // 5× a missile — the heavy-hitter profile

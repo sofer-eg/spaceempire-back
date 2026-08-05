@@ -3,6 +3,7 @@ package sector_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -289,4 +290,44 @@ func TestUnit_KillShip_MissileCargoBurnsUp(t *testing.T) {
 
 	require.Empty(t, repo.lastDrops, "missile stack burns up on a low roll")
 	require.Empty(t, w.Snapshot(testSector).Containers)
+}
+
+// TestUnit_KillShip_EveryMissileClassCargoBurnsUp: the throw covers ALL five
+// missile classes, not only the one the starter magazine holds. SP KillObject picks
+// the stacks to throw with `inner join ct_missiles ctm on ctm.cargo_id = c.type`,
+// so the rule is about missile ammunition as a class of item.
+//
+// Without this, TASK-175 (which made classes 2-5 launchable, hence worth carrying)
+// would have left a «Шершень» stack — thirty times dearer than a «Москит» — falling
+// out of every wreck intact while the Москит beside it burned.
+func TestUnit_KillShip_EveryMissileClassCargoBurnsUp(t *testing.T) {
+	t.Parallel()
+
+	for _, goods := range domain.MissileGoodsTypes() {
+		goods := goods
+		t.Run(strconv.Itoa(int(goods)), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			// A regular stack rides along: it must still drop in full, so a failure
+			// here means the missile branch was taken (or missed) — not that the
+			// whole drop broke.
+			repo := &fakeContainerRepo{cargoByShip: map[domain.ShipID][]domain.CargoItem{
+				2: {
+					{GoodsType: goods, Quantity: 100000},
+					{GoodsType: 7, Quantity: 100},
+				},
+			}}
+			w := killerVictim(t, repo, staticRNG{v: 0}) // roll 0 → chance 0 < 12 → burns
+
+			w.Tick(ctx)
+
+			require.Equal(t, []domain.ContainerDrop{{
+				Pos:       domain.Vec2{X: 30, Y: 0},
+				ExpiresAt: repo.lastDrops[0].ExpiresAt,
+				GoodsType: 7,
+				Quantity:  100,
+			}}, repo.lastDrops,
+				"only the regular stack drops; missile class %d burns up on a low roll", goods)
+		})
+	}
 }

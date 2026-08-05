@@ -183,12 +183,37 @@ func (f *fakeOrdnance) LaunchTorpedo(ctx context.Context, owner domain.EntityRef
 	return domain.TorpedoID(f.nextID), nil
 }
 
+// LaunchDrones models the real ordnance since TASK-176: the salvo is sized inside
+// the transaction by what the hold actually carries (cargo.AvailableIn), so a short
+// magazine launches — and charges — what is there instead of refusing the whole
+// salvo. It returns one id per drone actually launched, a PREFIX of ds. An empty
+// magazine is still cargo.ErrInsufficientQuantity, the 400 an empty hold owes the
+// player.
 func (f *fakeOrdnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error) {
-	if err := f.begin(ctx, owner, gtype, int64(len(ds))); err != nil {
+	if err := f.enter(ctx); err != nil {
 		return nil, err
 	}
-	ids := make([]domain.DroneID, 0, len(ds))
-	for range ds {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	launch := int64(len(ds))
+	if f.failWith == nil && !f.unlimited && f.stock[gtype] < launch {
+		// A transaction that fails never gets as far as sizing the salvo, so
+		// failWith keeps the priority charge() gives it.
+		launch = f.stock[gtype]
+		if launch == 0 {
+			// Record the attempt the way charge would, so the "which goods id did the
+			// command point at" assertions still see the reached call.
+			f.owners = append(f.owners, owner)
+			f.goodsTypes = append(f.goodsTypes, gtype)
+			return nil, cargo.ErrInsufficientQuantity
+		}
+	}
+	if err := f.charge(owner, gtype, launch); err != nil {
+		return nil, err
+	}
+	ids := make([]domain.DroneID, 0, launch)
+	for i := int64(0); i < launch; i++ {
 		f.nextID++
 		f.drones++
 		ids = append(ids, domain.DroneID(f.nextID))
@@ -509,10 +534,51 @@ func TestUnit_LaunchDrone_ChargesToSpawnNotRequested(t *testing.T) {
 	assert.Len(t, w.Snapshot(testSector).Drones, 2)
 }
 
-// TestUnit_LaunchDrone_ShortHoldSpawnsNothing: the clamped salvo is
-// all-or-nothing. Two drones fit under the cap but only one is in the hold, so
-// the whole launch is refused — no partial spawn, nothing charged.
-func TestUnit_LaunchDrone_ShortHoldSpawnsNothing(t *testing.T) {
+// TestUnit_LaunchDrone_NoCountLaunchesTheCap is the TASK-176 contract at the
+// command boundary: the SERVER decides the salvo size, so a command that names no
+// Count launches everything up_drone_control still allows. The clients used to send
+// a fixed DRONE_SALVO=3 of their own, which is how the two SPA entry points came to
+// disagree — one clamped it to the hold, the other did not.
+func TestUnit_LaunchDrone_NoCountLaunchesTheCap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 5})
+	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+
+	reply := make(chan sector.LaunchDroneResult, 1)
+	require.NoError(t, w.Send(testSector, sector.LaunchDroneCommand{
+		PlayerID: 100, ShipID: 1, Target: shipTarget(2),
+		GoodsType: testDroneGoods, Reply: reply,
+	}))
+	w.Tick(ctx)
+
+	res := <-reply
+	require.NoError(t, res.Err)
+	require.Equal(t, 2, res.Spawned, "the level-2 module is the whole salvo")
+	assert.EqualValues(t, 2, ord.charged[testDroneGoods])
+	assert.Len(t, w.Snapshot(testSector).Drones, 2)
+
+	// The cap counts the drones already out: a second command with no Count adds
+	// nothing and is refused, rather than launching another two.
+	reply = make(chan sector.LaunchDroneResult, 1)
+	require.NoError(t, w.Send(testSector, sector.LaunchDroneCommand{
+		PlayerID: 100, ShipID: 1, Target: shipTarget(2),
+		GoodsType: testDroneGoods, Reply: reply,
+	}))
+	w.Tick(ctx)
+
+	require.ErrorIs(t, (<-reply).Err, sector.ErrDroneCapReached)
+	assert.EqualValues(t, 2, ord.charged[testDroneGoods], "no second charge")
+	assert.Len(t, w.Snapshot(testSector).Drones, 2)
+}
+
+// TestUnit_LaunchDrone_ShortHoldLaunchesWhatItHas is the defect TASK-176 fixes.
+// Two drones fit under the cap but only one is in the hold: the launch used to be
+// refused outright (400) because the clamped salvo was charged as one
+// all-or-nothing debit — and at space 290 "fewer drones aboard than the salvo" is
+// the normal case, not an edge. Now one launches, one unit is charged, and exactly
+// one drone is in RAM: ids[i] pairs with ds[i] over the launched prefix.
+func TestUnit_LaunchDrone_ShortHoldLaunchesWhatItHas(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	ord := newFakeOrdnance(map[domain.GoodsTypeID]int64{testDroneGoods: 1})
@@ -526,9 +592,33 @@ func TestUnit_LaunchDrone_ShortHoldSpawnsNothing(t *testing.T) {
 	w.Tick(ctx)
 
 	res := <-reply
+	require.NoError(t, res.Err, "a short hold is not a refusal any more")
+	assert.Equal(t, 1, res.Spawned, "what the hold could pay for")
+	assert.EqualValues(t, 1, ord.charged[testDroneGoods], "charged for the drone that flew")
+	assert.EqualValues(t, 0, ord.left(testDroneGoods))
+	require.Len(t, w.Snapshot(testSector).Drones, 1, "one drone in RAM, not the whole salvo")
+}
+
+// An EMPTY hold is still a refusal: cargo.ErrInsufficientQuantity, which the
+// handler maps to 400 "not enough drones in cargo". Without this, a launch with
+// nothing aboard would answer 200 / spawned 0 and the player would be told nothing.
+func TestUnit_LaunchDrone_EmptyHoldRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	ord := newFakeOrdnance(nil)
+	w := ordnanceWorker(t, ord, ordnanceCfg(), launchPair())
+
+	reply := make(chan sector.LaunchDroneResult, 1)
+	require.NoError(t, w.Send(testSector, sector.LaunchDroneCommand{
+		PlayerID: 100, ShipID: 1, Target: shipTarget(2), Count: 2,
+		GoodsType: testDroneGoods, Reply: reply,
+	}))
+	w.Tick(ctx)
+
+	res := <-reply
 	require.ErrorIs(t, res.Err, cargo.ErrInsufficientQuantity)
 	assert.Zero(t, res.Spawned)
-	assert.EqualValues(t, 1, ord.left(testDroneGoods))
+	assert.Zero(t, ord.debits, "nothing charged")
 	assert.Empty(t, w.Snapshot(testSector).Drones)
 }
 

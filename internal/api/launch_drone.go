@@ -26,18 +26,21 @@ const DroneGoodsType = domain.DroneGoodsType
 // owns no cargo, it only routes the command (carrying the goods id) and maps the
 // outcome.
 //
-// The salvo's debit lives inside the worker's apply, through sector.Ordnance
-// (TASK-147): the worker clamps Count to what up_drone_control still allows and
-// charges exactly that many units in the same transaction as the INSERTs. So
-// Spawned can no longer come back short of what was paid for, and the shortfall
-// refund this handler used to do is gone with it.
+// The salvo's size AND its debit live inside the worker's apply, through
+// sector.Ordnance (TASK-147, TASK-176): the worker clamps to what up_drone_control
+// still allows, the transaction clamps again to what the hold carries, and exactly
+// that many units are charged in the same transaction as the INSERTs. So Spawned can
+// no longer come back short of what was paid for, and the shortfall refund this
+// handler used to do is gone with it.
+//
+// The request carries no count — see dto.LaunchDroneRequest.
 func (s *Server) handleLaunchDrone(w http.ResponseWriter, r *http.Request) {
 	var req dto.LaunchDroneRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if req.ShipID <= 0 || req.TargetRef.ID <= 0 || req.Count <= 0 {
+	if req.ShipID <= 0 || req.TargetRef.ID <= 0 {
 		writeError(w, http.StatusBadRequest, "invalid request fields")
 		return
 	}
@@ -60,11 +63,11 @@ func (s *Server) handleLaunchDrone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := make(chan sector.LaunchDroneResult, 1)
+	// No Count: zero means "the whole salvo up_drone_control allows" (TASK-176).
 	err := s.router.Send(sectorID, sector.LaunchDroneCommand{
 		PlayerID:  playerID,
 		ShipID:    domain.ShipID(req.ShipID),
 		Target:    target,
-		Count:     req.Count,
 		GoodsType: DroneGoodsType,
 		Reply:     reply,
 	})

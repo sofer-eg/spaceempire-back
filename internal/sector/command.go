@@ -694,26 +694,37 @@ func replyLaunchTorpedo(reply chan<- LaunchTorpedoResult, res LaunchTorpedoResul
 }
 
 // LaunchDroneResult reports how many drones were actually spawned, which the
-// handler echoes for client-side tracking. Since TASK-147 the whole salvo is
-// charged and INSERTed in one transaction, so Spawned is either the clamped
-// salvo size or (on error) zero — never a fraction the handler has to refund.
+// handler echoes for client-side tracking. Since TASK-147 the salvo is charged and
+// INSERTed in one transaction, so Spawned is either the number of drones that flew
+// or (on error) zero — never a fraction the handler has to refund. Since TASK-176
+// it can also be short of the cap, when the hold had fewer drones than that.
 type LaunchDroneResult struct {
 	Err     error
 	Spawned int
 }
 
-// LaunchDroneCommand spawns up to Count combat drones from ShipID, each launched
-// at Target. Ownership is enforced; the target must be a live ship in the same
-// sector (phase 4.4: explicitly-assigned target only, see drones.md §4). The
-// salvo is clamped to what up_drone_control still allows, then charged and
-// INSERTed as ONE transaction through Ordnance (TASK-147), so each drone survives
-// a restart under its DB primary key and the player pays for exactly the drones
-// that flew.
+// LaunchDroneCommand spawns a salvo of combat drones from ShipID, each launched at
+// Target. Ownership is enforced; the target must be a live ship in the same sector
+// (phase 4.4: explicitly-assigned target only, see drones.md §4).
+//
+// The SERVER decides the salvo size (TASK-176):
+// min(up_drone_control level − live drones, drones in the hold). The first half is
+// clamped here, the second inside the Ordnance transaction — and both must be,
+// because only the worker knows the cap and only the transaction can size the hold
+// without racing it. The whole salvo is then charged and INSERTed as ONE
+// transaction (TASK-147), so each drone survives a restart under its DB primary key
+// and the player pays for exactly the drones that flew.
 type LaunchDroneCommand struct {
 	PlayerID domain.PlayerID
 	ShipID   domain.ShipID
 	Target   domain.EntityRef
-	Count    int
+	// Count is an OPTIONAL upper bound on the salvo. Zero (the HTTP path never
+	// sets it) means "as many as up_drone_control allows" — the product rule since
+	// TASK-176: the clients used to send a fixed salvo of 3 each, and the entry
+	// point that did not also clamp it to the hold answered 400 for a launch the
+	// player could plainly see they could make. Kept for callers that need a
+	// deterministic number, which is what the worker tests are.
+	Count int
 	// GoodsType is the goods id one drone costs (21); the handler owns that
 	// constant so the sector package stays free of the goods catalog.
 	GoodsType domain.GoodsTypeID
@@ -743,8 +754,6 @@ func (c LaunchDroneCommand) apply(w *Worker, s *sectorState) {
 		res.Err = ErrInvalidAttackTarget
 	case domain.ShipID(c.Target.ID) == c.ShipID:
 		res.Err = ErrInvalidAttackTarget
-	case c.Count <= 0:
-		res.Err = ErrInvalidAttackTarget
 	}
 	if res.Err != nil {
 		replyLaunchDrone(c.Reply, res)
@@ -764,6 +773,9 @@ func (c LaunchDroneCommand) apply(w *Worker, s *sectorState) {
 	// The visible consequence is deliberately milder than before: asking for 5
 	// with a level-2 module and 3 units in the hold used to fail the handler's
 	// Consume(5) outright; now 2 launch and 2 are charged.
+	//
+	// Since TASK-176 the cap IS the salvo unless the caller names a smaller Count:
+	// the launch is "as many drones as the drone-control system runs".
 	cap := shipEquipmentLevel(ship, "up_drone_control")
 	live := s.liveDroneCount(c.ShipID)
 	allowed := cap - live
@@ -772,9 +784,9 @@ func (c LaunchDroneCommand) apply(w *Worker, s *sectorState) {
 		replyLaunchDrone(c.Reply, res)
 		return
 	}
-	toSpawn := c.Count
-	if toSpawn > allowed {
-		toSpawn = allowed
+	toSpawn := allowed
+	if c.Count > 0 && c.Count < allowed {
+		toSpawn = c.Count
 	}
 
 	now := c.Now
@@ -788,18 +800,19 @@ func (c LaunchDroneCommand) apply(w *Worker, s *sectorState) {
 		ds[i] = *d
 	}
 
-	// One all-or-nothing transaction: too little ammunition for the clamped salvo
-	// rejects the whole launch, and no INSERT can fail halfway. That is what makes
-	// a partial spawn — and the handler-side remainder refund it used to need —
-	// structurally impossible.
+	// One transaction sizes the salvo by the hold, charges it and INSERTs it: what
+	// flies and what is paid for cannot disagree, and no INSERT can fail halfway.
+	// A hold shorter than the cap shortens the salvo (TASK-176) instead of rejecting
+	// it; an EMPTY hold is still cargo.ErrInsufficientQuantity → 400.
 	ids, err := w.launchDrones(ship, c.GoodsType, ds)
 	if err != nil {
 		res.Err = err
 		replyLaunchDrone(c.Reply, res)
 		return
 	}
-	// ids[i] belongs to ds[i]; launchDrones guarantees the two lengths match, so
-	// the pairing cannot go out of range or drop a charged drone.
+	// ids[i] belongs to ds[i] over the launched prefix — launchDrones guarantees
+	// len(ids) <= len(ds), so the pairing cannot index past the salvo, and the
+	// drones beyond it were never charged and are simply dropped.
 	for i, id := range ids {
 		d := ds[i]
 		d.ID = id

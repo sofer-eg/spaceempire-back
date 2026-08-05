@@ -225,29 +225,51 @@ func TestIntegration_Ordnance(t *testing.T) {
 		assert.Equal(t, 1, rowCount(t, pool, "torpedos"), "no free second torpedo")
 	})
 
-	// The salvo is all-or-nothing: three drones against two units in the hold
-	// leaves nothing behind, and the clamped two go through together.
-	t.Run("DroneSalvoIsAllOrNothing", func(t *testing.T) {
+	// The salvo is SIZED BY THE HOLD inside the transaction (TASK-176) and what it
+	// launches is all-or-nothing. Three drones against two units in the hold used to
+	// fail outright with ErrInsufficientQuantity — one all-or-nothing debit of the
+	// whole clamped salvo (TASK-147) — which at space 290 refused the ordinary case:
+	// a hull that can carry drones carries single digits of them, so the canvas menu
+	// (which sends the full salvo, unlike the HUD) answered 400 for a launch the
+	// player could see they could make.
+	//
+	// Reformulated invariant: the debit and the INSERTs still commit together, for
+	// exactly the number of drones that flew — charged units, committed rows and
+	// returned ids are the same number, and nothing beyond it is charged.
+	t.Run("DroneSalvoIsSizedByTheHold", func(t *testing.T) {
 		ctx := installCtx(t)
 		resetOrdnanceTables(t, pool)
 		stockHold(t, pool, hold, droneGoods, 2)
 
 		ids, err := ord.LaunchDrones(ctx, hold, droneGoods, testDrones(3, ship, player, ordnanceSectorID))
-		require.ErrorIs(t, err, cargo.ErrInsufficientQuantity, "3 requested, 2 in the hold")
-		assert.Empty(t, ids)
-		assert.Equal(t, 0, rowCount(t, pool, "drones"), "no partial salvo")
-		assert.EqualValues(t, 2, heldQty(t, pool, hold, droneGoods), "hold untouched")
-
-		ids, err = ord.LaunchDrones(ctx, hold, droneGoods, testDrones(2, ship, player, ordnanceSectorID))
-		require.NoError(t, err)
-		require.Len(t, ids, 2, "one id per drone, in order")
-		assert.Equal(t, 2, rowCount(t, pool, "drones"), "exactly two drones")
-		assert.Zero(t, heldQty(t, pool, hold, droneGoods), "both units are paid for")
+		require.NoError(t, err, "3 requested, 2 in the hold: launch what the hold pays for")
+		require.Len(t, ids, 2, "one id per drone that actually flew")
+		assert.Equal(t, 2, rowCount(t, pool, "drones"), "exactly the launched drones exist")
+		assert.Zero(t, heldQty(t, pool, hold, droneGoods), "both units are paid for, the third was never there")
 
 		got, err := dronesrepo.New(pool).LoadAll(ctx, ordnanceSectorID)
 		require.NoError(t, err)
 		require.Len(t, got, 2)
 		assert.Equal(t, ids, []domain.DroneID{got[0].ID, got[1].ID}, "the returned ids are the committed rows")
+
+		// A single unit aboard launches exactly one drone and charges exactly one —
+		// the case the SPA used to have to pre-clamp for (and only did in one of its
+		// two entry points).
+		resetOrdnanceTables(t, pool)
+		stockHold(t, pool, hold, droneGoods, 1)
+
+		ids, err = ord.LaunchDrones(ctx, hold, droneGoods, testDrones(3, ship, player, ordnanceSectorID))
+		require.NoError(t, err)
+		require.Len(t, ids, 1, "the hold is the salvo")
+		assert.Equal(t, 1, rowCount(t, pool, "drones"))
+		assert.Zero(t, heldQty(t, pool, hold, droneGoods), "one unit charged, not three")
+
+		// An EMPTY hold is still a refusal, so the handler still answers 400 rather
+		// than a cheerful "spawned 0" (see also EmptyHoldLaunchesNothing).
+		ids, err = ord.LaunchDrones(ctx, hold, droneGoods, testDrones(3, ship, player, ordnanceSectorID))
+		require.ErrorIs(t, err, cargo.ErrInsufficientQuantity, "nothing aboard is not a partial launch")
+		assert.Empty(t, ids)
+		assert.Equal(t, 1, rowCount(t, pool, "drones"), "no free drone")
 	})
 
 	// The recall is the launch run backwards (TASK-152): the DELETEs and the credit

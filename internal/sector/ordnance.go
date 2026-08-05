@@ -66,13 +66,23 @@ func (w *Worker) launchTorpedo(ship *domain.Ship, gtype domain.GoodsTypeID, t do
 	return id, nil
 }
 
-// errOrdnanceIDCount reports that Ordnance broke its own contract: it must
-// return exactly one id per drone it was handed.
-var errOrdnanceIDCount = errors.New("sector: ordnance returned the wrong number of drone ids")
+// errOrdnanceIDCount reports that Ordnance broke its own contract: it must never
+// return MORE ids than the drones it was handed.
+var errOrdnanceIDCount = errors.New("sector: ordnance returned more drone ids than drones")
 
-// launchDrones charges len(ds) drones and creates their rows, returning one id
-// per drone in the same order. All-or-nothing: on error nothing was charged and
-// nothing created.
+// launchDrones charges the salvo and creates its rows, returning one id per drone
+// ACTUALLY launched, in order — a prefix of ds, so ids[i] belongs to ds[i].
+//
+// Since TASK-176 the ordnance sizes the salvo by what the hold carries, so
+// len(ids) < len(ds) is a normal answer ("the hold could pay for this many"): at
+// space 290 a drone-capable hull carries single digits of them, and refusing the
+// whole salvo instead — as the all-or-nothing debit of TASK-147 did — turned the
+// common case into a 400. Zero launched for an empty magazine is reported as
+// cargo.ErrInsufficientQuantity by the ordnance itself, so the player still gets
+// that 400 when there is genuinely nothing aboard.
+//
+// Still all-or-nothing about the drones it DOES launch: on error nothing was
+// charged and nothing created.
 func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error) {
 	if w.ordnance == nil {
 		return nil, ErrOrdnanceUnavailable
@@ -87,16 +97,15 @@ func (w *Worker) launchDrones(ship *domain.Ship, gtype domain.GoodsTypeID, ds []
 		w.logOrdnanceError(err, "drone", ship, gtype, len(ds))
 		return nil, err
 	}
-	if len(ids) != len(ds) {
+	if len(ids) > len(ds) {
 		// A broken contract, not a game situation: an implementation that batches
-		// the INSERTs or retries inside the transaction could return a different
-		// count, and the caller pairs ids[i] with ds[i]. Too many ids would panic
-		// the tick goroutine (there is no recover() in this package, so it takes
-		// every sector this worker owns with it); too few would leave rows charged
-		// and committed but absent from RAM. Refuse instead of half-applying: the
-		// transaction is already committed and we cannot tell which row belongs to
-		// which drone, so this is logged at ERROR with the counts for hand
-		// reconciliation, like the deadline case in logOrdnanceError.
+		// the INSERTs or retries inside the transaction could return more ids than
+		// drones, and the caller pairs ids[i] with ds[i] — so this would index past
+		// the salvo and panic the tick goroutine (there is no recover() in this
+		// package, so it takes every sector this worker owns with it). Refuse instead
+		// of half-applying: the transaction is already committed and we cannot tell
+		// which row belongs to which drone, so this is logged at ERROR with the counts
+		// for hand reconciliation, like the deadline case in logOrdnanceError.
 		w.logger.Error("launch outcome in doubt: ordnance broke its id contract, drones charged but not in RAM",
 			"err", errOrdnanceIDCount, "requested", len(ds), "returned", len(ids),
 			"ship", int64(ship.ID), "player", int64(ship.PlayerID),

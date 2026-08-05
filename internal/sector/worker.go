@@ -164,8 +164,13 @@ type StaticInstaller interface {
 //
 // SpendMissile has no object to create — a missile is RAM-only, reconstructable
 // state — so its "transaction" is the debit alone. LaunchDrones takes the whole
-// prepared salvo and is all-or-nothing: it returns one id per drone, in order, or
-// an error and nothing charged. That is what makes a partial spawn impossible.
+// prepared salvo and returns one id per drone it actually launched, in order — a
+// PREFIX of ds, so ids[i] belongs to ds[i] and len(ids) <= len(ds). Since TASK-176
+// it sizes the salvo by what the hold carries and launches what it can pay for
+// (mirroring RecallDrones, which recalls what the hold can take): fewer ids means a
+// short magazine, and an empty one is reported as cargo.ErrInsufficientQuantity.
+// What it does launch is still all-or-nothing — on error nothing is charged and
+// nothing created, so a partial CHARGE remains impossible.
 //
 // RecallDrones runs the same transaction backwards (TASK-152): it deletes the
 // drone rows and credits the units in one commit, so a lost ack cannot delete a

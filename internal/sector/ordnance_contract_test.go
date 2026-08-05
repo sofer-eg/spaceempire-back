@@ -13,11 +13,11 @@ import (
 )
 
 // miscountingOrdnance breaks the Ordnance contract on purpose: LaunchDrones must
-// return exactly one id per drone, and this returns `ids` regardless of how many
-// drones it was handed. It stands in for a future implementation that batches the
-// INSERTs (`INSERT … RETURNING id`) or retries inside the transaction and gets the
-// count wrong — the only way to reach the guard, since both real fakes and the
-// app-side adapter honour the contract.
+// never return MORE ids than the drones it was handed, and this returns `ids`
+// regardless. It stands in for a future implementation that batches the INSERTs
+// (`INSERT … RETURNING id`) or retries inside the transaction and gets the count
+// wrong — the only way to reach the guard, since both real fakes and the app-side
+// adapter honour the contract.
 type miscountingOrdnance struct{ ids []domain.DroneID }
 
 func (o miscountingOrdnance) SpendMissile(context.Context, domain.EntityRef, domain.GoodsTypeID) error {
@@ -37,47 +37,49 @@ func (o miscountingOrdnance) RecallDrones(_ context.Context, _ domain.EntityRef,
 }
 
 // TestUnit_LaunchDrones_IDCountContract is a white-box test of the guard in
-// launchDrones (review round 2). LaunchDroneCommand.apply pairs ids[i] with
-// ds[i], so a miscounting Ordnance would either index past the salvo — panicking
-// the tick goroutine, which has no recover() and would take every sector this
-// worker owns with it — or silently drop a drone that was already charged and
-// INSERTed. The guard turns both into a refused launch, so neither can reach
-// apply.
+// launchDrones (review round 2; relaxed by TASK-176). LaunchDroneCommand.apply
+// pairs ids[i] with ds[i], so an Ordnance returning MORE ids than drones would
+// index past the salvo — panicking the tick goroutine, which has no recover() and
+// would take every sector this worker owns with it. The guard turns that into a
+// refused launch, so it cannot reach apply.
+//
+// FEWER ids is now a legal answer, not a broken contract: since TASK-176 the
+// ordnance sizes the salvo by what the hold carries and returns one id per drone it
+// actually launched. apply spawns exactly those.
 func TestUnit_LaunchDrones_IDCountContract(t *testing.T) {
 	t.Parallel()
 
 	ship := &domain.Ship{ID: 1, PlayerID: 7, SectorID: 1}
 	salvo := make([]domain.Drone, 2)
 
-	cases := map[string][]domain.DroneID{
-		"too many ids": {1, 2, 3},
-		"too few ids":  {1},
-		"no ids":       nil,
-	}
-	for name, ids := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			w := &Worker{
-				logger:   slog.New(slog.DiscardHandler),
-				cfg:      Config{RepoTimeout: time.Second},
-				ordnance: miscountingOrdnance{ids: ids},
-			}
-			got, err := w.launchDrones(ship, 51, salvo)
-			require.ErrorIs(t, err, errOrdnanceIDCount)
-			assert.Nil(t, got, "a broken contract yields no ids for apply to pair")
-		})
-	}
-
-	// The matching count is accepted — the guard rejects only a mismatch.
-	t.Run("exact count accepted", func(t *testing.T) {
-		t.Parallel()
-		w := &Worker{
+	newWorker := func(ids []domain.DroneID) *Worker {
+		return &Worker{
 			logger:   slog.New(slog.DiscardHandler),
 			cfg:      Config{RepoTimeout: time.Second},
-			ordnance: miscountingOrdnance{ids: []domain.DroneID{1, 2}},
+			ordnance: miscountingOrdnance{ids: ids},
 		}
-		got, err := w.launchDrones(ship, 51, salvo)
-		require.NoError(t, err)
-		assert.Equal(t, []domain.DroneID{1, 2}, got)
+	}
+
+	t.Run("too many ids refused", func(t *testing.T) {
+		t.Parallel()
+		got, err := newWorker([]domain.DroneID{1, 2, 3}).launchDrones(ship, 51, salvo)
+		require.ErrorIs(t, err, errOrdnanceIDCount)
+		assert.Nil(t, got, "a broken contract yields no ids for apply to pair")
 	})
+
+	// Fewer than requested is the short-magazine answer TASK-176 made legal: the
+	// units the hold could pay for flew, and only those come back as ids.
+	accepted := map[string][]domain.DroneID{
+		"exact count":  {1, 2},
+		"short salvo":  {1},
+		"nothing flew": nil,
+	}
+	for name, ids := range accepted {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := newWorker(ids).launchDrones(ship, 51, salvo)
+			require.NoError(t, err)
+			assert.Equal(t, ids, got)
+		})
+	}
 }

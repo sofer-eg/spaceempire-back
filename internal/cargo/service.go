@@ -189,6 +189,38 @@ func FitsIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype domain
 	}
 }
 
+// AvailableIn reports how many whole units of gtype the owner's hold carries,
+// from inside the caller's ALREADY OPEN transaction. It is FitsIn's mirror on the
+// debit side (TASK-176): a caller that must not be refused, but must not overdraw
+// either, sizes its debit with this and consumes only what is there.
+//
+// It counts the SAME stack ConsumeIn debits — the unowned pool — so a quantity it
+// reports is always a quantity ConsumeIn can take. Goods another player deposited
+// into a station hold are invisible here for that reason.
+//
+// An empty stack answers 0 and is not an error: what "nothing left" means belongs
+// to the caller (the drone salvo turns it into cargo.ErrInsufficientQuantity, so
+// the player still gets a 400 for an empty magazine).
+//
+// repo must already be bound to that transaction (persistence/cargo
+// Repository.WithExecutor(tx)). An unknown gtype is ErrGoodsTypeNotFound — a
+// misconfigured goods constant is a 500, and a caller that short-circuits on a
+// zero would otherwise never reach ConsumeIn's own check and would report it as an
+// empty hold.
+func AvailableIn(ctx context.Context, repo Repo, owner domain.EntityRef, gtype domain.GoodsTypeID) (int64, error) {
+	if _, err := repo.GoodsType(ctx, gtype); err != nil {
+		if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
+			return 0, ErrGoodsTypeNotFound
+		}
+		return 0, err
+	}
+	qty, err := repo.Quantity(ctx, owner, gtype, unownedGoods)
+	if err != nil {
+		return 0, fmt.Errorf("read stack: %w", err)
+	}
+	return qty, nil
+}
+
 // RefundIn inserts (or grows) qty units of gtype into the owner's stack from
 // inside the caller's ALREADY OPEN transaction — the mirror of ConsumeIn, for an
 // operation that must commit together with the credit. Used by the recall-drones

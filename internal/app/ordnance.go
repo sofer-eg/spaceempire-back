@@ -70,11 +70,27 @@ func (o ordnance) LaunchTorpedo(ctx context.Context, owner domain.EntityRef, gty
 	return id, nil
 }
 
-// LaunchDrones charges len(ds) units and creates one row per drone, returning
-// the ids in the same order. All-or-nothing by construction: the debit and every
-// INSERT share the transaction, so a short magazine or a failing insert rolls the
-// whole salvo back. That is what makes a partial spawn — and the remainder refund
-// the handler used to do — impossible.
+// LaunchDrones launches as many of ds as the hold can pay for, charging one unit
+// each and creating one row per launched drone, and returns their ids in order — a
+// prefix of ds, so ids[i] belongs to ds[i].
+//
+// The salvo is SIZED inside the transaction (TASK-176), by cargo.AvailableIn: the
+// mirror of what RecallDrones does with cargo.FitsIn. Until then the whole clamped
+// salvo was one all-or-nothing debit, so a hold shorter than the salvo failed the
+// launch outright with ErrInsufficientQuantity. At the drone's real space of 290
+// (TASK-167) a drone-capable hull carries single digits of them, which made "fewer
+// aboard than the salvo" the ordinary case rather than an edge — and the SPA entry
+// point that did not pre-clamp the count (the canvas menu) answered 400 for a launch
+// the player could plainly see they could make.
+//
+// Sizing and debiting in one transaction is what keeps the count honest: a quantity
+// read outside it could be spent by another command before the debit lands, which
+// is the same reason the recall sizes its credit inside its own.
+//
+// An EMPTY hold is still ErrInsufficientQuantity, not an empty success: the handler
+// owes the player a 400 "not enough drones in cargo" when there is nothing to
+// launch. What it does launch stays all-or-nothing — the debit and every INSERT
+// share the transaction, so a failing insert rolls the whole salvo back.
 func (o ordnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error) {
 	ids := make([]domain.DroneID, 0, len(ds))
 	err := o.tx.Do(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -82,12 +98,26 @@ func (o ordnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtyp
 		// accumulator that lives outside it would silently double on the first
 		// retry anyone adds.
 		ids = ids[:0]
-		if err := cargo.ConsumeIn(ctx, o.cargo.WithExecutor(tx), owner, gtype, int64(len(ds))); err != nil {
+		cargoRepo := o.cargo.WithExecutor(tx)
+
+		available, err := cargo.AvailableIn(ctx, cargoRepo, owner, gtype)
+		if err != nil {
+			return err
+		}
+		launch := int64(len(ds))
+		if available < launch {
+			launch = available
+		}
+		if launch == 0 {
+			return cargo.ErrInsufficientQuantity
+		}
+
+		if err := cargo.ConsumeIn(ctx, cargoRepo, owner, gtype, launch); err != nil {
 			return err
 		}
 		repo := o.drones.WithExecutor(tx)
-		for i := range ds {
-			created, err := repo.Create(ctx, ds[i])
+		for _, d := range ds[:launch] {
+			created, err := repo.Create(ctx, d)
 			if err != nil {
 				return fmt.Errorf("create drone: %w", err)
 			}

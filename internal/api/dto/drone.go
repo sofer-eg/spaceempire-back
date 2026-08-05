@@ -3,15 +3,22 @@ package dto
 import "spaceempire/back/internal/domain"
 
 // LaunchDroneRequest is the body of POST /api/cmd/launch-drone. PlayerID
-// comes from the session cookie. Count drones are launched at TargetRef.
+// comes from the session cookie.
+//
+// There is no count: the SERVER decides the salvo size (TASK-176) —
+// min(up_drone_control level − live drones, drones in the hold). The clients used
+// to send a fixed 3 of their own, and the one that did not also clamp it to the
+// hold (the canvas menu, which has no cargo) turned every short magazine into a
+// 400. Only the worker knows the cap and only its transaction can size the hold, so
+// neither number can be decided here or in the SPA.
 type LaunchDroneRequest struct {
 	ShipID    int64     `json:"shipID"`
 	TargetRef EntityRef `json:"targetRef"`
-	Count     int       `json:"count"`
 }
 
-// LaunchDroneResponse echoes how many drones were actually spawned (the
-// handler refunds the rest of the requested count if a launch fell short).
+// LaunchDroneResponse echoes how many drones actually launched — the cap, or fewer
+// when the hold had fewer aboard. Nothing is left over to refund: the salvo is
+// sized, charged and INSERTed in one transaction inside the worker.
 type LaunchDroneResponse struct {
 	OK      bool `json:"ok"`
 	Spawned int  `json:"spawned"`

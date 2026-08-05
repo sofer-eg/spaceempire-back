@@ -216,10 +216,15 @@ func TestUnit_LaunchDrone_Rejects(t *testing.T) {
 			clock.NewRealClock(), nil, []domain.Ship{a, b})
 		require.ErrorIs(t, launchDrones(t, w, 999, 1, 2, 1).Err, sector.ErrForbidden)
 	})
-	t.Run("zero count", func(t *testing.T) {
+	// Count 0 is no longer a rejected request but the normal one: since TASK-176 it
+	// means "the whole salvo the drone-control module runs", and the HTTP path never
+	// sends anything else. droneShip carries up_drone_control level 8.
+	t.Run("zero count launches the module's cap", func(t *testing.T) {
 		w := newSingleSectorWorker(t, sector.Config{TickInterval: time.Second},
 			clock.NewRealClock(), nil, []domain.Ship{a, b})
-		require.ErrorIs(t, launchDrones(t, w, 100, 1, 2, 0).Err, sector.ErrInvalidAttackTarget)
+		res := launchDrones(t, w, 100, 1, 2, 0)
+		require.NoError(t, res.Err)
+		require.Equal(t, 8, res.Spawned, "the level-8 module is the salvo")
 	})
 	t.Run("no drone control module", func(t *testing.T) {
 		noMod := droneShip(1, 100, domain.Vec2{X: 0, Y: 0})

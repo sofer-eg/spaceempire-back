@@ -82,14 +82,25 @@ func (f *fakeOrdnance) LaunchTorpedo(_ context.Context, _ domain.EntityRef, gtyp
 	return domain.TorpedoID(f.nextID), nil
 }
 
+// LaunchDrones models the real ordnance since TASK-176: the salvo is sized inside
+// the transaction by what the hold carries, so it launches (and charges) what is
+// there rather than refusing a salvo bigger than the magazine. An empty magazine is
+// still cargo.ErrInsufficientQuantity — the 400 the handler owes the player.
 func (f *fakeOrdnance) LaunchDrones(_ context.Context, _ domain.EntityRef, gtype domain.GoodsTypeID, ds []domain.Drone) ([]domain.DroneID, error) {
-	if err := f.charge(gtype, int64(len(ds))); err != nil {
+	launch := int64(len(ds))
+	if have := f.left(gtype); have < launch {
+		launch = have
+	}
+	if launch == 0 {
+		return nil, f.charge(gtype, 1) // records the attempt and reports the empty hold
+	}
+	if err := f.charge(gtype, launch); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	ids := make([]domain.DroneID, 0, len(ds))
-	for range ds {
+	ids := make([]domain.DroneID, 0, launch)
+	for i := int64(0); i < launch; i++ {
 		f.nextID++
 		f.drones++
 		ids = append(ids, domain.DroneID(f.nextID))

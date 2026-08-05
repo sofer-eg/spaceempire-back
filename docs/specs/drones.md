@@ -72,23 +72,42 @@ cargobay: a starter hull (cargobay 50) holds none, and the HUD button reads
 «Нет дронов в трюме» until the player buys a bigger ship. The satellite (375)
 and the jammer (535) already set that precedent.
 
-**Salvo size is clamped by the client to the hold.** The worker clamps `Count`
-to what `up_drone_control` still allows, but not to what the hold carries, and
-the ordnance charges the clamped size as one all-or-nothing debit — so a salvo
-of 3 against 1 unit aboard is refused outright (see
-`TestIntegration_Ordnance/DroneSalvoIsAllOrNothing`). At `space=290` a single
-digit of drones aboard is the normal case, so `CombatHUD` sends
-`min(DRONE_SALVO, hold)`. The canvas `ObjectActionsMenu` has no cargo of its
-own and still sends the full salvo — its own documented split (the hold gate
-lives in `CombatHUD`).
+**Salvo size is decided by the SERVER (TASK-176):**
+
+```
+salvo = min(up_drone_control level − live drones, drones in the hold)
+```
+
+The product rule: *always launch as many drones as the drone-control system
+runs; if the hold holds fewer, launch what is there.* The first half is
+clamped in `LaunchDroneCommand.apply` (only the worker knows the cap and the
+live count), the second inside the `Ordnance` transaction (only it can size
+the hold without racing the debit) — see §2.1. `POST /api/cmd/launch-drone`
+therefore carries **no `count`**, and neither SPA entry point computes one.
+
+Before TASK-176 the worker clamped only by the cap and the ordnance charged
+the clamped size as one all-or-nothing debit, so a salvo of 3 against 1 unit
+aboard was refused outright with 400. At `space=290` a single digit of drones
+aboard is the normal case, so `CombatHUD` pre-clamped its request to
+`min(DRONE_SALVO, hold)` — and the canvas `ObjectActionsMenu`, which has no
+cargo of its own, kept sending the full 3 and got the 400 for the very state
+the HUD launched fine from (TASK-176: two paths to one action behaving
+differently). Both now send no count at all, so a third entry point cannot
+reintroduce the split.
+
+The HUD still disables the button at `drones === 0`, but as a **hint**: the
+guarantee lives on the backend, where an empty hold answers
+`ErrInsufficientQuantity` → 400.
 
 **Since TASK-147 the launch handler owns no cargo.** It only routes and
 maps, mirroring `install-jammer`:
 
 1. validate request,
-2. send `LaunchDroneCommand{PlayerID, ShipID, Target, Count, GoodsType: 21}`
+2. send `LaunchDroneCommand{PlayerID, ShipID, Target, GoodsType: 21}`
    to the sector worker — the handler owns the goods constant so the
-   sector package stays free of the catalog,
+   sector package stays free of the catalog. `Count` stays on the command as
+   an optional upper bound (zero = "the whole cap"); the HTTP path never sets
+   it, worker tests that need a deterministic salvo do,
 3. wait for ack (`AckTimeout`) and map the outcome:
    `ErrShipNotFound` → 404, `ErrForbidden` → 403, `ErrShipDocked` → 400,
    `ErrEquipmentRequired` → 422, `ErrDroneCapReached` → 422,
@@ -109,11 +128,22 @@ drone cargo operation at all.
 
 **Invariant: the ammunition debit and every drone INSERT commit in ONE
 transaction.** `LaunchDroneCommand.apply` clamps the salvo to what
-`up_drone_control` still allows (`toSpawn = min(Count, level - live)`),
-builds the drones, and hands the whole slice to `sector.Ordnance`
-(app-side adapter over `database.TxManager` + `cargo.ConsumeIn` +
-`dronesRepo.WithExecutor(tx).Create` per drone). Only on success are they
-inserted into the sector's RAM.
+`up_drone_control` still allows (`toSpawn = level - live`, or `Count` when a
+caller named a smaller one), builds the drones, and hands the whole slice to
+`sector.Ordnance` (app-side adapter over `database.TxManager` +
+`cargo.AvailableIn` + `cargo.ConsumeIn` + `dronesRepo.WithExecutor(tx).Create`
+per drone). Only on success are they inserted into the sector's RAM.
+
+**Since TASK-176 the transaction also SIZES the salvo** with
+`cargo.AvailableIn` — the mirror of the recall's `cargo.FitsIn` (§2.3) — and
+launches `min(len(ds), available)` of it, charging exactly that many units.
+`LaunchDrones` returns one id per drone that actually flew: a **prefix** of the
+slice it was handed, so `ids[i]` still belongs to `ds[i]` and
+`len(ids) <= len(ds)`. The worker's guard therefore rejects only *more* ids
+than drones (`errOrdnanceIDCount`), the case that would index past the salvo
+and panic the tick goroutine; fewer is the ordinary short-magazine answer.
+An **empty** hold is still `cargo.ErrInsufficientQuantity` → 400, so "nothing
+aboard" never reads as a successful launch of zero drones.
 
 `Ordnance` is the **only** launch path. A worker built without one
 (`WithOrdnance` lost in a refactor) refuses the command with
@@ -130,18 +160,25 @@ a moment later — ammunition returned, drones flying.
 Consequences of the new invariant:
 - A 504 means "outcome unknown", not "nothing happened": the player
   checks the hold and retries only if no drones appeared.
-- **Partial spawn is gone as a class.** `Spawned` is either `toSpawn` or
-  (on error) zero, so the `Count - Spawned` remainder refund the handler
-  used to do has nothing left to do. The old mid-salvo `break` on a
-  failing INSERT is gone with it.
+- **A partial CHARGE is gone as a class.** `Spawned` is either the number of
+  drones that flew — all of them paid for — or (on error) zero. The old
+  mid-salvo `break` on a failing INSERT, and the handler-side remainder
+  refund, are both gone. Since TASK-176 `Spawned` may legitimately be *fewer
+  than the cap*, and that is not a partial charge: only the drones that flew
+  were ever billed.
 - **The cap, not the request, is what gets billed** — a deliberate,
   strictly milder behaviour change. The cap is known only inside the
   worker, so billing `Count` would make the player pay for drones the cap
   refuses. Asking for 5 with a level-2 module and 3 units in the hold
   used to fail the handler's `Consume(5)` outright (400, zero drones);
   now 2 launch and exactly 2 are charged.
-- Too little ammunition for the **clamped** salvo rejects the whole
-  launch (400): nothing charged, nothing spawned.
+- **A short hold shortens the salvo** (TASK-176) instead of rejecting it: 1
+  unit aboard under a level-3 module launches 1 and charges 1. Only a hold
+  with *nothing* in it is a 400 — see
+  `TestIntegration_Ordnance/DroneSalvoIsSizedByTheHold` (which replaced
+  `DroneSalvoIsAllOrNothing`, whose "3 requested, 2 aboard → 400" was exactly
+  the defect) and `TestUnit_LaunchDrone_ShortHoldLaunchesWhatItHas` in both the
+  sector and api suites.
 
 ### 2.2 Atomicity of the recall (TASK-152)
 

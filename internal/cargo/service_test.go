@@ -526,6 +526,47 @@ func TestUnit_CargoFitsIn_UnknownGoodsType(t *testing.T) {
 	require.ErrorIs(t, err, cargo.ErrGoodsTypeNotFound)
 }
 
+// AvailableIn is FitsIn read backwards, for the debit side (TASK-176): a caller
+// that must launch "as many as the hold has" sizes its own debit with it instead
+// of asking ConsumeIn to refuse an amount that was never there.
+func TestUnit_CargoAvailableIn_SizesTheDebitToTheStack(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	owner := domain.EntityRef{Kind: domain.EntityKindShip, ID: 7}
+	repo.goodsTypes[21] = domain.GoodsType{ID: 21, Name: "Боевой дрон", Space: 290}
+
+	// An empty stack answers 0 and is NOT an error: "nothing to launch" is the
+	// caller's decision to make, not this helper's.
+	avail, err := cargo.AvailableIn(context.Background(), repo, owner, 21)
+	require.NoError(t, err)
+	assert.Zero(t, avail)
+
+	repo.seed(owner, 21, 0, 3)
+	avail, err = cargo.AvailableIn(context.Background(), repo, owner, 21)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, avail)
+
+	// Another player's deposit sitting in the same hold is not this ship's
+	// ammunition: ConsumeIn debits the unowned stack, so this must count the same
+	// one or the debit it sizes would be refused.
+	repo.seed(owner, 21, 5, 4)
+	avail, err = cargo.AvailableIn(context.Background(), repo, owner, 21)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, avail, "only the unowned stack ConsumeIn debits")
+}
+
+// A goods id that is not in the catalog is a misconfigured constant (500), not an
+// empty magazine (400) — the exact confusion TASK-167 spent a release on. Checked
+// here rather than left to ConsumeIn, because a zero answer short-circuits the
+// debit and ConsumeIn is never reached.
+func TestUnit_CargoAvailableIn_UnknownGoodsType(t *testing.T) {
+	t.Parallel()
+	repo := newStubRepo()
+	_, err := cargo.AvailableIn(context.Background(), repo, domain.EntityRef{Kind: 1, ID: 1}, 51)
+	require.ErrorIs(t, err, cargo.ErrGoodsTypeNotFound)
+}
+
 func TestUnit_CargoService_Move_UnknownGoodsType(t *testing.T) {
 	t.Parallel()
 

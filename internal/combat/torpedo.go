@@ -28,10 +28,12 @@ type TorpedoSpec struct {
 	Speed float64
 	// Accel is the per-second engine acceleration along Direction.
 	Accel float64
-	// TurnRate is the maximum heading change per second (radians). A torpedo
-	// lumbers: 60-90°/s against the light missile classes' 124-77°/s. It is
-	// nimbler than missile classes 4-5 (54 and 31°/s), whose maneureability
-	// comes from ct_missiles (TASK-175).
+	// TurnRate is the maximum heading change per second (radians). Which missiles
+	// out-turn a torpedo depends on the torpedo's own class: class 2 (60°/s) is
+	// out-turned by missile classes 1-3 (124/89/77°/s), while class 3 (90°/s) is
+	// out-turned by class 1 alone — it edges past class 2's 88.9°/s by a degree.
+	// Both torpedo classes out-turn the heavy missiles 4-5 (54 and 31°/s), whose
+	// maneureability comes from ct_missiles (TASK-175).
 	TurnRate float64
 	// HitRadius is the detonation-trigger distance to the target.
 	HitRadius float64
@@ -49,9 +51,11 @@ type TorpedoSpec struct {
 // torpedoSpecsByClass holds the balance profile for each torpedo ammunition
 // class: 2 = gt23 "Огненная Буря", 3 = gt24 "Святая Торпеда". The magnitudes
 // are a spaceempire balance decision — relative parity with StarWind ct_drones,
-// not the literal 100k/1M numbers (ЧТЗ §5.1, C-01). A torpedo is slower and less
-// nimble than the LIGHT missile classes (see TorpedoSpec.Speed — the heavy classes
-// 4-5 are slower than a torpedo), has a finite TTL, carries its own HP and deals
+// not the literal 100k/1M numbers (ЧТЗ §5.1, C-01). A torpedo is slower than the
+// LIGHT missile classes and, at class 2, less nimble than them as well; a class-3
+// torpedo turns faster than every missile class but the first (see TorpedoSpec.Speed
+// and .TurnRate — the heavy missile classes 4-5 are both slower and less nimble than
+// either torpedo). A torpedo has a finite TTL, carries its own HP and deals
 // area damage. Class 3 beats class 2 on every axis (faster, harder-hitting,
 // longer-lived, bigger blast) and is the pricier fit. Sub-task .4 consumes this
 // via DefaultTorpedoSpec.

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"spaceempire/back/internal/combat"
+	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/pkg/config"
 )
 
@@ -139,6 +140,13 @@ func TestUnit_MissileSpecs_ReachExceedsRadar(t *testing.T) {
 // combat test that reads pkg/config, the one import here that is not about combat.
 // If the default tick is ever changed on purpose, this test is the checklist entry
 // saying the missile catalog has to be recalibrated with it.
+//
+// HOW the Go side is measured is the load-bearing part: `snapsInGo` comes from real
+// TickMissile calls (snapTurnProbeBearingsDeg via oneTickAlignsWithTarget), never
+// from re-evaluating `TurnRate*dt >= π` in the test. Restating the condition here
+// would pin the formula against itself: widening the threshold to 2π leaves classes
+// 2-3 rotating a literal 267°/232° past a 45° target into the opposite hemisphere,
+// and a test that spells the condition out passes that mutation unmoved.
 func TestUnit_MissileSpecs_SnapBoundaryHoldsAtTheDefaultTick(t *testing.T) {
 	// Not parallel: t.Setenv (needed to neutralise a developer's own override).
 	t.Setenv("CONFIG_PATH", "")
@@ -155,12 +163,65 @@ func TestUnit_MissileSpecs_SnapBoundaryHoldsAtTheDefaultTick(t *testing.T) {
 	dt := cfg.Sector.TickInterval.Seconds()
 	for _, row := range ctMissiles {
 		spec := combat.DefaultMissileSpec(row.class)
-		snapsInSP := row.maneuv*1.16 > 180       // SP: grad_speed > 180°/tick
-		snapsInGo := spec.TurnRate*dt >= math.Pi // TickMissile step 2
+		snapsInSP := row.maneuv*1.16 > 180 // SP: grad_speed > 180°/tick
+
+		// A snapping missile takes ANY heading in one tick; a bounded one only gets
+		// part of the way round on the bearings wider than its own step, and must
+		// never swing PAST the ones narrower than it. So ask the integrator on a
+		// spread of bearings and let "aligned on every one of them" be the verdict.
+		snapsInGo, fellShortAtDeg := true, 0.0
+		for _, bearingDeg := range snapTurnProbeBearingsDeg {
+			if !oneTickAlignsWithTarget(t, row.class, bearingDeg*math.Pi/180, dt) {
+				snapsInGo, fellShortAtDeg = false, bearingDeg
+				break
+			}
+		}
 		assert.Equal(t, snapsInSP, snapsInGo,
-			"class %d: SP snaps=%v at %.1f°/tick, TickMissile snaps=%v at TurnRate %.4f rad/s "+
-				"over a %.1fs tick", row.class, snapsInSP, row.maneuv*1.16, snapsInGo, spec.TurnRate, dt)
+			"class %d: SP snaps=%v at %.1f°/tick, one real TickMissile of %.1fs aligns the "+
+				"heading from every probed bearing=%v (first bearing it fell short of: %.0f°) "+
+				"at TurnRate %.4f rad/s",
+			row.class, snapsInSP, row.maneuv*1.16, dt, snapsInGo, fellShortAtDeg, spec.TurnRate)
 	}
+}
+
+// snapTurnProbeBearingsDeg are the target bearings oneTickAlignsWithTarget walks,
+// shallow first so a missile that swings past a near target is what the failure
+// message names. The narrow end catches an over-wide snap threshold (a missile that
+// applies >180° as a literal rotation leaves a 45° target behind it); the wide end
+// catches a missing one (a bounded step cannot cover a near-reversal in one tick).
+// 179° rather than 180°: at an exact reversal the perpendicular component is zero
+// and TickMissile's own left/right sign test degenerates.
+var snapTurnProbeBearingsDeg = []float64{45, 90, 135, 179}
+
+// oneTickAlignsWithTarget runs ONE real TickMissile of dt seconds on a class-`class`
+// missile that starts pointing at +X with its target `bearing` radians off that
+// heading, and reports whether the integrator brought Direction all the way onto the
+// target in that single tick. The verdict is measured, not recomputed — that is the
+// whole point of the helper (see the test's doc comment).
+func oneTickAlignsWithTarget(t *testing.T, class int, bearing, dt float64) bool {
+	t.Helper()
+	now := time.Unix(1_700_000_000, 0)
+	a := attackerShip()
+	a.Vel = domain.Vec2{} // only Direction is read; inherited drift would just move Pos
+	a.Direction = domain.Vec2{X: 1, Y: 0}
+
+	// Far enough that the tick is a pure turn: well outside HitRadius, and past the
+	// range below which the integrator holds its heading instead of steering.
+	const targetRange = 1000
+	targetPos := domain.Vec2{
+		X: targetRange * math.Cos(bearing),
+		Y: targetRange * math.Sin(bearing),
+	}
+	m := combat.LaunchMissile(1, combat.DefaultMissileSpec(class), a,
+		domain.EntityRef{Kind: domain.EntityKindShip, ID: 99}, targetPos, now)
+
+	combat.TickMissile(m, targetPos, true, dt, now)
+
+	// Aligned = the unit heading and the unit bearing point the same way. The
+	// gradual outcomes sit whole degrees away, so the tolerance is not a judgement
+	// call: it only absorbs float noise on an exact snap.
+	dot := m.Direction.X*math.Cos(bearing) + m.Direction.Y*math.Sin(bearing)
+	return dot > 1-1e-6
 }
 
 // TestUnit_DefaultMissileSpec_UnknownClassFallsBack: the HTTP handler validates

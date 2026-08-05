@@ -60,19 +60,29 @@ func TestUnit_LaunchDrones_IDCountContract(t *testing.T) {
 		}
 	}
 
-	t.Run("too many ids refused", func(t *testing.T) {
-		t.Parallel()
-		got, err := newWorker([]domain.DroneID{1, 2, 3}).launchDrones(ship, 51, salvo)
-		require.ErrorIs(t, err, errOrdnanceIDCount)
-		assert.Nil(t, got, "a broken contract yields no ids for apply to pair")
-	})
+	// Both ways to break the contract: more ids than drones, and an empty set with
+	// no error. The salvo is never empty (apply only calls this with
+	// toSpawn = allowed >= 1) and an ordnance that launched nothing owes the caller
+	// cargo.ErrInsufficientQuantity, so a silent nil would otherwise reach the player
+	// as 200 "spawned: 0" — a successful launch of nothing.
+	refused := map[string][]domain.DroneID{
+		"too many ids": {1, 2, 3},
+		"nothing flew": nil,
+	}
+	for name, ids := range refused {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := newWorker(ids).launchDrones(ship, 51, salvo)
+			require.ErrorIs(t, err, errOrdnanceIDCount)
+			assert.Nil(t, got, "a broken contract yields no ids for apply to pair")
+		})
+	}
 
 	// Fewer than requested is the short-magazine answer TASK-176 made legal: the
 	// units the hold could pay for flew, and only those come back as ids.
 	accepted := map[string][]domain.DroneID{
-		"exact count":  {1, 2},
-		"short salvo":  {1},
-		"nothing flew": nil,
+		"exact count": {1, 2},
+		"short salvo": {1},
 	}
 	for name, ids := range accepted {
 		t.Run(name, func(t *testing.T) {

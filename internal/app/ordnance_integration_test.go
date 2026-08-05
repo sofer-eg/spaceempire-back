@@ -251,6 +251,14 @@ func TestIntegration_Ordnance(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 2)
 		assert.Equal(t, ids, []domain.DroneID{got[0].ID, got[1].ID}, "the returned ids are the committed rows")
+		// WHICH drones flew, not just how many: the launched set must be the PREFIX
+		// ds[:launch], because the worker pairs ids[i] with ds[i] to put them in RAM.
+		// testDrones numbers the salvo through Pos.X, so a suffix (or any other
+		// subset) shows up here as 1,2 instead of 0,1 — RAM and DB would otherwise
+		// disagree on where each drone is (nudgeDroneSpawn offsets each one onto a
+		// different point of the spawn ring).
+		assert.Equal(t, []float64{0, 1}, []float64{got[0].Pos.X, got[1].Pos.X},
+			"the first two drones of the salvo are the ones that flew")
 
 		// A single unit aboard launches exactly one drone and charges exactly one —
 		// the case the SPA used to have to pre-clamp for (and only did in one of its
@@ -263,6 +271,12 @@ func TestIntegration_Ordnance(t *testing.T) {
 		require.Len(t, ids, 1, "the hold is the salvo")
 		assert.Equal(t, 1, rowCount(t, pool, "drones"))
 		assert.Zero(t, heldQty(t, pool, hold, droneGoods), "one unit charged, not three")
+
+		got, err = dronesrepo.New(pool).LoadAll(ctx, ordnanceSectorID)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, ids[0], got[0].ID)
+		assert.EqualValues(t, 0, got[0].Pos.X, "the FIRST drone of the salvo flew, not the last")
 
 		// An EMPTY hold is still a refusal, so the handler still answers 400 rather
 		// than a cheerful "spawned 0" (see also EmptyHoldLaunchesNothing).

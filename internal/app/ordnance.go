@@ -83,9 +83,17 @@ func (o ordnance) LaunchTorpedo(ctx context.Context, owner domain.EntityRef, gty
 // point that did not pre-clamp the count (the canvas menu) answered 400 for a launch
 // the player could plainly see they could make.
 //
-// Sizing and debiting in one transaction is what keeps the count honest: a quantity
-// read outside it could be spent by another command before the debit lands, which
-// is the same reason the recall sizes its credit inside its own.
+// The sizing read is NOT serialised against a concurrent debit. cargo.Quantity is
+// a plain SELECT (no FOR UPDATE) and the transaction runs at READ COMMITTED, so a
+// cargo-move committed between the read and the debit is visible to neither: with 3
+// drones aboard, one tab launching while another unloads one can leave the debit
+// asking for 3 units that are no longer there. The rejected outcome is what stays
+// atomic — Subtract is a CAS (`UPDATE … WHERE quantity >= n RETURNING`), so it fails
+// instead of overdrawing and the whole salvo rolls back. The player sees a rare 400
+// where a salvo of 2 was possible, and a second click launches it; a launch that was
+// never paid for remains structurally impossible. FOR UPDATE would close the window
+// but is deliberately not taken: it needs a new repository method and would let the
+// sector's tick goroutine park on another transaction's row lock.
 //
 // An EMPTY hold is still ErrInsufficientQuantity, not an empty success: the handler
 // owes the player a 400 "not enough drones in cargo" when there is nothing to
@@ -122,6 +130,17 @@ func (o ordnance) LaunchDrones(ctx context.Context, owner domain.EntityRef, gtyp
 				return fmt.Errorf("create drone: %w", err)
 			}
 			ids = append(ids, created)
+		}
+		// The one place where "charged" and "returned to the worker" are both in
+		// scope, so it is the only place that can make them disagreeing IMPOSSIBLE
+		// rather than merely detectable: a rollback, not a log line. Today the loop
+		// keeps them equal by construction; a batch INSERT (… RETURNING, CopyFrom)
+		// that inserted 3 rows and collected 2 ids would charge 3, leave 3 drones in
+		// the DB and 2 in RAM — and the third would be invisible to liveDroneCount
+		// (so the ship flies over its cap) and to the recall, until a restart's
+		// LoadAll brought it back as a live drone nobody can command.
+		if len(ids) != int(launch) {
+			return fmt.Errorf("ordnance: charged %d, created %d", launch, len(ids))
 		}
 		return nil
 	})

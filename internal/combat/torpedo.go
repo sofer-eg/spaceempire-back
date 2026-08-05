@@ -20,14 +20,18 @@ type TorpedoSpec struct {
 	// Damage is applied at detonation to every target inside SplashRadius
 	// (torpedoes are an area weapon, ЧТЗ §3 FR-007).
 	Damage int
-	// Speed is the upper bound on |Vel| in world units per second. Torpedoes
-	// are deliberately slower than missiles (DefaultMissileSpec.Speed): heavy
-	// ordnance that is hard to dodge up close but easy to outrun.
+	// Speed is the upper bound on |Vel| in world units per second. A torpedo is
+	// heavy ordnance: hard to dodge up close but easy to outrun. It is slower
+	// than the LIGHT missile classes (30/50 against 90/78/60) — no longer than
+	// missiles as a whole, since TASK-175 gave classes 4-5 the original's heavy
+	// profile at 28 and 22, which a torpedo outpaces.
 	Speed float64
 	// Accel is the per-second engine acceleration along Direction.
 	Accel float64
-	// TurnRate is the maximum heading change per second (radians). Lower than
-	// a missile's — a torpedo lumbers toward its target.
+	// TurnRate is the maximum heading change per second (radians). A torpedo
+	// lumbers: 60-90°/s against the light missile classes' 124-77°/s. It is
+	// nimbler than missile classes 4-5 (54 and 31°/s), whose maneureability
+	// comes from ct_missiles (TASK-175).
 	TurnRate float64
 	// HitRadius is the detonation-trigger distance to the target.
 	HitRadius float64
@@ -46,8 +50,9 @@ type TorpedoSpec struct {
 // class: 2 = gt23 "Огненная Буря", 3 = gt24 "Святая Торпеда". The magnitudes
 // are a spaceempire balance decision — relative parity with StarWind ct_drones,
 // not the literal 100k/1M numbers (ЧТЗ §5.1, C-01). A torpedo is slower and less
-// nimble than a missile, has a finite TTL, carries its own HP and deals area
-// damage. Class 3 beats class 2 on every axis (faster, harder-hitting,
+// nimble than the LIGHT missile classes (see TorpedoSpec.Speed — the heavy classes
+// 4-5 are slower than a torpedo), has a finite TTL, carries its own HP and deals
+// area damage. Class 3 beats class 2 on every axis (faster, harder-hitting,
 // longer-lived, bigger blast) and is the pricier fit. Sub-task .4 consumes this
 // via DefaultTorpedoSpec.
 //
@@ -57,20 +62,20 @@ type TorpedoSpec struct {
 // for less than the cheapest missile. Recalibration is TASK-190.
 var torpedoSpecsByClass = map[int]TorpedoSpec{
 	2: {
-		Damage:       150, // 5× a missile — the heavy-hitter profile
-		Speed:        30,  // < missile (80): noticeably slower
+		Damage:       150, // under-calibrated, see the note above (TASK-190)
+		Speed:        30,  // < the light missile classes (90/78/60)
 		Accel:        15,
-		TurnRate:     math.Pi / 3, // 60°/s — lumbering vs a missile's 180°/s
+		TurnRate:     math.Pi / 3, // 60°/s — lumbering vs the light classes' 124-77°/s
 		HitRadius:    14,
 		SplashRadius: 40,
 		HP:           40, // shoot-downable
 		TTL:          30 * time.Second,
 	},
 	3: {
-		Damage:       600, // 4× class 2, 20× a missile
-		Speed:        50,  // faster than class 2, still < missile
+		Damage:       600, // 4× class 2; under-calibrated all the same (TASK-190)
+		Speed:        50,  // faster than class 2, still < missile classes 1-3
 		Accel:        30,
-		TurnRate:     math.Pi / 2, // 90°/s — nimbler than class 2, still < missile
+		TurnRate:     math.Pi / 2, // 90°/s — nimbler than class 2, still < missile class 1
 		HitRadius:    16,
 		SplashRadius: 70, // bigger blast
 		HP:           60, // sturdier

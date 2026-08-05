@@ -46,12 +46,23 @@ const (
 	missileFrictionK = 0.1
 )
 
-// nominalTickSeconds is the project's default sector tick (sector.Config
-// TickInterval, 3 s). It appears here because two ct_missiles columns are counted
-// in TICKS by the SP and have to be expressed in the seconds MissileSpec uses:
-// `ttl` (compared against a per-tick `ttl = ttl + 1`) and `maneureability` (a
-// per-tick angular rate). Nothing else in a spec depends on the tick length — the
-// integrator scales everything by dt.
+// nominalTickSeconds is the project's DEFAULT sector tick (config.SectorConfig
+// TickInterval, `default:"3s"`). It appears here because two ct_missiles columns
+// are counted in TICKS by the SP and have to be expressed in the seconds
+// MissileSpec uses: `ttl` (compared against a per-tick `ttl = ttl + 1`) and
+// `maneureability` (a per-tick angular rate).
+//
+// The tick is configurable, and this constant does NOT follow it: the catalog is
+// deliberately free of config (a spec is data, not wiring), so what is calibrated
+// here is calibrated against the nominal tick only. TTL is unaffected in effect —
+// the integrator scales everything by dt, so a 30 s missile lives 30 s at any tick
+// rate — but the SNAP BOUNDARY is not: TickMissile snaps the heading at
+// TurnRate*dt >= π, which reproduces the SP's `grad_speed > 180°/tick` split
+// (classes 1-3 snap, 4-5 turn gradually) only while dt is 3 s. Shorten the tick and
+// every class turns gradually, three times slower per tick than the original.
+// TestUnit_MissileSpecs_SnapBoundaryHoldsAtTheDefaultTick pins that assumption so
+// a change of the default tick fails a test instead of quietly making this comment
+// and missiles.md §3.1 false; recalibrating the catalog is then part of that change.
 const nominalTickSeconds = 3.0
 
 // maneuvToDegPerTick is SP TO_Missiles' `mob_to_grad_eq`: it converts
@@ -63,9 +74,10 @@ const maneuvToDegPerTick = 1.16
 // TurnRate the integrator wants. Derived rather than hand-computed so the five
 // classes cannot drift from the SP's formula, and so the snap boundary lands where
 // the original put it: the SP snaps the heading when grad_speed > 180°/tick, and
-// TickMissile snaps when TurnRate*dt >= π — which for a 3 s tick is the same
-// threshold. Classes 1-3 (371/267/232 °/tick) snap in both; classes 4-5
-// (162/93 °/tick) turn gradually in both.
+// TickMissile snaps when TurnRate*dt >= π — which at the nominal 3 s tick is the
+// same threshold. Classes 1-3 (371/267/232 °/tick) snap in both; classes 4-5
+// (162/93 °/tick) turn gradually in both. That equivalence is tick-dependent — see
+// nominalTickSeconds.
 func missileTurnRate(maneuverability float64) float64 {
 	return maneuverability * maneuvToDegPerTick * math.Pi / 180 / nominalTickSeconds
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"spaceempire/back/internal/combat"
+	"spaceempire/back/internal/pkg/config"
 )
 
 // ctMissilesRow is one row of the legacy `ct_missiles` table, spelled out from the
@@ -114,6 +115,51 @@ func TestUnit_MissileSpecs_ReachExceedsRadar(t *testing.T) {
 		reach := spec.Speed * spec.TTL.Seconds()
 		assert.Greater(t, reach, widestRadar,
 			"class %d reach %.0f must exceed the widest radar (%.0f)", row.class, reach, widestRadar)
+	}
+}
+
+// TestUnit_MissileSpecs_SnapBoundaryHoldsAtTheDefaultTick pins the assumption the
+// TurnRate calibration rests on, which nothing in the code can enforce: the catalog
+// converts ct_missiles.maneureability (degrees per TICK) at a hard-coded nominal
+// 3 s tick, while the tick itself is configuration
+// (config.SectorConfig.TickInterval, `default:"3s"`, overridable via the CONFIG_PATH
+// YAML and SE_SECTOR_TICK_INTERVAL).
+//
+// What breaks silently if they diverge is the SP's own split between an instant and
+// a gradual turn: TO_Missiles snaps the heading when grad_speed > 180°/tick, and
+// TickMissile snaps at TurnRate*dt >= π. At 3 s those are the same line — classes
+// 1-3 (371/267/232 °/tick) snap, classes 4-5 (162/93) turn gradually. At 1 s every
+// class turns gradually and three times slower per tick than the original, and the
+// parity claim in missileSpecsByClass and missiles.md §3.1 becomes false with no
+// test failing.
+//
+// Deriving TurnRate from cfg at wiring time was the alternative and was rejected:
+// the specs live in combat as data, and threading config into them to keep one
+// comment honest is the wrong trade. So the coupling is pinned instead — hence a
+// combat test that reads pkg/config, the one import here that is not about combat.
+// If the default tick is ever changed on purpose, this test is the checklist entry
+// saying the missile catalog has to be recalibrated with it.
+func TestUnit_MissileSpecs_SnapBoundaryHoldsAtTheDefaultTick(t *testing.T) {
+	// Not parallel: t.Setenv (needed to neutralise a developer's own override).
+	t.Setenv("CONFIG_PATH", "")
+	t.Setenv("SE_SECTOR_TICK_INTERVAL", "")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	require.Equal(t, 3*time.Second, cfg.Sector.TickInterval,
+		"the missile catalog converts ct_missiles' per-tick maneureability and ttl at a "+
+			"nominal 3 s tick (combat/missile.go nominalTickSeconds); the default tick moved, "+
+			"so recalibrate the catalog (and missiles.md §3.1) or the snap boundary no longer "+
+			"matches SP TO_Missiles")
+
+	dt := cfg.Sector.TickInterval.Seconds()
+	for _, row := range ctMissiles {
+		spec := combat.DefaultMissileSpec(row.class)
+		snapsInSP := row.maneuv*1.16 > 180       // SP: grad_speed > 180°/tick
+		snapsInGo := spec.TurnRate*dt >= math.Pi // TickMissile step 2
+		assert.Equal(t, snapsInSP, snapsInGo,
+			"class %d: SP snaps=%v at %.1f°/tick, TickMissile snaps=%v at TurnRate %.4f rad/s "+
+				"over a %.1fs tick", row.class, snapsInSP, row.maneuv*1.16, snapsInGo, spec.TurnRate, dt)
 	}
 }
 

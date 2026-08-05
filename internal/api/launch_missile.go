@@ -13,8 +13,12 @@ import (
 	"spaceempire/back/internal/sector"
 )
 
-// Missile ammunition goods types, one per ct_missiles class. Mirrors
-// `app.MissileGoodsType`, which seeds the starter magazine with class 1.
+// MissileGoodsType is the class-1 ammunition, gt10 «Ракета Москит» — the only one
+// of the five this package names, because it is the starter magazine `app` seeds
+// (app.MissileGoodsType mirrors it) and the handle the handler tests hold. Classes
+// 2-5 are read straight off domain below: they had api-level aliases for one commit
+// and nothing but the switch ever used them, which is a third copy of the class→goods
+// table (domain → api → front) with no consumer.
 //
 // The ids come from the legacy schema's own mapping, ct_missiles.cargo_id. Until
 // TASK-167 class 1 was 50, an English-named duplicate migration 0017 minted next to
@@ -22,31 +26,28 @@ import (
 // refilled, while the 10-14 missiles on 62-72 markets were consumed by nothing.
 // TASK-167 fixed class 1 and TASK-175 wired 2-5, so no missile good is on sale and
 // unusable any more.
-const (
-	MissileGoodsType            = domain.MissileGoodsType            // gt10 «Ракета Москит», class 1
-	MissileOsaGoodsType         = domain.MissileOsaGoodsType         // gt11 «Ракета Оса», class 2
-	MissileStrekozaGoodsType    = domain.MissileStrekozaGoodsType    // gt12 «Ракета Стрекоза», class 3
-	MissileShelkopryadGoodsType = domain.MissileShelkopryadGoodsType // gt13 «Ракета Шелкопряд», class 4
-	MissileShershenGoodsType    = domain.MissileShershenGoodsType    // gt14 «Ракета Шершень», class 5
-)
+const MissileGoodsType = domain.MissileGoodsType
 
 // missileGoodsType maps a launch class to the goods type its ammunition is stored
 // as. Only classes 1-5 exist (ct_missiles); any other value is rejected by the
-// handler with 400. Mirrors torpedoGoodsType — the missile object's balance profile
-// is selected from the same class inside the sector worker
+// handler with 400. Mirrors torpedoGoodsType in shape — but not in where the ids
+// live: the torpedo pair is declared in this package for historical reasons, while
+// the missile ids belong to domain (TASK-167), which is what lets `app`'s seed,
+// this debit and sector's kill drop agree by construction. The missile object's
+// balance profile is selected from the same class inside the sector worker
 // (combat.DefaultMissileSpec), so here the class only picks the cargo row to debit.
 func missileGoodsType(class int) (domain.GoodsTypeID, bool) {
 	switch class {
 	case 1:
-		return MissileGoodsType, true
+		return domain.MissileGoodsType, true
 	case 2:
-		return MissileOsaGoodsType, true
+		return domain.MissileOsaGoodsType, true
 	case 3:
-		return MissileStrekozaGoodsType, true
+		return domain.MissileStrekozaGoodsType, true
 	case 4:
-		return MissileShelkopryadGoodsType, true
+		return domain.MissileShelkopryadGoodsType, true
 	case 5:
-		return MissileShershenGoodsType, true
+		return domain.MissileShershenGoodsType, true
 	}
 	return 0, false
 }

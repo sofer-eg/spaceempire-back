@@ -304,7 +304,6 @@ func TestUnit_KillShip_EveryMissileClassCargoBurnsUp(t *testing.T) {
 	t.Parallel()
 
 	for _, goods := range domain.MissileGoodsTypes() {
-		goods := goods
 		t.Run(strconv.Itoa(int(goods)), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()

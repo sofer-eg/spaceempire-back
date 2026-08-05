@@ -131,7 +131,8 @@ func TestUnit_TickMissiles_DamagesStatic(t *testing.T) {
 func TestUnit_TickMissiles_KillsFragileStatic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// 20 HP < 30 missile damage → one hit kills it.
+	// 20 HP against the class-1 missile's 1000 damage (ct_missiles.power, TASK-175
+	// — it was 30 when this fixture was written) → one hit kills it.
 	station := stationStatic(9, ownerPtr(7), domain.Vec2{X: 200, Y: 0}, 20, 0, 0, 0)
 	w := missileStaticWorker(t, clock.NewRealClock(),
 		[]domain.Ship{missileShip(1, 100, domain.Vec2{X: 0, Y: 0})},

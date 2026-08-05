@@ -339,7 +339,6 @@ func TestUnit_LaunchMissile_ClassPicksItsOwnGoods(t *testing.T) {
 	}{
 		1: {10, 1000}, 2: {11, 2500}, 3: {12, 5000}, 4: {13, 12000}, 5: {14, 25000},
 	} {
-		class, want := class, want
 		t.Run(strconv.Itoa(class), func(t *testing.T) {
 			t.Parallel()
 			target := missileTestShip()
@@ -404,7 +403,6 @@ func TestUnit_LaunchMissile_InvalidClass(t *testing.T) {
 	t.Parallel()
 
 	for _, class := range []int{0, -1, 6, 99} {
-		class := class
 		t.Run(strconv.Itoa(class), func(t *testing.T) {
 			t.Parallel()
 			srv, _, ord := newMissileTestServer(t, []domain.Ship{missileTestShip()}, 5)

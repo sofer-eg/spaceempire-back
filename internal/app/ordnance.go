@@ -83,16 +83,21 @@ func (o ordnance) LaunchTorpedo(ctx context.Context, owner domain.EntityRef, gty
 // point that did not pre-clamp the count (the canvas menu) answered 400 for a launch
 // the player could plainly see they could make.
 //
-// The sizing read is NOT serialised against a concurrent debit. cargo.Quantity is
-// a plain SELECT (no FOR UPDATE) and the transaction runs at READ COMMITTED, so a
-// cargo-move committed between the read and the debit is visible to neither: with 3
-// drones aboard, one tab launching while another unloads one can leave the debit
-// asking for 3 units that are no longer there. The rejected outcome is what stays
-// atomic — Subtract is a CAS (`UPDATE … WHERE quantity >= n RETURNING`), so it fails
-// instead of overdrawing and the whole salvo rolls back. The player sees a rare 400
-// where a salvo of 2 was possible, and a second click launches it; a launch that was
-// never paid for remains structurally impossible. FOR UPDATE would close the window
-// but is deliberately not taken: it needs a new repository method and would let the
+// The sizing read is NOT serialised against a concurrent debit. cargo.Quantity is a
+// plain SELECT (no FOR UPDATE) and the transaction runs at READ COMMITTED, so a
+// cargo-move that commits after it is missed by THAT READ, and therefore by the salvo
+// size computed from it — the number can be stale by the time the debit runs. The
+// DEBIT does see the newer row (READ COMMITTED re-reads it at UPDATE time), and that
+// is precisely what saves us: Subtract is a CAS
+// (`UPDATE … WHERE quantity >= n RETURNING`), so against a hold that no longer holds n
+// it matches nothing and the whole salvo rolls back instead of overdrawing. Keep that
+// CAS: an unconditional `SET quantity = quantity - n` would happily go negative here
+// and hand out drones nobody paid for.
+//
+// So with 3 drones aboard, one tab launching while another unloads one leaves the
+// debit asking for 3 units that are gone, and the player sees a rare 400 where a salvo
+// of 2 was possible; a second click launches it. FOR UPDATE would close the window but
+// is deliberately not taken: it needs a new repository method and would let the
 // sector's tick goroutine park on another transaction's row lock.
 //
 // An EMPTY hold is still ErrInsufficientQuantity, not an empty success: the handler

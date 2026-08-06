@@ -172,9 +172,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { unsub() }()
 
-	// Send the sector's static objects once before the patch stream starts.
-	// They never change during the session in phase 3.1, so a single message
-	// at subscribe time is enough — keeps the per-tick patches lean.
+	// Send the sector's statics frame before the patch stream starts. It carries
+	// two sets that age very differently: the layout (immutable for the session,
+	// which is why it is sent whole once and never repeated per tick) and the
+	// live combat state of every static, which the very next tick can change
+	// (TASK-186). The frame is therefore a starting point, not a cache — the
+	// per-tick StaticsUpdated/StaticsRemoved delta keeps the live half current,
+	// and wsPushLoop re-sends the whole frame on a handoff (see the handoff
+	// branch below) because the new sector's live state is nowhere else.
 	s.sendStatics(ctx, conn, initialSector)
 
 	// Reader goroutine: detects client close. We don't process client messages

@@ -131,6 +131,16 @@ type StaticsMessage struct {
 	DockRange float64       `json:"dockRange"`
 	GateRange float64       `json:"gateRange"`
 	Statics   SectorStatics `json:"statics"`
+	// Destructibles is the live combat state (hp/shield) of every static in
+	// the sector, in the same shape the per-tick StaticsUpdated delta uses.
+	// Statics above is the immutable spawn layout — its hp is what the object
+	// was built with, not what it has left — so a client that only ever saw
+	// that frame read spawn figures after every reconnect and every jump back
+	// into a sector it had fought in (TASK-186). Sent whole rather than merged
+	// into the layout because the layout is shared between subscribers: this
+	// slice is the copy the tick already made, so a connection pays for
+	// serialising it and nothing more.
+	Destructibles []DestructibleStatic `json:"destructibles,omitempty"`
 }
 
 func StationFromDomain(s domain.Station) Station {

@@ -21,6 +21,10 @@ func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 		statics := dto.StaticsFromDomain(snap.Statics)
 		out.Statics = &statics
 	}
+	// Live static combat state alongside the layout, same as the WS welcome
+	// frame (TASK-186): Statics carries the spawn hp/shield, which is stale for
+	// anything that has been in a fight.
+	out.Destructibles = dto.DestructiblesFromDomain(snap.Destructibles)
 	if len(snap.Asteroids) > 0 {
 		out.Asteroids = dto.AsteroidsFromDomain(snap.Asteroids)
 	}

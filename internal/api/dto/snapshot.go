@@ -1,5 +1,7 @@
 package dto
 
+import "spaceempire/back/internal/domain"
+
 // Snapshot is the message the WS server pushes to a subscribed client.
 // In phase 1.4 the wire format moved to a delta: the first push after
 // subscribe carries the entire visible state in Added, and every
@@ -86,6 +88,12 @@ type Snapshot struct {
 	// StaticsMessage; the SPA merges these into its statics map. Statics that
 	// left the window arrive in StaticsRemoved.
 	StaticsAdded *SectorStatics `json:"staticsAdded,omitempty"`
+
+	// Destructibles is the live combat state of every static in the sector,
+	// returned by the /api/state snapshot (mirrors Ships/Statics). The HP in
+	// Statics is the spawn layout and goes stale the moment anything is shot;
+	// this is the current one. WS deltas use StaticsUpdated instead. TASK-186.
+	Destructibles []DestructibleStatic `json:"destructibles,omitempty"`
 }
 
 // DestructibleStatic is the live combat state of one static object on the
@@ -95,6 +103,34 @@ type DestructibleStatic struct {
 	HP        int       `json:"hp"`
 	Shield    int       `json:"shield"`
 	MaxShield int       `json:"maxShield"`
+}
+
+// DestructiblesFromDomain maps live static combat state onto the wire. One
+// encoder for both users of the shape — the welcome frame's full set
+// (TASK-186) and the per-tick StaticsUpdated delta — so the two can never
+// disagree about what a client is being told about the same object.
+//
+// There is no maxHP field and deliberately so: statics carry no maximum-hull
+// column in the domain or the DB, and the spawn hp in the layout frame is the
+// de-facto maximum, because hull damage is never persisted and hull never
+// regenerates (ChargeShield lifts the shield only, applyDamage returns early on
+// dmg <= 0). The SPA therefore draws the bar as this HP over the layout's. If
+// repair (TASK-67) or damage persistence ever lands, that denominator stops
+// being a maximum and a real MaxHP has to join this struct.
+func DestructiblesFromDomain(src []domain.DestructibleStatic) []DestructibleStatic {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]DestructibleStatic, len(src))
+	for i, d := range src {
+		out[i] = DestructibleStatic{
+			Ref:       EntityRef{Kind: int(d.Ref.Kind), ID: d.Ref.ID},
+			HP:        d.HP,
+			Shield:    d.Shield,
+			MaxShield: d.MaxShield,
+		}
+	}
+	return out
 }
 
 // LaserBeam mirrors combat.LaserBeam on the wire.

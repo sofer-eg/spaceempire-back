@@ -450,6 +450,7 @@ func (s *Server) sendStatics(ctx context.Context, conn *websocket.Conn, sectorID
 		DockRange:          dockRange,
 		GateRange:          gateRange,
 		Statics:            dto.StaticsFromDomain(snap.Statics),
+		Destructibles:      dto.DestructiblesFromDomain(snap.Destructibles),
 	}
 	payload, err := json.Marshal(msg)
 	if err != nil {
@@ -782,15 +783,7 @@ func (s *Server) buildSnapshotDTO(patch sector.Patch, sectorID int64) dto.Snapsh
 		}
 	}
 	if len(patch.StaticsUpdated) > 0 {
-		out.StaticsUpdated = make([]dto.DestructibleStatic, len(patch.StaticsUpdated))
-		for i, d := range patch.StaticsUpdated {
-			out.StaticsUpdated[i] = dto.DestructibleStatic{
-				Ref:       dto.EntityRef{Kind: int(d.Ref.Kind), ID: d.Ref.ID},
-				HP:        d.HP,
-				Shield:    d.Shield,
-				MaxShield: d.MaxShield,
-			}
-		}
+		out.StaticsUpdated = dto.DestructiblesFromDomain(patch.StaticsUpdated)
 	}
 	if len(patch.StaticsRemoved) > 0 {
 		out.StaticsRemoved = make([]dto.EntityRef, len(patch.StaticsRemoved))

@@ -31,6 +31,7 @@ type stubRepo struct {
 	goodsTypes    map[domain.GoodsTypeID]domain.GoodsType
 	capacities    map[domain.EntityRef]float64
 	stacks        map[domain.EntityRef]map[stackKey]int64
+	docks         map[domain.ShipID]cargorepo.ShipDock
 	failGoodsType bool
 }
 
@@ -39,7 +40,24 @@ func newStubRepo() *stubRepo {
 		goodsTypes: make(map[domain.GoodsTypeID]domain.GoodsType),
 		capacities: make(map[domain.EntityRef]float64),
 		stacks:     make(map[domain.EntityRef]map[stackKey]int64),
+		docks:      make(map[domain.ShipID]cargorepo.ShipDock),
 	}
+}
+
+// seedDock registers a ships row: owned by player, docked to dockedTo
+// (nil = in space). Ships absent from the map do not exist.
+func (s *stubRepo) seedDock(id domain.ShipID, player domain.PlayerID, dockedTo *domain.EntityRef) {
+	s.docks[id] = cargorepo.ShipDock{PlayerID: player, Docked: dockedTo}
+}
+
+func (s *stubRepo) ShipDock(_ context.Context, shipID domain.ShipID) (cargorepo.ShipDock, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.docks[shipID]
+	if !ok {
+		return cargorepo.ShipDock{}, cargorepo.ErrShipNotFound
+	}
+	return d, nil
 }
 
 // seed places qty units of gtype deposited by goodsOwner into owner's hold.
@@ -581,4 +599,215 @@ func TestUnit_CargoService_Move_UnknownGoodsType(t *testing.T) {
 
 	err := svc.Move(context.Background(), 0, from, to, 999, 1)
 	require.ErrorIs(t, err, cargo.ErrGoodsTypeNotFound)
+}
+
+// --- TASK-189: the player-initiated transfer gate -------------------------
+//
+// MoveByPlayer refuses anything the docked UI could not have produced: a ship
+// that is not the caller's, a ship in space, a ship docked somewhere else, and
+// a pair of ends that is not exactly one ship and one station.
+
+func TestUnit_CargoService_MoveByPlayer_UnloadToDockedStation(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	repo.capacities[ship] = 1000
+	repo.capacities[station] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(ship, 1, 0, 50)
+	repo.seedDock(2, 7, &station)
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	require.NoError(t, svc.MoveByPlayer(context.Background(), 7, ship, station, 1, 30))
+	assert.EqualValues(t, 20, repo.stacks[ship][stackKey{1, 0}])
+	assert.EqualValues(t, 30, repo.stacks[station][stackKey{1, 7}])
+}
+
+func TestUnit_CargoService_MoveByPlayer_LoadFromDockedTradeStation(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	station := domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: 5}
+	repo.capacities[ship] = 1000
+	repo.capacities[station] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(station, 1, 7, 40)
+	repo.seedDock(2, 7, &station)
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	require.NoError(t, svc.MoveByPlayer(context.Background(), 7, station, ship, 1, 25))
+	assert.EqualValues(t, 15, repo.stacks[station][stackKey{1, 7}])
+	assert.EqualValues(t, 25, repo.stacks[ship][stackKey{1, 0}])
+}
+
+// The exploit that opened TASK-189's second front: naming someone else's ship
+// id emptied its hold from anywhere on the map.
+func TestUnit_CargoService_MoveByPlayer_OtherPlayersShipForbidden(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	repo.capacities[ship] = 1000
+	repo.capacities[station] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(ship, 1, 0, 50)
+	repo.seedDock(2, 9, &station) // ship belongs to player 9, docked correctly
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	err := svc.MoveByPlayer(context.Background(), 7, ship, station, 1, 30)
+	require.ErrorIs(t, err, cargo.ErrShipForbidden)
+	assert.EqualValues(t, 50, repo.stacks[ship][stackKey{1, 0}], "no goods left the hold")
+	assert.Empty(t, repo.stacks[station])
+}
+
+// The exploit named in the task: a ship in open space unloading onto a station
+// it only knows the id of.
+func TestUnit_CargoService_MoveByPlayer_ShipInSpaceRefused(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 21}
+	repo.capacities[ship] = 1000
+	repo.capacities[station] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(ship, 1, 0, 50)
+	repo.seedDock(2, 7, nil) // owned by the caller, but in space
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	err := svc.MoveByPlayer(context.Background(), 7, ship, station, 1, 5)
+	require.ErrorIs(t, err, cargo.ErrNotDocked)
+	assert.EqualValues(t, 50, repo.stacks[ship][stackKey{1, 0}])
+	assert.Empty(t, repo.stacks[station])
+}
+
+func TestUnit_CargoService_MoveByPlayer_DockedElsewhereRefused(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	here := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	there := domain.EntityRef{Kind: domain.EntityKindStation, ID: 21}
+	repo.capacities[ship] = 1000
+	repo.capacities[there] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(ship, 1, 0, 50)
+	repo.seedDock(2, 7, &here)
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	err := svc.MoveByPlayer(context.Background(), 7, ship, there, 1, 5)
+	require.ErrorIs(t, err, cargo.ErrWrongStation)
+	assert.EqualValues(t, 50, repo.stacks[ship][stackKey{1, 0}])
+	assert.Empty(t, repo.stacks[there])
+}
+
+// Same id, different kind: docked to station 1 is not docked to trade station 1.
+func TestUnit_CargoService_MoveByPlayer_DockedToSameIdOtherKindRefused(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	tradeStation := domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: 1}
+	repo.capacities[ship] = 1000
+	repo.capacities[tradeStation] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(ship, 1, 0, 50)
+	repo.seedDock(2, 7, &station)
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	err := svc.MoveByPlayer(context.Background(), 7, ship, tradeStation, 1, 5)
+	require.ErrorIs(t, err, cargo.ErrWrongStation)
+	assert.EqualValues(t, 50, repo.stacks[ship][stackKey{1, 0}])
+}
+
+func TestUnit_CargoService_MoveByPlayer_UnknownShipNotFound(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 404}
+	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	repo.capacities[ship] = 1000
+	repo.capacities[station] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	err := svc.MoveByPlayer(context.Background(), 7, ship, station, 1, 5)
+	require.ErrorIs(t, err, cargo.ErrShipNotFound)
+}
+
+// Ship↔ship has its own gated path (POST /api/cmd/transport-cargo) and must not
+// be reachable here, docked or not.
+func TestUnit_CargoService_MoveByPlayer_ShipToShipRefused(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	mine := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	theirs := domain.EntityRef{Kind: domain.EntityKindShip, ID: 3}
+	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	repo.capacities[mine] = 1000
+	repo.capacities[theirs] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(theirs, 1, 0, 50)
+	repo.seedDock(2, 7, &station)
+	repo.seedDock(3, 7, &station)
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	err := svc.MoveByPlayer(context.Background(), 7, theirs, mine, 1, 10)
+	require.ErrorIs(t, err, cargo.ErrInvalidTransfer)
+	assert.EqualValues(t, 50, repo.stacks[theirs][stackKey{1, 0}])
+	assert.Empty(t, repo.stacks[mine])
+}
+
+func TestUnit_CargoService_MoveByPlayer_StationToStationRefused(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	a := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	b := domain.EntityRef{Kind: domain.EntityKindTradeStation, ID: 5}
+	repo.capacities[a] = 1000
+	repo.capacities[b] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(a, 1, 7, 50)
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	err := svc.MoveByPlayer(context.Background(), 7, a, b, 1, 10)
+	require.ErrorIs(t, err, cargo.ErrInvalidTransfer)
+	assert.EqualValues(t, 50, repo.stacks[a][stackKey{1, 7}])
+	assert.Empty(t, repo.stacks[b])
+}
+
+// The engine keeps its ungated entry point: the NPC trade hauler moves goods
+// between a station and a ship that never docks (app.traderHauler.Haul), and
+// gating Move would stop NPC logistics dead.
+func TestUnit_CargoService_Move_EngineNeedsNoDock(t *testing.T) {
+	t.Parallel()
+
+	repo := newStubRepo()
+	ship := domain.EntityRef{Kind: domain.EntityKindShip, ID: 2}
+	station := domain.EntityRef{Kind: domain.EntityKindStation, ID: 1}
+	repo.capacities[ship] = 1000
+	repo.capacities[station] = 1000
+	repo.goodsTypes[1] = domain.GoodsType{ID: 1, Name: "Batteries", Space: 1}
+	repo.seed(station, 1, 0, 50)
+	// No ships row seeded at all: Move must not even look one up.
+
+	svc := cargo.New(repo, inlineTx{repo: repo})
+
+	require.NoError(t, svc.Move(context.Background(), 0, station, ship, 1, 30))
+	assert.EqualValues(t, 20, repo.stacks[station][stackKey{1, 0}])
+	assert.EqualValues(t, 30, repo.stacks[ship][stackKey{1, 0}])
 }

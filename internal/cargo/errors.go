@@ -39,3 +39,29 @@ var ErrUnsupportedOwnerKind = errors.New("cargo: unsupported owner kind")
 // depositor (or anyone, for the unowned pool) may pull a stack out. HTTP maps
 // it to 403.
 var ErrForbidden = errors.New("cargo: forbidden")
+
+// The five below guard MoveByPlayer — the player-initiated transfer (TASK-189).
+// They mirror the trade package's sentinels one for one, because the gate is
+// the same gate; see MoveByPlayer for why.
+
+// ErrShipNotFound is returned when the ship end of the transfer has no row.
+// HTTP maps it to 404.
+var ErrShipNotFound = errors.New("cargo: ship not found")
+
+// ErrShipForbidden is returned when the ship end of the transfer belongs to a
+// different player. Distinct from ErrForbidden, which is about the goods rather
+// than the ship. HTTP maps it to 403.
+var ErrShipForbidden = errors.New("cargo: ship belongs to another player")
+
+// ErrNotDocked is returned when the ship end of the transfer is in space.
+// HTTP maps it to 400.
+var ErrNotDocked = errors.New("cargo: ship is not docked")
+
+// ErrWrongStation is returned when the ship is docked, but not to the station
+// the transfer names. HTTP maps it to 400.
+var ErrWrongStation = errors.New("cargo: ship docked at a different station")
+
+// ErrInvalidTransfer is returned when the two ends are not one ship and one
+// station: ship↔ship has its own gated path (POST /api/cmd/transport-cargo)
+// and station↔station has no legal path at all. HTTP maps it to 400.
+var ErrInvalidTransfer = errors.New("cargo: transfer must be between a ship and a station")

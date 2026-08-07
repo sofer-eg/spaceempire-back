@@ -41,7 +41,7 @@ func (s *stubCargoService) Inventory(_ context.Context, owner domain.EntityRef, 
 	return out, nil
 }
 
-func (s *stubCargoService) Move(_ context.Context, actor domain.PlayerID, from, to domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
+func (s *stubCargoService) MoveByPlayer(_ context.Context, actor domain.PlayerID, from, to domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
 	s.moveCall.actor = actor
 	s.moveCall.from = from
 	s.moveCall.to = to
@@ -266,4 +266,48 @@ func TestUnit_CargoMove_UnexpectedError_Returns500(t *testing.T) {
 	srv.Handler().ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// --- TASK-189: gate sentinels reach the player with the right status -------
+
+func TestUnit_CargoMove_GateErrors_MapToStatuses(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"ship not found", cargo.ErrShipNotFound, http.StatusNotFound},
+		{"other player's ship", cargo.ErrShipForbidden, http.StatusForbidden},
+		{"ship in space", cargo.ErrNotDocked, http.StatusBadRequest},
+		{"docked elsewhere", cargo.ErrWrongStation, http.StatusBadRequest},
+		{"ship to ship", cargo.ErrInvalidTransfer, http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := newCargoServer(t, &stubCargoService{moveErr: tc.err})
+
+			body, _ := json.Marshal(dto.MoveCargoRequest{
+				From:     dto.EntityRef{Kind: int(domain.EntityKindShip), ID: 1283},
+				To:       dto.EntityRef{Kind: int(domain.EntityKindStation), ID: 21},
+				TypeID:   1,
+				Quantity: 5,
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/cmd/cargo/move", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+
+			require.Equal(t, tc.want, rec.Code, "body=%s", rec.Body.String())
+			// The player is told what happened, in Russian (TASK-185 convention),
+			// and never sees the English sentinel text.
+			var resp struct {
+				Error string `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.NotEmpty(t, resp.Error)
+			assert.NotContains(t, resp.Error, "cargo:")
+		})
+	}
 }

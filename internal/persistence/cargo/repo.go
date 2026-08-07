@@ -30,6 +30,18 @@ var ErrInsufficientQuantity = errors.New("cargo: insufficient quantity")
 // inventory owners in this milestone.
 var ErrUnsupportedOwnerKind = errors.New("cargo: unsupported owner kind")
 
+// ErrShipNotFound is returned by ShipDock when no ships row matches the id.
+var ErrShipNotFound = errors.New("cargo: ship not found")
+
+// ShipDock is the ownership/dock view of one ship — the two facts the
+// player-initiated transfer gate needs (TASK-189). Deliberately narrower than
+// persistence/trade.ShipDock: the gate never asks where the ship is, only whose
+// it is and what it is docked to.
+type ShipDock struct {
+	PlayerID domain.PlayerID
+	Docked   *domain.EntityRef // nil = in space
+}
+
 // Repository talks to cargo / goods_types / *.cargobay via an Executor.
 type Repository struct {
 	exec database.Executor
@@ -63,6 +75,35 @@ func (r *Repository) GoodsType(ctx context.Context, id domain.GoodsTypeID) (doma
 		return domain.GoodsType{}, fmt.Errorf("query goods_type: %w", err)
 	}
 	return domain.GoodsType{ID: domain.GoodsTypeID(gid), Name: name, Space: space}, nil
+}
+
+const shipDockSQL = `
+SELECT player_id, docked_kind, docked_id
+FROM ships
+WHERE id = $1
+`
+
+// ShipDock returns who owns the ship and what it is currently docked to.
+// cargo.Service calls it through the transaction-bound repo so the gate and the
+// transfer it guards commit together (TASK-189).
+func (r *Repository) ShipDock(ctx context.Context, shipID domain.ShipID) (ShipDock, error) {
+	var (
+		playerID   int64
+		dockedKind *int16
+		dockedID   *int64
+	)
+	err := r.exec.QueryRow(ctx, shipDockSQL, int64(shipID)).Scan(&playerID, &dockedKind, &dockedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ShipDock{}, ErrShipNotFound
+	}
+	if err != nil {
+		return ShipDock{}, fmt.Errorf("query ship dock: %w", err)
+	}
+	out := ShipDock{PlayerID: domain.PlayerID(playerID)}
+	if dockedKind != nil && dockedID != nil {
+		out.Docked = &domain.EntityRef{Kind: domain.EntityKind(*dockedKind), ID: *dockedID}
+	}
+	return out, nil
 }
 
 const listByOwnerSQL = `

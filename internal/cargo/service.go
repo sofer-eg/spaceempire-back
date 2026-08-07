@@ -38,6 +38,7 @@ type Repo interface {
 	Subtract(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, qty int64, goodsOwner domain.PlayerID) error
 	Quantity(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, goodsOwner domain.PlayerID) (int64, error)
 	HasOthersGoods(ctx context.Context, owner domain.EntityRef, gtype domain.GoodsTypeID, viewer domain.PlayerID) (bool, error)
+	ShipDock(ctx context.Context, shipID domain.ShipID) (cargorepo.ShipDock, error)
 }
 
 // TxRunner executes fn inside a database transaction and passes a Repo
@@ -295,6 +296,11 @@ func (s *Service) Add(ctx context.Context, owner domain.EntityRef, gtype domain.
 // actor. The whole operation runs inside a single transaction so the capacity
 // check, source subtraction, and destination addition cannot race.
 //
+// This is the ENGINE entry point and carries no authorization of its own: it
+// moves whatever it is told to move, which is what the NPC trade hauler
+// (app.traderHauler.Haul) needs from internal logistics. A request that comes
+// from a player must go through MoveByPlayer instead — see its comment.
+//
 // Depositor semantics (phase 10.22):
 //   - Depositing into a station hold tags the stack with actor, so other
 //     players cannot see or take it. An NPC haul (actor == 0) deposits into
@@ -313,48 +319,148 @@ func (s *Service) Move(ctx context.Context, actor domain.PlayerID, from, to doma
 	}
 
 	return s.tx.Do(ctx, func(ctx context.Context, txRepo Repo) error {
-		gt, err := txRepo.GoodsType(ctx, gtype)
-		if err != nil {
-			if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
-				return ErrGoodsTypeNotFound
-			}
-			return err
-		}
-
-		toCapacity, err := txRepo.Capacity(ctx, to)
-		if err != nil {
-			if errors.Is(err, cargorepo.ErrOwnerNotFound) {
-				return ErrOwnerNotFound
-			}
-			if errors.Is(err, cargorepo.ErrUnsupportedOwnerKind) {
-				return ErrUnsupportedOwnerKind
-			}
-			return err
-		}
-
-		toUsed, err := txRepo.UsedSpace(ctx, to)
-		if err != nil {
-			return err
-		}
-
-		needed := float64(qty) * gt.Space
-		if toUsed+needed > toCapacity {
-			return ErrNoSpace
-		}
-
-		if err := s.subtractFromSource(ctx, txRepo, actor, from, gtype, qty); err != nil {
-			return err
-		}
-
-		toOwner := unownedGoods
-		if isStationLike(to.Kind) {
-			toOwner = actor
-		}
-		if err := txRepo.Add(ctx, to, gtype, qty, toOwner); err != nil {
-			return fmt.Errorf("add to destination: %w", err)
-		}
-		return nil
+		return s.moveIn(ctx, txRepo, actor, from, to, gtype, qty)
 	})
+}
+
+// MoveByPlayer is Move behind the gate every player-initiated transfer must
+// pass: the ship end must belong to actor AND be docked to exactly the station
+// the request names (TASK-189).
+//
+// Why THIS gate, and not a distance check:
+//
+//  1. It is the same gate trading against that hold already uses
+//     (trade.authorizeDocked). Loading a good into a station hold and selling it
+//     to the same station are two operations over one warehouse; if only one of
+//     them requires a dock, cargo/move is simply a way around the trade rules.
+//  2. It matches the only UI that reaches here 1:1 — front CargoView lives
+//     inside StationView, which opens only while docked. So the gate costs a
+//     legal player nothing.
+//  3. A range gate (DockRange) is strictly weaker: it would allow "hover next to
+//     the station and shuffle cargo", which exists neither in this client nor in
+//     the original StarWind, where cargo is moved in dock.
+//
+// The gate runs INSIDE the transfer's own transaction, not before it: checked
+// outside, an undock (or a change of owner) landing between the check and the
+// debit would let the move through anyway.
+//
+// Boarding someone else's ship as a passenger does not grant this — the
+// predicate is strictly ships.player_id == actor, and a passenger's HUD is
+// read-only (app.eva).
+func (s *Service) MoveByPlayer(ctx context.Context, actor domain.PlayerID, from, to domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
+	if qty <= 0 {
+		return ErrNonPositiveQuantity
+	}
+	if from == to {
+		return ErrSameOwner
+	}
+	shipID, station, err := transferEnds(from, to)
+	if err != nil {
+		return err
+	}
+
+	return s.tx.Do(ctx, func(ctx context.Context, txRepo Repo) error {
+		if err := authorizeDocked(ctx, txRepo, actor, shipID, station); err != nil {
+			return err
+		}
+		return s.moveIn(ctx, txRepo, actor, from, to, gtype, qty)
+	})
+}
+
+// transferEnds resolves which end of a player transfer is the ship and which is
+// the station hold. Exactly one end must be each: ship↔ship belongs to the
+// transporter path (POST /api/cmd/transport-cargo, with its own equipment,
+// ownership, range and energy gates) and station↔station has no legal path.
+func transferEnds(from, to domain.EntityRef) (domain.ShipID, domain.EntityRef, error) {
+	switch {
+	case from.Kind == domain.EntityKindShip && isTransferStation(to.Kind):
+		return domain.ShipID(from.ID), to, nil
+	case isTransferStation(from.Kind) && to.Kind == domain.EntityKindShip:
+		return domain.ShipID(to.ID), from, nil
+	default:
+		return 0, domain.EntityRef{}, ErrInvalidTransfer
+	}
+}
+
+// isTransferStation lists the holds a player may load from / unload into by
+// docking. Pirbase is absent on purpose: it is not a cargo owner kind on this
+// endpoint (see api.isCargoOwnerKind).
+func isTransferStation(k domain.EntityKind) bool {
+	switch k {
+	case domain.EntityKindStation, domain.EntityKindTradeStation:
+		return true
+	default:
+		return false
+	}
+}
+
+// authorizeDocked enforces MoveByPlayer's gate against the transaction-bound
+// repo: the ship must exist, belong to actor, and be docked to station.
+func authorizeDocked(ctx context.Context, txRepo Repo, actor domain.PlayerID, shipID domain.ShipID, station domain.EntityRef) error {
+	dock, err := txRepo.ShipDock(ctx, shipID)
+	if err != nil {
+		if errors.Is(err, cargorepo.ErrShipNotFound) {
+			return ErrShipNotFound
+		}
+		return fmt.Errorf("load ship dock: %w", err)
+	}
+	if dock.PlayerID != actor {
+		return ErrShipForbidden
+	}
+	if dock.Docked == nil {
+		return ErrNotDocked
+	}
+	if *dock.Docked != station {
+		return ErrWrongStation
+	}
+	return nil
+}
+
+// moveIn is Move's body over a caller-supplied transaction-bound repo, so the
+// gated and ungated entry points share one implementation and MoveByPlayer's
+// check commits together with the transfer it guards.
+func (s *Service) moveIn(ctx context.Context, txRepo Repo, actor domain.PlayerID, from, to domain.EntityRef, gtype domain.GoodsTypeID, qty int64) error {
+	gt, err := txRepo.GoodsType(ctx, gtype)
+	if err != nil {
+		if errors.Is(err, cargorepo.ErrGoodsTypeNotFound) {
+			return ErrGoodsTypeNotFound
+		}
+		return err
+	}
+
+	toCapacity, err := txRepo.Capacity(ctx, to)
+	if err != nil {
+		if errors.Is(err, cargorepo.ErrOwnerNotFound) {
+			return ErrOwnerNotFound
+		}
+		if errors.Is(err, cargorepo.ErrUnsupportedOwnerKind) {
+			return ErrUnsupportedOwnerKind
+		}
+		return err
+	}
+
+	toUsed, err := txRepo.UsedSpace(ctx, to)
+	if err != nil {
+		return err
+	}
+
+	needed := float64(qty) * gt.Space
+	if toUsed+needed > toCapacity {
+		return ErrNoSpace
+	}
+
+	if err := s.subtractFromSource(ctx, txRepo, actor, from, gtype, qty); err != nil {
+		return err
+	}
+
+	toOwner := unownedGoods
+	if isStationLike(to.Kind) {
+		toOwner = actor
+	}
+	if err := txRepo.Add(ctx, to, gtype, qty, toOwner); err != nil {
+		return fmt.Errorf("add to destination: %w", err)
+	}
+	return nil
 }
 
 // subtractFromSource removes qty of gtype from the move source. For a player

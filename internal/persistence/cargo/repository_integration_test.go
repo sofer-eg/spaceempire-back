@@ -257,3 +257,64 @@ func TestIntegration_CargoRepository_StationHold_PerPlayer(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 5, q2, "p2 stack untouched")
 }
+
+// seedShipDocked inserts a ship docked to the given object, so ShipDock is
+// exercised against the real ships schema. schemaguard cannot stand in for this:
+// it inspects INSERT ... ON CONFLICT, not SELECT, so a migration that retyped
+// docked_kind would sail past every other test and surface as a 500 on each
+// legal cargo transfer (TASK-189 review).
+func seedShipDocked(t *testing.T, pool *pgxpool.Pool, dockedKind int16, dockedID int64) (int64, int64) {
+	t.Helper()
+	var playerID, shipID int64
+	err := pool.QueryRow(context.Background(),
+		`INSERT INTO players (login, password_hash) VALUES ($1, $2) RETURNING id`,
+		t.Name(), "x").Scan(&playerID)
+	require.NoError(t, err)
+	err = pool.QueryRow(context.Background(),
+		`INSERT INTO ships (player_id, sector_id, docked_kind, docked_id) VALUES ($1, 1, $2, $3) RETURNING id`,
+		playerID, dockedKind, dockedID).Scan(&shipID)
+	require.NoError(t, err)
+	return playerID, shipID
+}
+
+func TestIntegration_CargoRepository_ShipDock_ReturnsDocked(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	repo := cargo.New(pool)
+
+	playerID, shipID := seedShipDocked(t, pool, int16(domain.EntityKindStation), 1)
+
+	dock, err := repo.ShipDock(context.Background(), domain.ShipID(shipID))
+	require.NoError(t, err)
+	assert.EqualValues(t, playerID, dock.PlayerID)
+	require.NotNil(t, dock.Docked)
+	assert.Equal(t, domain.EntityKindStation, dock.Docked.Kind)
+	assert.EqualValues(t, 1, dock.Docked.ID)
+}
+
+// A ship in space reads back as owned-but-not-docked, which is the exact input
+// the gate turns into ErrNotDocked. Both dock columns are NULL there, so this
+// also pins that the nil scan targets do not become a spurious EntityRef{0,0}.
+func TestIntegration_CargoRepository_ShipDock_InSpaceHasNoDock(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	repo := cargo.New(pool)
+
+	shipID := seedShip(t, pool, 1)
+
+	dock, err := repo.ShipDock(context.Background(), domain.ShipID(shipID))
+	require.NoError(t, err)
+	assert.Nil(t, dock.Docked)
+}
+
+func TestIntegration_CargoRepository_ShipDock_NotFound(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	repo := cargo.New(pool)
+
+	_, err := repo.ShipDock(context.Background(), domain.ShipID(999_999))
+	require.ErrorIs(t, err, cargo.ErrShipNotFound)
+}

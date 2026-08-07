@@ -41,8 +41,12 @@ var ErrUnsupportedOwnerKind = errors.New("cargo: unsupported owner kind")
 var ErrForbidden = errors.New("cargo: forbidden")
 
 // The five below guard MoveByPlayer — the player-initiated transfer (TASK-189).
-// They mirror the trade package's sentinels one for one, because the gate is
-// the same gate; see MoveByPlayer for why.
+// Four of them answer the same three questions trade.authorizeDocked asks, so
+// they carry the same meanings: ErrShipNotFound and ErrNotDocked / ErrWrongStation
+// match trade's namesakes, and ErrShipForbidden is trade.ErrForbidden under a
+// name that does not collide with this package's own ErrForbidden (which is about
+// the goods, not the ship). ErrInvalidTransfer has no trade counterpart at all —
+// it rejects a shape of request trade cannot express. See MoveByPlayer.
 
 // ErrShipNotFound is returned when the ship end of the transfer has no row.
 // HTTP maps it to 404.

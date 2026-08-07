@@ -340,9 +340,18 @@ func (s *Service) Move(ctx context.Context, actor domain.PlayerID, from, to doma
 //     the station and shuffle cargo", which exists neither in this client nor in
 //     the original StarWind, where cargo is moved in dock.
 //
-// The gate runs INSIDE the transfer's own transaction, not before it: checked
-// outside, an undock (or a change of owner) landing between the check and the
-// debit would let the move through anyway.
+// The gate runs INSIDE the transfer's own transaction, not before it. That
+// narrows the race, and does not close it: TxManager.Do opens READ COMMITTED and
+// ShipDock is a plain SELECT, so a sector worker committing an undock between
+// our read and the debit is still possible — the window is a few statements
+// wide instead of an HTTP round-trip wide. Closing it would take FOR SHARE,
+// which we deliberately do not take: that would make the worker's ship Save wait
+// on a player's transaction, and there is one worker per sector running its DB
+// calls under a timeout. The trade is worth it because the leftover window buys
+// an attacker almost nothing — they must already be docked at that very station,
+// and all they gain is a transfer committing about a millisecond after the undock
+// was acked. trade.authorizeDocked has exactly the same property; this is
+// consistency with it, not a regression introduced here.
 //
 // Boarding someone else's ship as a passenger does not grant this — the
 // predicate is strictly ships.player_id == actor, and a passenger's HUD is
@@ -383,8 +392,13 @@ func transferEnds(from, to domain.EntityRef) (domain.ShipID, domain.EntityRef, e
 }
 
 // isTransferStation lists the holds a player may load from / unload into by
-// docking. Pirbase is absent on purpose: it is not a cargo owner kind on this
-// endpoint (see api.isCargoOwnerKind).
+// docking: a factory and a trade station each keep a warehouse a docked ship can
+// deposit goods into and draw them back out of.
+//
+// A pirbase is absent because it is not a hold at all — it has no cargobay in the
+// schema (only ships, stations and trade_stations do), so Capacity answers
+// ErrUnsupportedOwnerKind for it and there is nothing to deposit into. Goods
+// reach a pirbase by being sold to it, not by being stored there.
 func isTransferStation(k domain.EntityKind) bool {
 	switch k {
 	case domain.EntityKindStation, domain.EntityKindTradeStation:

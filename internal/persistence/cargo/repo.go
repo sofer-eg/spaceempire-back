@@ -31,12 +31,19 @@ var ErrInsufficientQuantity = errors.New("cargo: insufficient quantity")
 var ErrUnsupportedOwnerKind = errors.New("cargo: unsupported owner kind")
 
 // ErrShipNotFound is returned by ShipDock when no ships row matches the id.
-var ErrShipNotFound = errors.New("cargo: ship not found")
+// The prefix says "cargo repo" and not "cargo" on purpose: cargo.ErrShipNotFound
+// is a different value with the same meaning one layer up, and both packages are
+// called cargo in a log line.
+var ErrShipNotFound = errors.New("cargo repo: ship not found")
 
 // ShipDock is the ownership/dock view of one ship — the two facts the
-// player-initiated transfer gate needs (TASK-189). Deliberately narrower than
-// persistence/trade.ShipDock: the gate never asks where the ship is, only whose
-// it is and what it is docked to.
+// player-initiated transfer gate needs (TASK-189).
+//
+// It is the third copy of this shape: persistence/trade.ShipDock (which also
+// carries SectorID, unused by this gate) and persistence/auction.ShipDock are the
+// others. They stay copies by convention — a module does not import another
+// module's persistence package — so the duplication is deliberate, not an
+// oversight waiting to be merged.
 type ShipDock struct {
 	PlayerID domain.PlayerID
 	Docked   *domain.EntityRef // nil = in space

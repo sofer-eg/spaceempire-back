@@ -32,8 +32,13 @@ type stubRepo struct {
 	capacities    map[domain.EntityRef]float64
 	stacks        map[domain.EntityRef]map[stackKey]int64
 	docks         map[domain.ShipID]cargorepo.ShipDock
+	inTx          bool
 	failGoodsType bool
 }
+
+// errShipDockOutsideTx is what the stub answers when the dock gate is read
+// outside the transfer's transaction. See inlineTx.
+var errShipDockOutsideTx = errors.New("stub: ShipDock called outside the transaction")
 
 func newStubRepo() *stubRepo {
 	return &stubRepo{
@@ -53,11 +58,25 @@ func (s *stubRepo) seedDock(id domain.ShipID, player domain.PlayerID, dockedTo *
 func (s *stubRepo) ShipDock(_ context.Context, shipID domain.ShipID) (cargorepo.ShipDock, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The gate is only meaningful inside the transfer's own transaction — read
+	// before it opens, the ship can undock between the answer and the debit.
+	// Refusing here is what makes that invariant testable at all: with a stub
+	// that answers the same in either place, moving the check out of tx.Do is a
+	// silent regression (TASK-189 review).
+	if !s.inTx {
+		return cargorepo.ShipDock{}, errShipDockOutsideTx
+	}
 	d, ok := s.docks[shipID]
 	if !ok {
 		return cargorepo.ShipDock{}, cargorepo.ErrShipNotFound
 	}
 	return d, nil
+}
+
+func (s *stubRepo) setInTx(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inTx = v
 }
 
 // seed places qty units of gtype deposited by goodsOwner into owner's hold.
@@ -166,9 +185,16 @@ func (s *stubRepo) HasOthersGoods(_ context.Context, owner domain.EntityRef, gty
 // inlineTx implements cargo.TxRunner by invoking fn with the underlying
 // repo directly — no real transaction, but the assertions only care that
 // fn is called and that its error propagates.
-type inlineTx struct{ repo cargo.Repo }
+//
+// It does mark the window, though: the repo reports inTx only for the duration
+// of fn, and stubRepo.ShipDock refuses to answer outside it. Without that mark
+// "inside the transaction" and "before it" are indistinguishable in a stub, and
+// MoveByPlayer's whole TOCTOU argument would rest on an untested claim.
+type inlineTx struct{ repo *stubRepo }
 
 func (t inlineTx) Do(ctx context.Context, fn func(context.Context, cargo.Repo) error) error {
+	t.repo.setInTx(true)
+	defer t.repo.setInTx(false)
 	return fn(ctx, t.repo)
 }
 

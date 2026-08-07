@@ -104,7 +104,7 @@ func (s *Server) handleLaunchTorpedo(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -134,7 +134,7 @@ func (s *Server) handleLaunchTorpedo(w http.ResponseWriter, r *http.Request) {
 			case errors.Is(res.Err, sector.ErrOrdnanceUnavailable):
 				writeError(w, http.StatusServiceUnavailable, "запуск недоступен: ошибка конфигурации сервера")
 			default:
-				s.writeInternalError(w, res.Err)
+				s.writeInternalError(w, r, res.Err)
 			}
 			return
 		}

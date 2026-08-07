@@ -42,7 +42,7 @@ func (s *Server) handleExternalDock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -51,13 +51,13 @@ func (s *Server) handleExternalDock(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case res := <-reply:
-		s.writeExternalDockResult(w, res.Err)
+		s.writeExternalDockResult(w, r, res.Err)
 	case <-ctx.Done():
 		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }
 
-func (s *Server) writeExternalDockResult(w http.ResponseWriter, err error) {
+func (s *Server) writeExternalDockResult(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, sector.ErrShipNotFound):
 		writeError(w, http.StatusNotFound, "корабль не найден")
@@ -78,7 +78,7 @@ func (s *Server) writeExternalDockResult(w http.ResponseWriter, err error) {
 	case errors.Is(err, sector.ErrDockHostile):
 		writeError(w, http.StatusForbidden, "корабль-носитель враждебен")
 	case err != nil:
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 	default:
 		writeJSON(w, http.StatusOK, dto.ExternalDockResponse{OK: true})
 	}

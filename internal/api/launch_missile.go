@@ -141,7 +141,7 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -174,7 +174,7 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 				// for free. 503 — retrying may work after a fix.
 				writeError(w, http.StatusServiceUnavailable, "запуск недоступен: ошибка конфигурации сервера")
 			default:
-				s.writeInternalError(w, res.Err)
+				s.writeInternalError(w, r, res.Err)
 			}
 			return
 		}

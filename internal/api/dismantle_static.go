@@ -59,7 +59,7 @@ func (s *Server) handleDismantleStatic(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -90,7 +90,7 @@ func (s *Server) handleDismantleStatic(w http.ResponseWriter, r *http.Request) {
 			// installer the worker refuses to remove an object it cannot pay for.
 			writeError(w, http.StatusServiceUnavailable, "демонтаж недоступен: ошибка конфигурации сервера")
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.DismantleStaticResponse{OK: true})
 		}

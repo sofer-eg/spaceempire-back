@@ -39,7 +39,7 @@ func (s *Server) handleJump(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -61,7 +61,7 @@ func (s *Server) handleJump(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "передача сектора недоступна")
 		case writeIfTransient(w, res.Err, "не удалось записать прыжок, попробуйте ещё раз"):
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.JumpResponse{OK: true})
 		}

@@ -47,7 +47,7 @@ func (s *Server) handlePickupContainer(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -57,7 +57,7 @@ func (s *Server) handlePickupContainer(w http.ResponseWriter, r *http.Request) {
 	select {
 	case res := <-reply:
 		if res.Err != nil {
-			s.writePickupError(w, res.Err)
+			s.writePickupError(w, r, res.Err)
 			return
 		}
 		writeJSON(w, http.StatusOK, dto.PickupContainerResponse{OK: true})
@@ -66,7 +66,7 @@ func (s *Server) handlePickupContainer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) writePickupError(w http.ResponseWriter, err error) {
+func (s *Server) writePickupError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, sector.ErrShipNotFound):
 		writeError(w, http.StatusNotFound, "корабль не найден")
@@ -88,6 +88,6 @@ func (s *Server) writePickupError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "в трюме не хватает места")
 	case writeIfTransient(w, err, "не удалось записать подбор груза, попробуйте ещё раз"):
 	default:
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 	}
 }

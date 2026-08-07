@@ -49,7 +49,7 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(res.Err, sector.ErrShipDocked):
 			writeError(w, http.StatusConflict, "корабль пристыкован")
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.MoveResponse{OK: true})
 		}

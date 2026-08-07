@@ -67,7 +67,7 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -96,7 +96,7 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
 			// The roll landed but the ownership transfer could not be persisted, so
 			// the worker refused it (TASK-148).
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.CaptureResponse{OK: true, Captured: res.Captured})
 		}

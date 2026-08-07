@@ -33,8 +33,13 @@ import (
 //     silently, so the pairs now travel as a code the wording cannot affect.
 //  2. Every player-facing message in the eighteen space-command handlers is
 //     Russian. That is checked over the source (see the AST test at the bottom)
-//     rather than one response at a time: 216 write sites cannot each be reached
+//     rather than one response at a time: 220 write sites cannot each be reached
 //     through HTTP, and the acceptance criterion is about all of them.
+//
+// The code's literal value is pinned separately (TestUnit_ErrorCodeWireValues):
+// everything else here compares the constant with itself, so a rename would
+// travel silently and the SPA — which spells the same strings out by hand —
+// would quietly stop recognising them.
 
 // cannedRouter answers one queued command with a canned sentinel, so the
 // handler's error switch can be walked branch by branch without building a
@@ -115,6 +120,28 @@ func hasCyrillic(s string) bool {
 		}
 	}
 	return false
+}
+
+// TestUnit_ErrorCodeWireValues pins what actually travels on the wire. Every
+// other assertion in this file — and every one on the SPA side — compares a
+// constant with itself, so renaming `sector_busy` to `busy_sector` here keeps
+// `go test` green while the SPA, which repeats the literals in its own
+// ERROR_CODE map (front/src/api.ts), stops recognising them and starts telling
+// a player whose sector is merely busy that a retry will not help. There is a
+// twin of this test on the front; the two together are the contract.
+//
+// Changing a value is therefore a two-repository change: edit both maps, or the
+// pair silently drifts apart.
+func TestUnit_ErrorCodeWireValues(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "sector_busy", api.CodeSectorBusy)
+	assert.Equal(t, "ship_docked", api.CodeShipDocked)
+	assert.Equal(t, "jump_blocked_antijump", api.CodeJumpBlockedAntijump)
+	assert.Equal(t, "jump_drive_required", api.CodeJumpDriveRequired)
+	assert.Equal(t, "shield_required", api.CodeShieldRequired)
+	assert.Equal(t, "jump_forbidden_sector", api.CodeJumpForbiddenSector)
+	assert.Equal(t, "cargo_insufficient", api.CodeCargoInsufficient)
 }
 
 // TestUnit_JumpDriveErrorCodes walks every jump-drive branch the SPA has to
@@ -219,13 +246,22 @@ var spaceCommandFiles = []string{
 }
 
 // TestUnit_SpaceCommandMessagesAreRussian reads the handlers themselves. The
-// player-facing half of these files is 216 write sites; only a handful are
+// player-facing half of these files is 220 write sites; only a handful are
 // reachable from a unit test, and «русифицированы все 18 файлов целиком» is a
 // statement about the source, so the source is what is checked.
 //
-// Only string literals are inspected: writeError(w, status, err.Error()) hands
-// through a server-side error the SPA hides behind its own 5xx wording, and
-// there is nothing to translate in it.
+// 220 is every call to the three writers, and all three are counted because all
+// three put a literal in front of the player: 204 writeError + 12 writeErrorCode
+// + 4 writeIfTransient. (216 — the first two — is the number the commit message
+// quotes; it is the same set minus the transient-write helper.)
+//
+// Known limitation: only a *literal* last argument is inspected. A message built
+// at runtime — fmt.Sprintf("...%d", n) — is neither counted nor checked for
+// Russian, so it would slip past both halves of this test. There are none today
+// (the count above is every writer call in the eighteen files, with nothing
+// skipped); if one is added, this test will report a drop, and the fix is to
+// check that message by hand or to teach the walk about it — not to lower the
+// number.
 func TestUnit_SpaceCommandMessagesAreRussian(t *testing.T) {
 	t.Parallel()
 
@@ -260,8 +296,10 @@ func TestUnit_SpaceCommandMessagesAreRussian(t *testing.T) {
 		})
 	}
 
-	// The count is the scope: 216 write sites, of which the ones passing
-	// err.Error() through carry no literal. A drop here means a handler lost its
-	// message, a jump means one arrived untranslated in a file nobody re-checked.
-	assert.Equal(t, 220, total, "player-facing literals across the space commands")
+	// The count is the scope. A drop means a handler lost a literal message —
+	// most likely to a fmt.Sprintf this walk cannot read (see the header); a jump
+	// means one arrived in a file nobody re-checked, and it may be English.
+	assert.Equal(t, 220, total,
+		"player-facing literals across the space commands: re-read the files that changed, "+
+			"confirm every message there is Russian, and only then update this number")
 }

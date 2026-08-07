@@ -46,7 +46,7 @@ func (s *Server) handleAttack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -62,7 +62,7 @@ func (s *Server) handleAttack(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(res.Err, sector.ErrInvalidAttackTarget):
 			writeError(w, http.StatusBadRequest, "недопустимая цель для атаки")
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.AttackResponse{OK: true})
 		}
@@ -98,7 +98,7 @@ func (s *Server) handleCeaseFire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -112,7 +112,7 @@ func (s *Server) handleCeaseFire(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(res.Err, sector.ErrForbidden):
 			writeError(w, http.StatusForbidden, "чужой корабль")
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.CeaseFireResponse{OK: true})
 		}

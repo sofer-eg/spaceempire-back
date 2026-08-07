@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"spaceempire/back/internal/auth"
+)
 
 // Machine-readable error codes (TASK-185).
 //
@@ -22,10 +26,16 @@ import "net/http"
 //	400 install-*          ship_docked | cargo_insufficient | (bad body)
 //	503 install-*          sector_busy | (installer unwired)
 //
-// The other member of each pair stays uncoded on purpose: the SPA tests
-// positively for the code it can act on and treats everything else as the
-// cautious branch, so a new sentinel appearing under one of these statuses can
-// never inherit «попробуйте ещё раз» by accident.
+// A member in parentheses is the one that carries no code, and there is at most
+// one per status: the outcome with no advice of its own — a malformed body, a
+// process wired without a handoff or an installer — which the SPA words as its
+// fallback line. Every outcome the player can act on is coded, and the SPA tests
+// each of them positively (front/src/api.ts). So a body whose code it does not
+// recognise — an older backend, a sentinel added here later, a proxy's own error
+// page — lands on that neutral fallback instead of being told, specifically and
+// wrongly, that its ship is docked. Picking the last branch by elimination is
+// what made a jammed jump read as «вы пристыкованы» (TASK-131); neither side of
+// a coded pair may be inferred that way.
 //
 // Statuses that mean one thing (404, 403, 429, 504) carry no code — the SPA
 // already words them from the status alone, and inventing codes for them would
@@ -80,8 +90,20 @@ func writeErrorCode(w http.ResponseWriter, status int, code, message string) {
 // them and stops the leak at the source rather than after it crossed the wire.
 //
 // The raw error is not lost — it goes to the server log, which is where a
-// deadline or a Postgres error is diagnosed anyway.
-func (s *Server) writeInternalError(w http.ResponseWriter, err error) {
-	s.logger.Error("space command failed", "err", err)
+// deadline or a Postgres error is diagnosed anyway. That is the whole argument
+// for hiding it from the player, so the log line has to be worth reading: one
+// «space command failed» with nothing but err on it would be forty branches
+// across eighteen handlers collapsed into a single indistinguishable label. The
+// request carries what tells them apart, hence r — route names the command
+// (/api/cmd/jump-drive), player names whose it was, and between them the ship is
+// one query away. Same shape as the handlers that log their own failures
+// (activate.go, app/eva.go, app/sell_ship.go): a label for the place, then ids.
+func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, err error) {
+	playerID, _ := auth.PlayerIDFromContext(r.Context())
+	s.logger.Error("space command failed",
+		"err", err,
+		"route", r.URL.Path,
+		"player", int64(playerID),
+	)
 	writeError(w, http.StatusInternalServerError, "внутренняя ошибка сервера")
 }

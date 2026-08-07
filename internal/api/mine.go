@@ -54,7 +54,7 @@ func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(res.Err, sector.ErrAsteroidOutOfRange):
 			writeError(w, http.StatusBadRequest, "астероид слишком далеко")
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.MineResponse{OK: true})
 		}

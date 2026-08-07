@@ -58,7 +58,7 @@ func (s *Server) handleInstallSatellite(w http.ResponseWriter, r *http.Request) 
 			writeErrorCode(w, http.StatusServiceUnavailable, CodeSectorBusy, "сектор занят")
 			return
 		}
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -83,7 +83,7 @@ func (s *Server) handleInstallSatellite(w http.ResponseWriter, r *http.Request) 
 				// Misconfiguration, not a player error — see install_jammer.go.
 				writeError(w, http.StatusServiceUnavailable, "установка недоступна: ошибка конфигурации сервера")
 			default:
-				s.writeInternalError(w, res.Err)
+				s.writeInternalError(w, r, res.Err)
 			}
 			return
 		}

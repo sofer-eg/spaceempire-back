@@ -42,7 +42,7 @@ func (s *Server) handleDock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -67,7 +67,7 @@ func (s *Server) handleDock(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(res.Err, sector.ErrInvalidDockTarget):
 			writeError(w, http.StatusBadRequest, "к этому объекту нельзя пристыковаться")
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.DockResponse{OK: true})
 		}
@@ -102,7 +102,7 @@ func (s *Server) handleUndock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -119,7 +119,7 @@ func (s *Server) handleUndock(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(res.Err, sector.ErrNotDocked):
 			writeError(w, http.StatusConflict, "корабль не пристыкован")
 		case res.Err != nil:
-			s.writeInternalError(w, res.Err)
+			s.writeInternalError(w, r, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.UndockResponse{OK: true})
 		}

@@ -61,7 +61,7 @@ func (s *Server) handleInstallJammer(w http.ResponseWriter, r *http.Request) {
 			writeErrorCode(w, http.StatusServiceUnavailable, CodeSectorBusy, "сектор занят")
 			return
 		}
-		s.writeInternalError(w, err)
+		s.writeInternalError(w, r, err)
 		return
 	}
 
@@ -88,7 +88,7 @@ func (s *Server) handleInstallJammer(w http.ResponseWriter, r *http.Request) {
 				// build one for free. 503 — retrying may work after a fix.
 				writeError(w, http.StatusServiceUnavailable, "установка недоступна: ошибка конфигурации сервера")
 			default:
-				s.writeInternalError(w, res.Err)
+				s.writeInternalError(w, r, res.Err)
 			}
 			return
 		}

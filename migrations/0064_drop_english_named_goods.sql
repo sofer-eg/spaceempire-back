@@ -26,11 +26,22 @@
 -- close (docs/specs/auction.md: «деньги не теряются»). Return it before the lot
 -- goes, or the bidder's cash vanishes with it. Lots already closed (status 1) or
 -- cancelled (2) have settled, so they are left alone.
-UPDATE players p SET cash = p.cash + l.current_price
-FROM auction_lots l
-WHERE l.goods_type_id IN (104, 114)
-  AND l.status = 0
-  AND l.current_bidder_id = p.id;
+--
+-- Summed per bidder before the join, not joined lot by lot: UPDATE ... FROM
+-- touches each target row exactly once, so a bidder leading on lots of both
+-- goods would have had one of the two bids picked arbitrarily and the other
+-- silently dropped. Nothing limits a player to one active lot, so that is a
+-- reachable case, and it would destroy the money this statement exists to save.
+UPDATE players p SET cash = p.cash + r.escrow
+FROM (
+    SELECT current_bidder_id AS player_id, SUM(current_price) AS escrow
+    FROM auction_lots
+    WHERE goods_type_id IN (104, 114)
+      AND status = 0
+      AND current_bidder_id IS NOT NULL
+    GROUP BY current_bidder_id
+) r
+WHERE r.player_id = p.id;
 
 -- goods_types last: cargo, station_goods and auction_lots each hold an FK to it
 -- (and auction_bids cascades off auction_lots, so the bid history goes with the
@@ -39,6 +50,20 @@ DELETE FROM auction_lots  WHERE goods_type_id IN (104, 114);
 DELETE FROM cargo         WHERE goods_type_id IN (104, 114);
 DELETE FROM station_goods WHERE goods_type_id IN (104, 114);
 DELETE FROM goods_types   WHERE id IN (104, 114);
+
+-- A procedural quest freezes the goods id inside its definition JSONB
+-- (0060_quest_procedural.sql) and holds no FK to goods_types, so none of the
+-- deletes above reach one. Drop the pending offers that name these goods: they
+-- expire on a TTL anyway, and an offer to fetch a good that no longer exists is
+-- unachievable the moment it is accepted.
+--
+-- Quests already accepted (player_quests.definition) are deliberately left with
+-- their owners. Deleting one would take a filled quest slot and its progress off
+-- a player, which the customer did not ask for; the player keeps it and can
+-- abandon it. Its goods name renders as «товар #N» once the catalog row is gone.
+DELETE FROM player_quest_offers
+WHERE definition @> '{"Steps":[{"Goods":104}]}'
+   OR definition @> '{"Steps":[{"Goods":114}]}';
 -- +goose StatementEnd
 
 -- +goose Down
@@ -46,10 +71,16 @@ DELETE FROM goods_types   WHERE id IN (104, 114);
 -- Partial by nature: the catalog rows come back, the goods do not.
 --
 -- What Down cannot restore is anything that referenced them — the hold units,
--- the auction lots and their bid history, the 98 market rows. Those were deleted
--- outright (no merge kept the pre-delete values, unlike 0063), so this Down
--- leaves every owner without them; the market rows would come back on a rerun of
--- gen-trade-markets / gen-station-markets, the player cargo would not.
+-- the auction lots and their bid history, the pending quest offers, the 98
+-- market rows. Those were deleted outright (no merge kept the pre-delete values,
+-- unlike 0063), so this Down leaves every owner without them.
+--
+-- Rerunning gen-trade-markets / gen-station-markets does not bring the market
+-- rows back either. While the converter's exclusion stands the generators cannot
+-- emit them at all; and even with it reverted they only rewrite the files
+-- 0042/0044, which goose has long recorded as applied and will not replay. Those
+-- rows return on a database built from scratch, not on this one — restoring them
+-- here means writing them by hand or in a new migration.
 --
 -- Down alone also leaves the catalog inconsistent on purpose: configs/balance.yaml
 -- is generated with both ids excluded, so as long as the converter's exclusion

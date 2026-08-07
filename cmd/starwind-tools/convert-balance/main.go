@@ -61,6 +61,26 @@ type yamlBalance struct {
 	GoodsTypes []yamlGoods `yaml:"goods_types"`
 }
 
+// excludedGoods are catalog entries deliberately dropped on import, keyed by
+// the PHP array key with the source name for grep-ability.
+//
+// Both are the only two entries of the 80-good catalog whose name is not
+// Russian, and both are faithful to the original StarWind data — the label came
+// in with the game, the converter did not mangle it. That makes them the same
+// defect as TASK-140: a foreign-language label in a Russian interface, visible
+// in the hold, on every market, in auction lots and in the trade scanner. The
+// customer chose to drop them from the catalog outright rather than translate
+// (TASK-177), accepting that the units players already held are gone.
+//
+// The exclusion belongs here and not in configs/balance.yaml because that file
+// is generated: a hand-edit is undone by the next converter run. It is enough to
+// do it once, here — gen-trade-markets and gen-station-markets both read the
+// generated YAML, so neither can put the goods back on a market either.
+var excludedGoods = map[int]string{
+	104: "Поцелуй Evening",
+	114: `Gold ring with diamonds "charm"`,
+}
+
 func main() {
 	phpFile := flag.String("php-script", "", "path to starwind/includes/types_prod.php")
 	out := flag.String("out", "configs/balance.yaml", "output YAML path")
@@ -108,34 +128,24 @@ echo json_encode((object)$out, JSON_UNESCAPED_UNICODE);
 		return fmt.Errorf("decode php output: %w", err)
 	}
 
-	rows := make([]phpRow, 0, len(byKey))
-	for k, v := range byKey {
-		id, err := strconv.Atoi(k)
-		if err != nil {
-			return fmt.Errorf("non-integer goods key %q", k)
-		}
-		rows = append(rows, phpRow{Key: id, Entry: v})
+	goods, err := convert(byKey)
+	if err != nil {
+		return err
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Key < rows[j].Key })
+	out := yamlBalance{GoodsTypes: goods}
 
-	out := yamlBalance{GoodsTypes: make([]yamlGoods, 0, len(rows))}
-	for _, r := range rows {
-		out.GoodsTypes = append(out.GoodsTypes, yamlGoods{
-			ID:            r.Key,
-			Name:          r.Entry.Name,
-			MinWarRate:    r.Entry.MinWarRate,
-			MinTradeRate:  r.Entry.MinTradeRate,
-			MinRaceRate:   r.Entry.MinRaceRate,
-			AvgPrice:      r.Entry.AvgPrice,
-			MaxPrice:      r.Entry.MaxPrice,
-			ProductionStd: r.Entry.ProductionStd,
-			Space:         r.Entry.Space,
-			ObjectTypeID:  r.Entry.ObjectTypeID,
-		})
-	}
-
+	// The recipes note used to be appended to the YAML by hand, which meant every
+	// converter run silently dropped it (this one did). It is emitted from here so
+	// it survives regeneration — the same reason the exclusion list lives in the
+	// tool and not in the file.
 	header := "# Auto-generated from includes/types_prod.php by cmd/starwind-tools/convert-balance.\n" +
-		"# Do not edit by hand; rerun the converter against the source PHP file.\n"
+		"# Do not edit by hand; rerun the converter against the source PHP file.\n" +
+		"#\n" +
+		"# Production recipes moved to configs/station_types.yaml (phase 8.15): they are\n" +
+		"# generated from station_goods_types by convert-station-types, while this file\n" +
+		"# is regenerated from types_prod.php by convert-balance (which writes only\n" +
+		"# goods_types). Keeping them on separate files avoids one generator clobbering\n" +
+		"# the other's section.\n"
 
 	body, err := yaml.Marshal(out)
 	if err != nil {
@@ -148,6 +158,40 @@ echo json_encode((object)$out, JSON_UNESCAPED_UNICODE);
 	if err := os.WriteFile(outPath, append([]byte(header), body...), 0o644); err != nil {
 		return fmt.Errorf("write yaml: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "wrote %d goods types to %s\n", len(rows), outPath)
+	fmt.Fprintf(os.Stderr, "wrote %d goods types to %s (%d excluded)\n", len(goods), outPath, len(byKey)-len(goods))
 	return nil
+}
+
+// convert maps the decoded PHP cargo table to the YAML catalog: excluded goods
+// are dropped, the rest are copied through in id order.
+func convert(byKey map[string]phpEntry) ([]yamlGoods, error) {
+	rows := make([]phpRow, 0, len(byKey))
+	for k, v := range byKey {
+		id, err := strconv.Atoi(k)
+		if err != nil {
+			return nil, fmt.Errorf("non-integer goods key %q", k)
+		}
+		if _, skip := excludedGoods[id]; skip {
+			continue
+		}
+		rows = append(rows, phpRow{Key: id, Entry: v})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Key < rows[j].Key })
+
+	goods := make([]yamlGoods, 0, len(rows))
+	for _, r := range rows {
+		goods = append(goods, yamlGoods{
+			ID:            r.Key,
+			Name:          r.Entry.Name,
+			MinWarRate:    r.Entry.MinWarRate,
+			MinTradeRate:  r.Entry.MinTradeRate,
+			MinRaceRate:   r.Entry.MinRaceRate,
+			AvgPrice:      r.Entry.AvgPrice,
+			MaxPrice:      r.Entry.MaxPrice,
+			ProductionStd: r.Entry.ProductionStd,
+			Space:         r.Entry.Space,
+			ObjectTypeID:  r.Entry.ObjectTypeID,
+		})
+	}
+	return goods, nil
 }

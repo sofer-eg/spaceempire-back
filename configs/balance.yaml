@@ -1,5 +1,11 @@
 # Auto-generated from includes/types_prod.php by cmd/starwind-tools/convert-balance.
 # Do not edit by hand; rerun the converter against the source PHP file.
+#
+# Production recipes moved to configs/station_types.yaml (phase 8.15): they are
+# generated from station_goods_types by convert-station-types, while this file
+# is regenerated from types_prod.php by convert-balance (which writes only
+# goods_types). Keeping them on separate files avoids one generator clobbering
+# the other's section.
 goods_types:
     - id: 1
       name: Батарейки
@@ -471,16 +477,6 @@ goods_types:
       production_std: 0
       space: 3
       object_type_id: 10
-    - id: 104
-      name: Поцелуй Evening
-      min_war_rate: 0
-      min_trade_rate: 0
-      min_race_rate: 0
-      avg_price: 1
-      max_price: 1
-      production_std: 0
-      space: 1
-      object_type_id: 10
     - id: 105
       name: Алый Клеймор
       min_war_rate: 0
@@ -513,16 +509,6 @@ goods_types:
       object_type_id: 10
     - id: 113
       name: Снежинка
-      min_war_rate: 0
-      min_trade_rate: 0
-      min_race_rate: 0
-      avg_price: 61
-      max_price: 366
-      production_std: 1
-      space: 1
-      object_type_id: 10
-    - id: 114
-      name: Gold ring with diamonds "charm"
       min_war_rate: 0
       min_trade_rate: 0
       min_race_rate: 0
@@ -801,8 +787,3 @@ goods_types:
       production_std: 1
       space: 1
       object_type_id: 10
-# Production recipes moved to configs/station_types.yaml (phase 8.15): they are
-# generated from station_goods_types by convert-station-types, while this file
-# is regenerated from types_prod.php by convert-balance (which writes only
-# goods_types). Keeping them on separate files avoids one generator clobbering
-# the other's section.

@@ -71,7 +71,7 @@ func (s *Server) handleJumpDrive(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(res.Err, sector.ErrJumpBlockedByAntijump):
 			writeErrorCode(w, http.StatusConflict, CodeJumpBlockedAntijump, "прыжок глушат гипер-помехи")
 		case errors.Is(res.Err, sector.ErrInvalidSector):
-			writeError(w, http.StatusBadRequest, "недопустимый сектор назначения")
+			writeErrorCode(w, http.StatusBadRequest, CodeInvalidSector, "недопустимый сектор назначения")
 		case errors.Is(res.Err, sector.ErrHandoffUnavailable):
 			writeError(w, http.StatusServiceUnavailable, "передача сектора недоступна")
 		case res.Err != nil:

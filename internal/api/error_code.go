@@ -65,6 +65,13 @@ const (
 	// jumping out, as opposed to the destination being invalid.
 	CodeJumpForbiddenSector = "jump_forbidden_sector"
 
+	// CodeInvalidSector — ErrInvalidSector: the destination is the ship's own
+	// sector or unknown to the topology. Coded even though it is the second half
+	// of the 400 pair, because «недопустимый сектор назначения» is a claim about
+	// the destination and a malformed body must not inherit it — the same
+	// elimination the 409 pair was fixed for.
+	CodeInvalidSector = "invalid_sector"
+
 	// CodeCargoInsufficient — cargo.ErrInsufficientQuantity on an install: the
 	// hold ran out of the satellite/generator the command deploys.
 	CodeCargoInsufficient = "cargo_insufficient"

@@ -141,6 +141,7 @@ func TestUnit_ErrorCodeWireValues(t *testing.T) {
 	assert.Equal(t, "jump_drive_required", api.CodeJumpDriveRequired)
 	assert.Equal(t, "shield_required", api.CodeShieldRequired)
 	assert.Equal(t, "jump_forbidden_sector", api.CodeJumpForbiddenSector)
+	assert.Equal(t, "invalid_sector", api.CodeInvalidSector)
 	assert.Equal(t, "cargo_insufficient", api.CodeCargoInsufficient)
 }
 
@@ -163,7 +164,7 @@ func TestUnit_JumpDriveErrorCodes(t *testing.T) {
 		{name: "no drive", reply: sector.ErrEquipmentRequired, status: http.StatusUnprocessableEntity, code: api.CodeJumpDriveRequired, wantCode: true},
 		{name: "shield", reply: sector.ErrShieldRequired, status: http.StatusUnprocessableEntity, code: api.CodeShieldRequired, wantCode: true},
 		{name: "forbidden sector", reply: sector.ErrJumpForbiddenSector, status: http.StatusBadRequest, code: api.CodeJumpForbiddenSector, wantCode: true},
-		{name: "invalid sector", reply: sector.ErrInvalidSector, status: http.StatusBadRequest, wantCode: false},
+		{name: "invalid sector", reply: sector.ErrInvalidSector, status: http.StatusBadRequest, code: api.CodeInvalidSector, wantCode: true},
 		{name: "inbox full", send: sector.ErrInboxFull, status: http.StatusServiceUnavailable, code: api.CodeSectorBusy, wantCode: true},
 		{name: "handoff unavailable", reply: sector.ErrHandoffUnavailable, status: http.StatusServiceUnavailable, wantCode: false},
 		{name: "not found", reply: sector.ErrShipNotFound, status: http.StatusNotFound, wantCode: false},
@@ -251,9 +252,12 @@ var spaceCommandFiles = []string{
 // statement about the source, so the source is what is checked.
 //
 // 220 is every call to the three writers, and all three are counted because all
-// three put a literal in front of the player: 204 writeError + 12 writeErrorCode
+// three put a literal in front of the player: 203 writeError + 13 writeErrorCode
 // + 4 writeIfTransient. (216 — the first two — is the number the commit message
-// quotes; it is the same set minus the transient-write helper.)
+// quotes; it is the same set minus the transient-write helper.) The split moves
+// whenever a message gains or loses a code — coding ErrInvalidSector took one
+// from the first bucket into the second — while the total only moves when a
+// message is added or removed, which is what this assert is for.
 //
 // Known limitation: only a *literal* last argument is inspected. A message built
 // at runtime — fmt.Sprintf("...%d", n) — is neither counted nor checked for

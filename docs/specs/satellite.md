@@ -47,10 +47,13 @@ There is no seed. A player deploys a satellite from a ship's cargo:
    handler owns that constant so the sector package stays free of the goods
    catalog.
 2. Wait for ack (`AckTimeout`) and map the outcome: `ErrShipNotFound` → 404,
-   `ErrForbidden` → 403, `ErrShipDocked` → 400, `cargo.ErrInsufficientQuantity`
-   → 400 "no satellite in cargo", `cargo.ErrGoodsTypeNotFound` → 500,
-   `ErrInstallerUnavailable` → 503 "install unavailable: server misconfigured",
-   ack timeout → 504 with **no compensation** (see atomicity below).
+   `ErrForbidden` → 403, `ErrShipDocked` → 400 + code `ship_docked`,
+   `cargo.ErrInsufficientQuantity` → 400 + code `cargo_insufficient`,
+   `cargo.ErrGoodsTypeNotFound` → 500, `ErrInstallerUnavailable` → 503
+   (uncoded), `ErrInboxFull` → 503 + code `sector_busy`, ack timeout → 504 with
+   **no compensation** (see atomicity below). Messages are Russian since
+   TASK-185; the `code` is what the SPA branches on where one status covers two
+   outcomes (`internal/api/error_code.go`).
 
 `InstallSatelliteCommand.apply` validates ownership and that the ship is not
 docked — a rejected gate never touches the goods. Then `installSatellite` debits

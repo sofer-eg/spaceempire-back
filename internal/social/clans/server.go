@@ -60,7 +60,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux, authMW Middleware) {
 func (s *Server) handleSetRole(w http.ResponseWriter, r *http.Request) {
 	actor, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	clanID, ok := parseClanID(w, r)
@@ -69,7 +69,7 @@ func (s *Server) handleSetRole(w http.ResponseWriter, r *http.Request) {
 	}
 	var req roleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if err := s.svc.SetRole(r.Context(), actor, clanID, domain.PlayerID(req.PlayerID), req.Role); err != nil {
@@ -95,12 +95,12 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	player, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	clan, err := s.svc.Create(r.Context(), player, req.Name, req.Tag)
@@ -121,7 +121,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 	player, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	detail, err := s.svc.MyClan(r.Context(), player)
@@ -139,7 +139,7 @@ func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMyInvites(w http.ResponseWriter, r *http.Request) {
 	player, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	invites, err := s.svc.MyInvitations(r.Context(), player)
@@ -170,7 +170,7 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	player, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	clanID, ok := parseClanID(w, r)
@@ -179,7 +179,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	var req playerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if err := s.svc.Invite(r.Context(), player, clanID, domain.PlayerID(req.PlayerID)); err != nil {
@@ -192,7 +192,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	player, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	clanID, ok := parseClanID(w, r)
@@ -209,7 +209,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLeave(w http.ResponseWriter, r *http.Request) {
 	player, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	clanID, ok := parseClanID(w, r)
@@ -226,7 +226,7 @@ func (s *Server) handleLeave(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleKick(w http.ResponseWriter, r *http.Request) {
 	actor, ok := auth.PlayerIDFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
+		writeError(w, http.StatusUnauthorized, "не авторизован")
 		return
 	}
 	clanID, ok := parseClanID(w, r)
@@ -235,7 +235,7 @@ func (s *Server) handleKick(w http.ResponseWriter, r *http.Request) {
 	}
 	var req playerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if err := s.svc.Kick(r.Context(), actor, clanID, domain.PlayerID(req.PlayerID)); err != nil {
@@ -250,7 +250,7 @@ func (s *Server) handleKick(w http.ResponseWriter, r *http.Request) {
 func parseClanID(w http.ResponseWriter, r *http.Request) (domain.ClanID, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid clan id")
+		writeError(w, http.StatusBadRequest, "некорректный идентификатор клана")
 		return 0, false
 	}
 	return domain.ClanID(id), true
@@ -281,7 +281,7 @@ func (s *Server) writeServiceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	default:
 		s.logger.Error("clans handler", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeError(w, http.StatusInternalServerError, "внутренняя ошибка")
 	}
 }
 

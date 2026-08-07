@@ -58,10 +58,10 @@ func (s *Service) Create(ctx context.Context, leader domain.PlayerID, name, tag 
 	name = strings.TrimSpace(name)
 	tag = strings.TrimSpace(tag)
 	if l := len(name); l < minNameLen || l > maxNameLen {
-		return Clan{}, fmt.Errorf("%w: name length must be %d..%d", ErrInvalidInput, minNameLen, maxNameLen)
+		return Clan{}, fmt.Errorf("%w: длина названия должна быть от %d до %d символов", ErrInvalidInput, minNameLen, maxNameLen)
 	}
 	if l := len(tag); l < minTagLen || l > maxTagLen {
-		return Clan{}, fmt.Errorf("%w: tag length must be %d..%d", ErrInvalidInput, minTagLen, maxTagLen)
+		return Clan{}, fmt.Errorf("%w: длина тега должна быть от %d до %d символов", ErrInvalidInput, minTagLen, maxTagLen)
 	}
 
 	clanID, err := s.repo.CreateClanWithLeader(ctx, name, tag, leader)

@@ -15,7 +15,7 @@ import (
 func (s *Server) handleExternalDock(w http.ResponseWriter, r *http.Request) {
 	var req dto.ExternalDockRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 
@@ -23,7 +23,7 @@ func (s *Server) handleExternalDock(w http.ResponseWriter, r *http.Request) {
 
 	currentSector, ok := s.router.LookupShipSector(domain.ShipID(req.ShipID))
 	if !ok {
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 		return
 	}
 
@@ -38,11 +38,11 @@ func (s *Server) handleExternalDock(w http.ResponseWriter, r *http.Request) {
 		Reply: reply,
 	})
 	if errors.Is(err, sector.ErrInboxFull) {
-		writeError(w, http.StatusServiceUnavailable, "sector busy")
+		writeError(w, http.StatusServiceUnavailable, "сектор занят")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -51,34 +51,34 @@ func (s *Server) handleExternalDock(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case res := <-reply:
-		writeExternalDockResult(w, res.Err)
+		s.writeExternalDockResult(w, res.Err)
 	case <-ctx.Done():
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }
 
-func writeExternalDockResult(w http.ResponseWriter, err error) {
+func (s *Server) writeExternalDockResult(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, sector.ErrShipNotFound):
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 	case errors.Is(err, sector.ErrForbidden):
-		writeError(w, http.StatusForbidden, "ship belongs to another player")
+		writeError(w, http.StatusForbidden, "чужой корабль")
 	case errors.Is(err, sector.ErrAlreadyDocked):
-		writeError(w, http.StatusConflict, "already docked")
+		writeError(w, http.StatusConflict, "корабль уже пристыкован")
 	case errors.Is(err, sector.ErrEquipmentRequired):
-		writeError(w, http.StatusBadRequest, "up_exdocking module required")
+		writeError(w, http.StatusBadRequest, "нужен модуль внешней стыковки (up_exdocking)")
 	case errors.Is(err, sector.ErrTargetNotFound):
-		writeError(w, http.StatusNotFound, "dock target not found")
+		writeError(w, http.StatusNotFound, "цель стыковки не найдена")
 	case errors.Is(err, sector.ErrDockSelf):
-		writeError(w, http.StatusBadRequest, "cannot dock to self")
+		writeError(w, http.StatusBadRequest, "нельзя пристыковаться к самому себе")
 	case errors.Is(err, sector.ErrTargetSectorMismatch):
-		writeError(w, http.StatusBadRequest, "target in different sector")
+		writeError(w, http.StatusBadRequest, "цель в другом секторе")
 	case errors.Is(err, sector.ErrDockOutOfRange):
-		writeError(w, http.StatusBadRequest, "out of dock range")
+		writeError(w, http.StatusBadRequest, "слишком далеко для стыковки")
 	case errors.Is(err, sector.ErrDockHostile):
-		writeError(w, http.StatusForbidden, "host ship is hostile")
+		writeError(w, http.StatusForbidden, "корабль-носитель враждебен")
 	case err != nil:
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 	default:
 		writeJSON(w, http.StatusOK, dto.ExternalDockResponse{OK: true})
 	}

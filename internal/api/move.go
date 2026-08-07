@@ -15,7 +15,7 @@ import (
 func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 	var req dto.MoveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 
@@ -32,7 +32,7 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 	}
 	currentSector, ok := s.router.LookupShipSector(domain.ShipID(req.ShipID))
 	if !ok {
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 		return
 	}
 
@@ -45,11 +45,11 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		Reply:     reply,
 	})
 	if errors.Is(err, sector.ErrInboxFull) {
-		writeError(w, http.StatusServiceUnavailable, "sector busy")
+		writeError(w, http.StatusServiceUnavailable, "сектор занят")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -60,17 +60,17 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 	case res := <-reply:
 		switch {
 		case errors.Is(res.Err, sector.ErrShipNotFound):
-			writeError(w, http.StatusNotFound, "ship not found")
+			writeError(w, http.StatusNotFound, "корабль не найден")
 		case errors.Is(res.Err, sector.ErrForbidden):
-			writeError(w, http.StatusForbidden, "ship belongs to another player")
+			writeError(w, http.StatusForbidden, "чужой корабль")
 		case errors.Is(res.Err, sector.ErrShipDocked):
-			writeError(w, http.StatusConflict, "ship is docked")
+			writeError(w, http.StatusConflict, "корабль пристыкован")
 		case res.Err != nil:
-			writeError(w, http.StatusInternalServerError, res.Err.Error())
+			s.writeInternalError(w, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.MoveResponse{OK: true})
 		}
 	case <-ctx.Done():
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

@@ -112,7 +112,7 @@ maps, mirroring `install-jammer`:
    `ErrShipNotFound` → 404, `ErrForbidden` → 403, `ErrShipDocked` → 400,
    `ErrEquipmentRequired` → 422, `ErrDroneCapReached` → 422,
    `ErrInvalidAttackTarget` → 400, `cargo.ErrInsufficientQuantity` → 400
-   "not enough drones in cargo", `cargo.ErrGoodsTypeNotFound` → 500,
+   «в трюме не хватает дронов», `cargo.ErrGoodsTypeNotFound` → 500,
    `ErrOrdnanceUnavailable` → 503, ack timeout → 504 with **no
    compensation** (see §2.1).
 

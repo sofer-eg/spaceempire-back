@@ -82,16 +82,16 @@ func launchActionEnergyCost(cat EquipmentCatalog) int {
 func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 	var req dto.LaunchMissileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 || req.TargetRef.ID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 	goodsType, ok := missileGoodsType(req.Class)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid missile class")
+		writeError(w, http.StatusBadRequest, "недопустимый класс ракеты")
 		return
 	}
 	// TASK-113 FR-06 / TASK-110 / TASK-111: a missile may strike a ship (not
@@ -105,13 +105,13 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case targetKind == domain.EntityKindShip:
 		if req.TargetRef.ID == req.ShipID {
-			writeError(w, http.StatusBadRequest, "cannot target self")
+			writeError(w, http.StatusBadRequest, "нельзя выбрать целью свой корабль")
 			return
 		}
 	case sector.IsMissileTargetKind(targetKind):
 		// ok — the worker resolves the target's liveness/position.
 	default:
-		writeError(w, http.StatusBadRequest, "invalid target kind")
+		writeError(w, http.StatusBadRequest, "недопустимый тип цели")
 		return
 	}
 
@@ -138,10 +138,10 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, sector.ErrInboxFull) {
-			writeError(w, http.StatusServiceUnavailable, "sector busy")
+			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -153,28 +153,28 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 		if res.Err != nil {
 			switch {
 			case errors.Is(res.Err, sector.ErrShipNotFound):
-				writeError(w, http.StatusNotFound, "ship not found")
+				writeError(w, http.StatusNotFound, "корабль не найден")
 			case errors.Is(res.Err, sector.ErrForbidden):
-				writeError(w, http.StatusForbidden, "ship belongs to another player")
+				writeError(w, http.StatusForbidden, "чужой корабль")
 			case errors.Is(res.Err, sector.ErrShipDocked):
-				writeError(w, http.StatusBadRequest, "ship is docked")
+				writeError(w, http.StatusBadRequest, "корабль пристыкован")
 			case errors.Is(res.Err, sector.ErrEquipmentRequired):
-				writeError(w, http.StatusUnprocessableEntity, "ship has no missile launcher")
+				writeError(w, http.StatusUnprocessableEntity, "на корабле нет ракетной установки")
 			case errors.Is(res.Err, sector.ErrNotEnoughEnergy):
-				writeError(w, http.StatusUnprocessableEntity, "not enough energy to launch")
+				writeError(w, http.StatusUnprocessableEntity, "не хватает энергии для запуска")
 			case errors.Is(res.Err, sector.ErrInvalidAttackTarget):
-				writeError(w, http.StatusBadRequest, "invalid missile target")
+				writeError(w, http.StatusBadRequest, "недопустимая цель для ракеты")
 			case errors.Is(res.Err, cargo.ErrInsufficientQuantity):
-				writeError(w, http.StatusBadRequest, "no missile in cargo")
+				writeError(w, http.StatusBadRequest, "в трюме нет ракет")
 			case errors.Is(res.Err, cargo.ErrGoodsTypeNotFound):
-				writeError(w, http.StatusInternalServerError, "missile goods type missing")
+				writeError(w, http.StatusInternalServerError, "в каталоге товаров нет ракеты")
 			case errors.Is(res.Err, sector.ErrOrdnanceUnavailable):
 				// Misconfiguration, not a player error: the worker has no
 				// transactional ordnance, so it refuses to fire rather than launch
 				// for free. 503 — retrying may work after a fix.
-				writeError(w, http.StatusServiceUnavailable, "launch unavailable: server misconfigured")
+				writeError(w, http.StatusServiceUnavailable, "запуск недоступен: ошибка конфигурации сервера")
 			default:
-				writeError(w, http.StatusInternalServerError, res.Err.Error())
+				s.writeInternalError(w, res.Err)
 			}
 			return
 		}
@@ -187,6 +187,6 @@ func (s *Server) handleLaunchMissile(w http.ResponseWriter, r *http.Request) {
 		// with the launch, so whether the command has already applied or is still
 		// queued, ammunition and missile agree. 504 means "outcome unknown" — the
 		// player checks their hold and retries if nothing was fired.
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

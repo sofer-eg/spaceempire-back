@@ -21,11 +21,11 @@ import (
 func (s *Server) handlePickupContainer(w http.ResponseWriter, r *http.Request) {
 	var req dto.PickupContainerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 || req.ContainerID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 
@@ -44,10 +44,10 @@ func (s *Server) handlePickupContainer(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, sector.ErrInboxFull) {
-			writeError(w, http.StatusServiceUnavailable, "sector busy")
+			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -57,25 +57,25 @@ func (s *Server) handlePickupContainer(w http.ResponseWriter, r *http.Request) {
 	select {
 	case res := <-reply:
 		if res.Err != nil {
-			writePickupError(w, res.Err)
+			s.writePickupError(w, res.Err)
 			return
 		}
 		writeJSON(w, http.StatusOK, dto.PickupContainerResponse{OK: true})
 	case <-ctx.Done():
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }
 
-func writePickupError(w http.ResponseWriter, err error) {
+func (s *Server) writePickupError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, sector.ErrShipNotFound):
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 	case errors.Is(err, sector.ErrForbidden):
-		writeError(w, http.StatusForbidden, "ship belongs to another player")
+		writeError(w, http.StatusForbidden, "чужой корабль")
 	case errors.Is(err, sector.ErrContainerNotFound):
-		writeError(w, http.StatusNotFound, "container not found")
+		writeError(w, http.StatusNotFound, "контейнер не найден")
 	case errors.Is(err, sector.ErrContainerOutOfRange):
-		writeError(w, http.StatusBadRequest, "container out of range")
+		writeError(w, http.StatusBadRequest, "контейнер слишком далеко")
 	case errors.Is(err, containers.ErrContainerNotFound):
 		// Defence in depth, and currently unreachable: the worker translates this
 		// sentinel into sector.ErrContainerNotFound (and sweeps the stale RAM entry)
@@ -83,11 +83,11 @@ func writePickupError(w http.ResponseWriter, err error) {
 		// translation lives in another package and losing it would silently turn
 		// "this is not there" back into a 500 — do not delete it just because the
 		// caller is not obvious.
-		writeError(w, http.StatusNotFound, "container not found")
+		writeError(w, http.StatusNotFound, "контейнер не найден")
 	case errors.Is(err, containers.ErrNoSpace):
-		writeError(w, http.StatusConflict, "not enough cargo space")
-	case writeIfTransient(w, err, "pickup could not be recorded, try again"):
+		writeError(w, http.StatusConflict, "в трюме не хватает места")
+	case writeIfTransient(w, err, "не удалось записать подбор груза, попробуйте ещё раз"):
 	default:
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 	}
 }

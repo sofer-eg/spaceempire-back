@@ -36,18 +36,18 @@ func hackActionEnergyCost(cat EquipmentCatalog) int {
 func (s *Server) handleHack(w http.ResponseWriter, r *http.Request) {
 	var req dto.HackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 || req.TargetRef.ID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 	playerID, _ := auth.PlayerIDFromContext(r.Context())
 
 	currentSector, ok := s.router.LookupShipSector(domain.ShipID(req.ShipID))
 	if !ok {
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 		return
 	}
 
@@ -63,11 +63,11 @@ func (s *Server) handleHack(w http.ResponseWriter, r *http.Request) {
 		Reply:      reply,
 	})
 	if errors.Is(err, sector.ErrInboxFull) {
-		writeError(w, http.StatusServiceUnavailable, "sector busy")
+		writeError(w, http.StatusServiceUnavailable, "сектор занят")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -77,26 +77,26 @@ func (s *Server) handleHack(w http.ResponseWriter, r *http.Request) {
 	case res := <-reply:
 		switch {
 		case errors.Is(res.Err, sector.ErrShipNotFound):
-			writeError(w, http.StatusNotFound, "ship not found")
+			writeError(w, http.StatusNotFound, "корабль не найден")
 		case errors.Is(res.Err, sector.ErrForbidden):
-			writeError(w, http.StatusForbidden, "ship belongs to another player")
+			writeError(w, http.StatusForbidden, "чужой корабль")
 		case errors.Is(res.Err, sector.ErrEquipmentRequired):
-			writeError(w, http.StatusUnprocessableEntity, "ship has no hack module")
+			writeError(w, http.StatusUnprocessableEntity, "на корабле нет модуля взлома")
 		case errors.Is(res.Err, sector.ErrInvalidAttackTarget):
-			writeError(w, http.StatusBadRequest, "invalid hack target")
+			writeError(w, http.StatusBadRequest, "недопустимая цель для взлома")
 		case errors.Is(res.Err, sector.ErrHackOutOfRange):
-			writeError(w, http.StatusUnprocessableEntity, "trade station out of range")
+			writeError(w, http.StatusUnprocessableEntity, "торговая станция слишком далеко")
 		case errors.Is(res.Err, sector.ErrNotEnoughEnergy):
-			writeError(w, http.StatusUnprocessableEntity, "not enough energy to hack")
+			writeError(w, http.StatusUnprocessableEntity, "не хватает энергии для взлома")
 		case errors.Is(res.Err, sector.ErrHackTooLittleGoods):
-			writeError(w, http.StatusUnprocessableEntity, "station has too little goods to hack")
-		case writeIfTransient(w, res.Err, "hack could not be recorded, try again"):
+			writeError(w, http.StatusUnprocessableEntity, "на станции слишком мало товара для взлома")
+		case writeIfTransient(w, res.Err, "не удалось записать взлом, попробуйте ещё раз"):
 		case res.Err != nil:
-			writeError(w, http.StatusInternalServerError, res.Err.Error())
+			s.writeInternalError(w, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.HackResponse{OK: true, Robbed: res.Robbed})
 		}
 	case <-ctx.Done():
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

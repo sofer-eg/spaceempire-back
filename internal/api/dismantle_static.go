@@ -24,18 +24,18 @@ import (
 func (s *Server) handleDismantleStatic(w http.ResponseWriter, r *http.Request) {
 	var req dto.DismantleStaticRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 || req.Target.ID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 
 	kind := domain.EntityKind(req.Target.Kind)
 	gtype, ok := dismantleGoodsType(kind)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "object cannot be dismantled")
+		writeError(w, http.StatusBadRequest, "этот объект нельзя демонтировать")
 		return
 	}
 
@@ -56,10 +56,10 @@ func (s *Server) handleDismantleStatic(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, sector.ErrInboxFull) {
-			writeError(w, http.StatusServiceUnavailable, "sector busy")
+			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -70,27 +70,27 @@ func (s *Server) handleDismantleStatic(w http.ResponseWriter, r *http.Request) {
 	case res := <-reply:
 		switch {
 		case errors.Is(res.Err, sector.ErrShipNotFound):
-			writeError(w, http.StatusNotFound, "ship not found")
+			writeError(w, http.StatusNotFound, "корабль не найден")
 		case errors.Is(res.Err, sector.ErrDeployedNotFound):
-			writeError(w, http.StatusNotFound, "object not found")
+			writeError(w, http.StatusNotFound, "объект не найден")
 		case errors.Is(res.Err, sector.ErrForbidden):
-			writeError(w, http.StatusForbidden, "object belongs to another player")
+			writeError(w, http.StatusForbidden, "объект принадлежит другому игроку")
 		case errors.Is(res.Err, sector.ErrShipDocked):
-			writeError(w, http.StatusBadRequest, "ship is docked")
+			writeError(w, http.StatusBadRequest, "корабль пристыкован")
 		case errors.Is(res.Err, sector.ErrNotDismantlable):
-			writeError(w, http.StatusBadRequest, "object cannot be dismantled")
+			writeError(w, http.StatusBadRequest, "этот объект нельзя демонтировать")
 		case errors.Is(res.Err, sector.ErrDeployedOutOfRange):
-			writeError(w, http.StatusUnprocessableEntity, "object out of range")
+			writeError(w, http.StatusUnprocessableEntity, "объект слишком далеко")
 		case errors.Is(res.Err, cargo.ErrNoSpace):
-			writeError(w, http.StatusUnprocessableEntity, "no room in cargo")
+			writeError(w, http.StatusUnprocessableEntity, "в трюме нет места")
 		case errors.Is(res.Err, cargo.ErrGoodsTypeNotFound):
-			writeError(w, http.StatusInternalServerError, "goods type missing")
+			writeError(w, http.StatusInternalServerError, "в каталоге товаров нет этого товара")
 		case errors.Is(res.Err, sector.ErrInstallerUnavailable):
 			// Misconfiguration, not a player error: without the transactional
 			// installer the worker refuses to remove an object it cannot pay for.
-			writeError(w, http.StatusServiceUnavailable, "dismantle unavailable: server misconfigured")
+			writeError(w, http.StatusServiceUnavailable, "демонтаж недоступен: ошибка конфигурации сервера")
 		case res.Err != nil:
-			writeError(w, http.StatusInternalServerError, res.Err.Error())
+			s.writeInternalError(w, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.DismantleStaticResponse{OK: true})
 		}
@@ -98,7 +98,7 @@ func (s *Server) handleDismantleStatic(w http.ResponseWriter, r *http.Request) {
 		// No compensation to run: the credit and the delete commit together inside
 		// the worker, so hold and object agree either way. 504 means "outcome
 		// unknown" — the player checks the radar and their hold.
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }
 

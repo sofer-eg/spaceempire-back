@@ -32,11 +32,11 @@ const JammerGoodsType domain.GoodsTypeID = 27
 func (s *Server) handleInstallJammer(w http.ResponseWriter, r *http.Request) {
 	var req dto.InstallJammerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 
@@ -58,10 +58,10 @@ func (s *Server) handleInstallJammer(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, sector.ErrInboxFull) {
-			writeError(w, http.StatusServiceUnavailable, "sector busy")
+			writeErrorCode(w, http.StatusServiceUnavailable, CodeSectorBusy, "сектор занят")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -73,22 +73,22 @@ func (s *Server) handleInstallJammer(w http.ResponseWriter, r *http.Request) {
 		if res.Err != nil {
 			switch {
 			case errors.Is(res.Err, sector.ErrShipNotFound):
-				writeError(w, http.StatusNotFound, "ship not found")
+				writeError(w, http.StatusNotFound, "корабль не найден")
 			case errors.Is(res.Err, sector.ErrForbidden):
-				writeError(w, http.StatusForbidden, "ship belongs to another player")
+				writeError(w, http.StatusForbidden, "чужой корабль")
 			case errors.Is(res.Err, sector.ErrShipDocked):
-				writeError(w, http.StatusBadRequest, "ship is docked")
+				writeErrorCode(w, http.StatusBadRequest, CodeShipDocked, "корабль пристыкован")
 			case errors.Is(res.Err, cargo.ErrInsufficientQuantity):
-				writeError(w, http.StatusBadRequest, "no jammer in cargo")
+				writeErrorCode(w, http.StatusBadRequest, CodeCargoInsufficient, "в трюме нет генераторов гипер-помех")
 			case errors.Is(res.Err, cargo.ErrGoodsTypeNotFound):
-				writeError(w, http.StatusInternalServerError, "jammer goods type missing")
+				writeError(w, http.StatusInternalServerError, "в каталоге товаров нет генератора гипер-помех")
 			case errors.Is(res.Err, sector.ErrInstallerUnavailable):
 				// Misconfiguration, not a player error: the worker has no
 				// transactional installer, so it refuses to deploy rather than
 				// build one for free. 503 — retrying may work after a fix.
-				writeError(w, http.StatusServiceUnavailable, "install unavailable: server misconfigured")
+				writeError(w, http.StatusServiceUnavailable, "установка недоступна: ошибка конфигурации сервера")
 			default:
-				writeError(w, http.StatusInternalServerError, res.Err.Error())
+				s.writeInternalError(w, res.Err)
 			}
 			return
 		}
@@ -101,6 +101,6 @@ func (s *Server) handleInstallJammer(w http.ResponseWriter, r *http.Request) {
 		// inside the worker, so whether the command has already applied or is
 		// still queued, goods and generator agree. 504 means "outcome unknown" —
 		// the player checks their hold and retries if nothing was deployed.
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

@@ -154,8 +154,8 @@ func TestUnit_LaunchMissile_ContainerTargetForwarded(t *testing.T) {
 	// 400 from the WORKER (no such container in the sector), which is what proves
 	// the container kind crossed the handler's kind switch.
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	require.Contains(t, rec.Body.String(), "invalid missile target")
-	require.NotContains(t, rec.Body.String(), "invalid target kind")
+	require.Contains(t, rec.Body.String(), "недопустимая цель для ракеты")
+	require.NotContains(t, rec.Body.String(), "недопустимый тип цели")
 	require.EqualValues(t, 5, ord.left(api.MissileGoodsType), "a refused launch spends nothing")
 }
 
@@ -179,10 +179,10 @@ func TestUnit_LaunchMissile_StaticTargetForwarded(t *testing.T) {
 	})
 
 	// 400 from the worker (not from the handler boundary) is what proves the
-	// static kind crossed it: the handler answers "invalid missile target" only
+	// static kind crossed it: the handler answers «недопустимая цель для ракеты» only
 	// after the worker's resolve fails.
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	require.Contains(t, rec.Body.String(), "invalid missile target")
+	require.Contains(t, rec.Body.String(), "недопустимая цель для ракеты")
 	st := ord.snapshot()
 	require.EqualValues(t, 3, ord.left(api.MissileGoodsType), "magazine untouched")
 	require.Equal(t, 0, st.debits)
@@ -414,7 +414,7 @@ func TestUnit_LaunchMissile_InvalidClass(t *testing.T) {
 			})
 
 			require.Equal(t, http.StatusBadRequest, rec.Code)
-			assert.Contains(t, rec.Body.String(), "invalid missile class")
+			assert.Contains(t, rec.Body.String(), "недопустимый класс ракеты")
 			assert.Empty(t, ord.chargedGoods(), "rejected before the ordnance is reached")
 			assert.EqualValues(t, 5, ord.left(api.MissileGoodsType))
 		})

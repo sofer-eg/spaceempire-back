@@ -14,12 +14,12 @@ import (
 
 func (s *Server) handleSetCourse(w http.ResponseWriter, r *http.Request) {
 	if s.pathRouter == nil {
-		writeError(w, http.StatusServiceUnavailable, "autopilot unavailable")
+		writeError(w, http.StatusServiceUnavailable, "автопилот недоступен")
 		return
 	}
 	var req dto.SetCourseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 
@@ -27,13 +27,13 @@ func (s *Server) handleSetCourse(w http.ResponseWriter, r *http.Request) {
 
 	currentSector, ok := s.router.LookupShipSector(domain.ShipID(req.ShipID))
 	if !ok {
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 		return
 	}
 
 	hops, ok := s.pathRouter.Hops(currentSector, domain.SectorID(req.SectorID))
 	if !ok {
-		writeError(w, http.StatusBadRequest, "destination unreachable")
+		writeError(w, http.StatusBadRequest, "маршрут до цели не найден")
 		return
 	}
 
@@ -55,11 +55,11 @@ func (s *Server) handleSetCourse(w http.ResponseWriter, r *http.Request) {
 		Reply:    reply,
 	})
 	if errors.Is(err, sector.ErrInboxFull) {
-		writeError(w, http.StatusServiceUnavailable, "sector busy")
+		writeError(w, http.StatusServiceUnavailable, "сектор занят")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -70,19 +70,19 @@ func (s *Server) handleSetCourse(w http.ResponseWriter, r *http.Request) {
 	case res := <-reply:
 		switch {
 		case errors.Is(res.Err, sector.ErrShipNotFound):
-			writeError(w, http.StatusNotFound, "ship not found")
+			writeError(w, http.StatusNotFound, "корабль не найден")
 		case errors.Is(res.Err, sector.ErrForbidden):
-			writeError(w, http.StatusForbidden, "ship belongs to another player")
+			writeError(w, http.StatusForbidden, "чужой корабль")
 		case errors.Is(res.Err, sector.ErrShipDocked):
-			writeError(w, http.StatusConflict, "ship is docked")
+			writeError(w, http.StatusConflict, "корабль пристыкован")
 		case errors.Is(res.Err, sector.ErrEquipmentRequired):
-			writeError(w, http.StatusUnprocessableEntity, "autopilot module required")
+			writeError(w, http.StatusUnprocessableEntity, "нужен модуль автопилота")
 		case res.Err != nil:
-			writeError(w, http.StatusInternalServerError, res.Err.Error())
+			s.writeInternalError(w, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.SetCourseResponse{Hops: hops})
 		}
 	case <-ctx.Done():
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

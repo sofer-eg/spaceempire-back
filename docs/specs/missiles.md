@@ -460,7 +460,7 @@ Handler боеприпасом не владеет вообще -- он толь
 3. ждёт ack (`AckTimeout`) и маппит: `ErrShipNotFound` → 404,
    `ErrForbidden` → 403, `ErrShipDocked` → 400, `ErrEquipmentRequired` →
    422, `ErrNotEnoughEnergy` → 422, `ErrInvalidAttackTarget` → 400,
-   `cargo.ErrInsufficientQuantity` → 400 "no missile in cargo",
+   `cargo.ErrInsufficientQuantity` → 400 «в трюме нет ракет»,
    `cargo.ErrGoodsTypeNotFound` → 500, `ErrOrdnanceUnavailable` → 503,
    таймаут ack → 504 **без компенсации**;
 4. OK → 200 с MissileID.
@@ -556,14 +556,14 @@ Response (200):
 { "ok": true, "missileID": 42 }
 ```
 
-Ошибки:
-- `400` invalid json / invalid missile class / invalid target (non-ship /
-  self) / no missile in cargo
-- `403` ship belongs to another player
-- `404` ship not found / target not found
-- `503` sector busy / cargo service unavailable
-- `504` command timeout
-- `500` other
+Ошибки (сообщения с TASK-185 русские, тело — `{"error": "…"}`):
+- `400` некорректный запрос / недопустимый класс ракеты / недопустимая цель
+  (не корабль / сам себе) / в трюме нет ракет
+- `403` чужой корабль
+- `404` корабль не найден / цель не найдена
+- `503` сектор занят / служба груза недоступна
+- `504` таймаут команды
+- `500` внутренняя ошибка сервера (реальная ошибка уходит в лог, не игроку)
 
 ### Аутентификация
 
@@ -669,7 +669,7 @@ DTO для Missile:
 | Тест | Запрос | Ожидание |
 |---|---|---|
 | LaunchMissile_OK | player owns ship, есть missile в cargo, target=ship | 200, cargo Missile -=1 (списание внутри воркера) |
-| LaunchMissile_NoCargo | в cargo нет ракет | 400 "no missile in cargo" |
+| LaunchMissile_NoCargo | в cargo нет ракет | 400 «в трюме нет ракет» |
 | LaunchMissile_NonTargetableKind | target.kind=container | 400, ordnance не вызван |
 | LaunchMissile_NotOwner | player A → ship B | 403 |
 | LaunchMissile_SectorRejectsKeepsCargo | sector reply Err=ErrInvalidAttackTarget | трюм не тронут (гейт до списания), refund не нужен |

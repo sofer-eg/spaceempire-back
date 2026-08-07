@@ -66,16 +66,16 @@ func torpedoLaunchEnergyCost(cat EquipmentCatalog) int {
 func (s *Server) handleLaunchTorpedo(w http.ResponseWriter, r *http.Request) {
 	var req dto.LaunchTorpedoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 || req.TargetRef.ID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 	goodsType, ok := torpedoGoodsType(req.Class)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid torpedo class")
+		writeError(w, http.StatusBadRequest, "недопустимый класс торпеды")
 		return
 	}
 
@@ -101,10 +101,10 @@ func (s *Server) handleLaunchTorpedo(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, sector.ErrInboxFull) {
-			writeError(w, http.StatusServiceUnavailable, "sector busy")
+			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -116,25 +116,25 @@ func (s *Server) handleLaunchTorpedo(w http.ResponseWriter, r *http.Request) {
 		if res.Err != nil {
 			switch {
 			case errors.Is(res.Err, sector.ErrShipNotFound):
-				writeError(w, http.StatusNotFound, "ship not found")
+				writeError(w, http.StatusNotFound, "корабль не найден")
 			case errors.Is(res.Err, sector.ErrForbidden):
-				writeError(w, http.StatusForbidden, "ship belongs to another player")
+				writeError(w, http.StatusForbidden, "чужой корабль")
 			case errors.Is(res.Err, sector.ErrShipDocked):
-				writeError(w, http.StatusBadRequest, "ship is docked")
+				writeError(w, http.StatusBadRequest, "корабль пристыкован")
 			case errors.Is(res.Err, sector.ErrEquipmentRequired):
-				writeError(w, http.StatusUnprocessableEntity, "ship has no torpedo launcher")
+				writeError(w, http.StatusUnprocessableEntity, "на корабле нет торпедного аппарата")
 			case errors.Is(res.Err, sector.ErrNotEnoughEnergy):
-				writeError(w, http.StatusUnprocessableEntity, "not enough energy to launch")
+				writeError(w, http.StatusUnprocessableEntity, "не хватает энергии для запуска")
 			case errors.Is(res.Err, sector.ErrInvalidAttackTarget):
-				writeError(w, http.StatusBadRequest, "invalid torpedo target")
+				writeError(w, http.StatusBadRequest, "недопустимая цель для торпеды")
 			case errors.Is(res.Err, cargo.ErrInsufficientQuantity):
-				writeError(w, http.StatusBadRequest, "no torpedo in cargo")
+				writeError(w, http.StatusBadRequest, "в трюме нет торпед")
 			case errors.Is(res.Err, cargo.ErrGoodsTypeNotFound):
-				writeError(w, http.StatusInternalServerError, "torpedo goods type missing")
+				writeError(w, http.StatusInternalServerError, "в каталоге товаров нет торпеды")
 			case errors.Is(res.Err, sector.ErrOrdnanceUnavailable):
-				writeError(w, http.StatusServiceUnavailable, "launch unavailable: server misconfigured")
+				writeError(w, http.StatusServiceUnavailable, "запуск недоступен: ошибка конфигурации сервера")
 			default:
-				writeError(w, http.StatusInternalServerError, res.Err.Error())
+				s.writeInternalError(w, res.Err)
 			}
 			return
 		}
@@ -146,6 +146,6 @@ func (s *Server) handleLaunchTorpedo(w http.ResponseWriter, r *http.Request) {
 		// No compensation to run: the debit and the torpedo row commit together
 		// inside the worker, so ammunition and torpedo agree either way. 504 means
 		// "outcome unknown".
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

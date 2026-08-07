@@ -20,11 +20,11 @@ import (
 func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 	var req dto.MineRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 
@@ -32,7 +32,7 @@ func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 
 	currentSector, ok := s.router.LookupShipSector(domain.ShipID(req.ShipID))
 	if !ok {
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 		return
 	}
 
@@ -50,11 +50,11 @@ func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 		Reply:    reply,
 	})
 	if errors.Is(err, sector.ErrInboxFull) {
-		writeError(w, http.StatusServiceUnavailable, "sector busy")
+		writeError(w, http.StatusServiceUnavailable, "сектор занят")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -64,23 +64,23 @@ func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 	case res := <-reply:
 		switch {
 		case errors.Is(res.Err, sector.ErrShipNotFound):
-			writeError(w, http.StatusNotFound, "ship not found")
+			writeError(w, http.StatusNotFound, "корабль не найден")
 		case errors.Is(res.Err, sector.ErrForbidden):
-			writeError(w, http.StatusForbidden, "ship belongs to another player")
+			writeError(w, http.StatusForbidden, "чужой корабль")
 		case errors.Is(res.Err, sector.ErrShipDocked):
-			writeError(w, http.StatusBadRequest, "ship is docked")
+			writeError(w, http.StatusBadRequest, "корабль пристыкован")
 		case errors.Is(res.Err, sector.ErrEquipmentRequired):
-			writeError(w, http.StatusUnprocessableEntity, "ship has no mining drill")
+			writeError(w, http.StatusUnprocessableEntity, "на корабле нет бура")
 		case errors.Is(res.Err, sector.ErrAsteroidNotFound):
-			writeError(w, http.StatusNotFound, "asteroid not found")
+			writeError(w, http.StatusNotFound, "астероид не найден")
 		case errors.Is(res.Err, sector.ErrAsteroidOutOfRange):
-			writeError(w, http.StatusBadRequest, "asteroid out of range")
+			writeError(w, http.StatusBadRequest, "астероид слишком далеко")
 		case res.Err != nil:
-			writeError(w, http.StatusInternalServerError, res.Err.Error())
+			s.writeInternalError(w, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.MineResponse{OK: true})
 		}
 	case <-ctx.Done():
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

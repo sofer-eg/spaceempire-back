@@ -21,11 +21,11 @@ import (
 func (s *Server) handleRecallDrones(w http.ResponseWriter, r *http.Request) {
 	var req dto.RecallDronesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 	if req.ShipID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid request fields")
+		writeError(w, http.StatusBadRequest, "некорректные поля запроса")
 		return
 	}
 
@@ -45,10 +45,10 @@ func (s *Server) handleRecallDrones(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, sector.ErrInboxFull) {
-			writeError(w, http.StatusServiceUnavailable, "sector busy")
+			writeError(w, http.StatusServiceUnavailable, "сектор занят")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -60,13 +60,13 @@ func (s *Server) handleRecallDrones(w http.ResponseWriter, r *http.Request) {
 		if res.Err != nil {
 			switch {
 			case errors.Is(res.Err, sector.ErrShipNotFound):
-				writeError(w, http.StatusNotFound, "ship not found")
+				writeError(w, http.StatusNotFound, "корабль не найден")
 			case errors.Is(res.Err, sector.ErrForbidden):
-				writeError(w, http.StatusForbidden, "ship belongs to another player")
+				writeError(w, http.StatusForbidden, "чужой корабль")
 			case errors.Is(res.Err, sector.ErrOrdnanceUnavailable):
-				writeError(w, http.StatusServiceUnavailable, "recall unavailable: server misconfigured")
+				writeError(w, http.StatusServiceUnavailable, "возврат дронов недоступен: ошибка конфигурации сервера")
 			default:
-				writeError(w, http.StatusInternalServerError, res.Err.Error())
+				s.writeInternalError(w, res.Err)
 			}
 			return
 		}
@@ -79,6 +79,6 @@ func (s *Server) handleRecallDrones(w http.ResponseWriter, r *http.Request) {
 		// No compensation to run: the drone DELETEs and the cargo credit commit
 		// together inside the worker, so drones and hold agree either way. 504
 		// means "outcome unknown".
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

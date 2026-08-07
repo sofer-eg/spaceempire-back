@@ -20,7 +20,7 @@ import (
 func (s *Server) handleJumpDrive(w http.ResponseWriter, r *http.Request) {
 	var req dto.JumpDriveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "некорректный запрос")
 		return
 	}
 
@@ -28,7 +28,7 @@ func (s *Server) handleJumpDrive(w http.ResponseWriter, r *http.Request) {
 
 	currentSector, ok := s.router.LookupShipSector(domain.ShipID(req.ShipID))
 	if !ok {
-		writeError(w, http.StatusNotFound, "ship not found")
+		writeError(w, http.StatusNotFound, "корабль не найден")
 		return
 	}
 
@@ -40,11 +40,11 @@ func (s *Server) handleJumpDrive(w http.ResponseWriter, r *http.Request) {
 		Reply:          reply,
 	})
 	if errors.Is(err, sector.ErrInboxFull) {
-		writeError(w, http.StatusServiceUnavailable, "sector busy")
+		writeErrorCode(w, http.StatusServiceUnavailable, CodeSectorBusy, "сектор занят")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, err)
 		return
 	}
 
@@ -55,31 +55,31 @@ func (s *Server) handleJumpDrive(w http.ResponseWriter, r *http.Request) {
 	case res := <-reply:
 		switch {
 		case errors.Is(res.Err, sector.ErrShipNotFound):
-			writeError(w, http.StatusNotFound, "ship not found")
+			writeError(w, http.StatusNotFound, "корабль не найден")
 		case errors.Is(res.Err, sector.ErrForbidden):
-			writeError(w, http.StatusForbidden, "ship belongs to another player")
+			writeError(w, http.StatusForbidden, "чужой корабль")
 		case errors.Is(res.Err, sector.ErrShipDocked):
-			writeError(w, http.StatusConflict, "ship is docked")
+			writeErrorCode(w, http.StatusConflict, CodeShipDocked, "корабль пристыкован")
 		case errors.Is(res.Err, sector.ErrEquipmentRequired):
-			writeError(w, http.StatusUnprocessableEntity, "ship has no jump drive")
+			writeErrorCode(w, http.StatusUnprocessableEntity, CodeJumpDriveRequired, "на корабле нет прыжкового двигателя (up_jump_drive)")
 		case errors.Is(res.Err, sector.ErrShieldRequired):
-			writeError(w, http.StatusUnprocessableEntity, "shield generator damaged or missing")
+			writeErrorCode(w, http.StatusUnprocessableEntity, CodeShieldRequired, "генератор щита повреждён или отсутствует")
 		case errors.Is(res.Err, sector.ErrJumpOnCooldown):
-			writeError(w, http.StatusTooManyRequests, "jump drive not ready")
+			writeError(w, http.StatusTooManyRequests, "прыжковый двигатель ещё не готов")
 		case errors.Is(res.Err, sector.ErrJumpForbiddenSector):
-			writeError(w, http.StatusBadRequest, "jump blocked in this sector")
+			writeErrorCode(w, http.StatusBadRequest, CodeJumpForbiddenSector, "прыжок из этого сектора запрещён")
 		case errors.Is(res.Err, sector.ErrJumpBlockedByAntijump):
-			writeError(w, http.StatusConflict, "jump blocked by antijump field")
+			writeErrorCode(w, http.StatusConflict, CodeJumpBlockedAntijump, "прыжок глушат гипер-помехи")
 		case errors.Is(res.Err, sector.ErrInvalidSector):
-			writeError(w, http.StatusBadRequest, "invalid target sector")
+			writeError(w, http.StatusBadRequest, "недопустимый сектор назначения")
 		case errors.Is(res.Err, sector.ErrHandoffUnavailable):
-			writeError(w, http.StatusServiceUnavailable, "handoff unavailable")
+			writeError(w, http.StatusServiceUnavailable, "передача сектора недоступна")
 		case res.Err != nil:
-			writeError(w, http.StatusInternalServerError, res.Err.Error())
+			s.writeInternalError(w, res.Err)
 		default:
 			writeJSON(w, http.StatusOK, dto.JumpDriveResponse{OK: true})
 		}
 	case <-ctx.Done():
-		writeError(w, http.StatusGatewayTimeout, "command timeout")
+		writeError(w, http.StatusGatewayTimeout, "таймаут команды")
 	}
 }

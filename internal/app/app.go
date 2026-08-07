@@ -582,8 +582,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	// EVA (10.23): exit ship into a spacesuit, ship access toggle, board / ride
 	// as passenger, disembark. Shares the pool, the spawner (spacesuit), the
-	// players repo (active/passenger pointers) and the handoff bus.
-	newEvaServer(sectorPool, spawner, playersRepoPersistence, jumpBus, npcPlayerID, EVAConfig{}, logger).
+	// players repo (active/passenger pointers), the ships repo (authoritative
+	// is_spacesuit for the exit gate) and the handoff bus.
+	newEvaServer(sectorPool, spawner, playersRepoPersistence, shipRepo, jumpBus, npcPlayerID, EVAConfig{}, logger).
 		RegisterRoutes(srv.Mux(), authSrv.RequireAuth)
 
 	// Race standing (9.4): GET /api/my/race-standings for the reputation panel,

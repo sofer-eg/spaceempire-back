@@ -78,6 +78,37 @@ func TestIntegration_Ships_Create_RoundTripsSpacesuit(t *testing.T) {
 	assert.Equal(t, "", names[suitID], "unnamed ship loads empty name")
 }
 
+// TASK-194: the EVA exit gate asks the DB (not a worker snapshot) whether the
+// ship the player flies is already a spacesuit.
+func TestIntegration_Ships_IsSpacesuit_ReadsRow(t *testing.T) {
+	t.Parallel()
+
+	pool := testdb.Setup(t)
+	pid := seedPlayer(t, pool)
+	repo := ships.New(pool)
+	ctx := context.Background()
+
+	suitID, err := repo.Create(ctx, domain.Ship{
+		PlayerID: pid, SectorID: domain.SectorID(11), Pos: domain.Vec2{X: 1, Y: 2}, IsSpacesuit: true,
+	})
+	require.NoError(t, err)
+	shipID, err := repo.Create(ctx, domain.Ship{
+		PlayerID: pid, SectorID: domain.SectorID(11), Pos: domain.Vec2{X: 3, Y: 4},
+	})
+	require.NoError(t, err)
+
+	suit, err := repo.IsSpacesuit(ctx, suitID)
+	require.NoError(t, err)
+	assert.True(t, suit)
+
+	suit, err = repo.IsSpacesuit(ctx, shipID)
+	require.NoError(t, err)
+	assert.False(t, suit)
+
+	_, err = repo.IsSpacesuit(ctx, domain.ShipID(999999))
+	assert.ErrorIs(t, err, ships.ErrShipNotFound)
+}
+
 func TestIntegration_Ships_Create_RoundTripsIsOpen(t *testing.T) {
 	t.Parallel()
 

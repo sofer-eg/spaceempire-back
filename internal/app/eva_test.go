@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -78,16 +79,26 @@ type suitCall struct {
 type fakeEvaSuits struct {
 	nextID domain.ShipID
 	calls  []suitCall
+	// spawned mirrors the DB rows the spawner inserted — they exist before the
+	// worker republishes its snapshot, so fakeEvaShips can answer for them.
+	spawned map[domain.ShipID]bool
 }
 
 func (f *fakeEvaSuits) SpawnSpacesuit(_ context.Context, p domain.PlayerID, s domain.SectorID, pos domain.Vec2, docked *domain.EntityRef) (domain.ShipID, error) {
 	f.calls = append(f.calls, suitCall{p, s, pos, docked})
+	if f.spawned == nil {
+		f.spawned = map[domain.ShipID]bool{}
+	}
+	f.spawned[f.nextID] = true
 	return f.nextID, nil
 }
 
 type fakeEvaPlayers struct {
 	active    map[domain.PlayerID]domain.ShipID
 	passenger map[domain.PlayerID]domain.ShipID
+	// injected failures for the compensation paths (TASK-194)
+	setActiveErr error
+	setHostErr   error
 }
 
 func newFakeEvaPlayers() *fakeEvaPlayers {
@@ -100,6 +111,9 @@ func (f *fakeEvaPlayers) ActiveShip(_ context.Context, p domain.PlayerID) (domai
 }
 
 func (f *fakeEvaPlayers) SetActiveShip(_ context.Context, p domain.PlayerID, id domain.ShipID) error {
+	if f.setActiveErr != nil {
+		return f.setActiveErr
+	}
 	f.active[p] = id
 	return nil
 }
@@ -110,8 +124,43 @@ func (f *fakeEvaPlayers) PassengerHost(_ context.Context, p domain.PlayerID) (do
 }
 
 func (f *fakeEvaPlayers) SetPassengerHost(_ context.Context, p domain.PlayerID, host domain.ShipID) error {
+	if f.setHostErr != nil {
+		return f.setHostErr
+	}
 	f.passenger[p] = host
 	return nil
+}
+
+// fakeEvaShips answers is_spacesuit from the DB's point of view: the ships the
+// pool knows about, plus dbOnly rows that exist in the DB but have not reached
+// a worker snapshot yet (a suit spawned within the current tick).
+type fakeEvaShips struct {
+	pool   *fakeEvaPool
+	suits  *fakeEvaSuits
+	dbOnly map[domain.ShipID]bool
+	err    error
+}
+
+func (f *fakeEvaShips) IsSpacesuit(_ context.Context, id domain.ShipID) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	if suit, ok := f.dbOnly[id]; ok {
+		return suit, nil
+	}
+	if f.suits != nil && f.suits.spawned[id] {
+		return true, nil
+	}
+	if f.pool != nil {
+		for _, ships := range f.pool.ships {
+			for _, sh := range ships {
+				if sh.ID == id {
+					return sh.IsSpacesuit, nil
+				}
+			}
+		}
+	}
+	return false, errors.New("ship not found")
 }
 
 type fakeEvaBus struct{ topics []string }
@@ -126,7 +175,7 @@ func (f *fakeEvaBus) Publish(_ context.Context, topic string, _ []byte) error {
 const testNPC = domain.PlayerID(1)
 
 func newEvaTest(pool *fakeEvaPool, suits *fakeEvaSuits, players *fakeEvaPlayers, bus *fakeEvaBus) *evaServer {
-	return newEvaServer(pool, suits, players, bus, testNPC, EVAConfig{}, slog.New(slog.DiscardHandler))
+	return newEvaServer(pool, suits, players, &fakeEvaShips{pool: pool, suits: suits}, bus, testNPC, EVAConfig{}, slog.New(slog.DiscardHandler))
 }
 
 func doExit(t *testing.T, srv *evaServer, player domain.PlayerID, shipID int64) *httptest.ResponseRecorder {
@@ -183,7 +232,10 @@ func TestUnit_Eva_ExitShip_InSpace_SuitNotDocked(t *testing.T) {
 	assert.Nil(t, suits.calls[0].docked, "suit in space is not docked")
 }
 
-func TestUnit_Eva_ExitShip_FromSuit_Rejected(t *testing.T) {
+// TASK-194: being already outside a hull is not an error — the exit the player
+// asked for has happened, so answer 200 with the suit they are already in and
+// do not mint a second one.
+func TestUnit_Eva_ExitShip_FromSuit_Idempotent(t *testing.T) {
 	t.Parallel()
 	const player = domain.PlayerID(100)
 	pool := &fakeEvaPool{
@@ -195,8 +247,175 @@ func TestUnit_Eva_ExitShip_FromSuit_Rejected(t *testing.T) {
 
 	rr := doExit(t, srv, player, 42)
 
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	assert.Equal(t, int64(42), decodeExit(t, rr).ShipID, "the suit already worn is returned")
+	assert.Empty(t, suits.calls, "no second spacesuit spawned")
+}
+
+// TASK-194: the lost-ack retry. The SPA still shows the abandoned ship and
+// re-posts its id; the player is already in suit 99, so the answer is 200 with
+// 99 and nothing is created.
+func TestUnit_Eva_ExitShip_RepeatAfterLostAck_SameSuit_NoSecondRow(t *testing.T) {
+	t.Parallel()
+	const player = domain.PlayerID(100)
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{42: 2, 99: 2},
+		ships: map[domain.SectorID][]domain.Ship{2: {
+			{ID: 42, PlayerID: player, SectorID: 2},                    // the ship they stepped out of
+			{ID: 99, PlayerID: player, SectorID: 2, IsSpacesuit: true}, // the suit from the first call
+		}},
+	}
+	suits := &fakeEvaSuits{nextID: 100}
+	players := newFakeEvaPlayers()
+	players.active[player] = 99
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	for i := range 3 {
+		rr := doExit(t, srv, player, 42)
+		require.Equalf(t, http.StatusOK, rr.Code, "retry %d: %s", i, rr.Body.String())
+		assert.Equal(t, int64(99), decodeExit(t, rr).ShipID, "every retry answers the same suit")
+	}
+	assert.Empty(t, suits.calls, "no spacesuit row created by the retries")
+	assert.Equal(t, domain.ShipID(99), players.active[player])
+}
+
+// TASK-194: the same retry inside the tick the first exit landed in. The suit
+// row exists (active_ship_id points at it) but the worker has not republished
+// its snapshot yet, so the suit is invisible in RAM — the case that made the
+// live run mint three suits from three back-to-back clicks.
+func TestUnit_Eva_ExitShip_RepeatBeforeSnapshotRepublish_SameSuit(t *testing.T) {
+	t.Parallel()
+	const player = domain.PlayerID(100)
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{42: 2},
+		ships:      map[domain.SectorID][]domain.Ship{2: {{ID: 42, PlayerID: player, SectorID: 2}}},
+	}
+	suits := &fakeEvaSuits{nextID: 100}
+	players := newFakeEvaPlayers()
+	players.active[player] = 99 // spawned this tick, not in any snapshot yet
+	srv := newEvaServer(pool, suits, players,
+		&fakeEvaShips{pool: pool, suits: suits, dbOnly: map[domain.ShipID]bool{99: true}},
+		&fakeEvaBus{}, testNPC, EVAConfig{}, slog.New(slog.DiscardHandler))
+
+	rr := doExit(t, srv, player, 42)
+
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	assert.Equal(t, int64(99), decodeExit(t, rr).ShipID)
+	assert.Empty(t, suits.calls, "no second suit while the snapshot is stale")
+}
+
+// TASK-194 / AC-7: exiting a ship the player owns but does not fly is the
+// teleport hole — the suit would spawn at that ship's position, in another
+// sector, and become active.
+func TestUnit_Eva_ExitShip_NotTheFlownShip_Rejected(t *testing.T) {
+	t.Parallel()
+	const player = domain.PlayerID(100)
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{42: 1, 43: 40},
+		ships: map[domain.SectorID][]domain.Ship{
+			1:  {{ID: 42, PlayerID: player, SectorID: 1}},
+			40: {{ID: 43, PlayerID: player, SectorID: 40, Pos: domain.Vec2{X: 111, Y: 222}}},
+		},
+	}
+	suits := &fakeEvaSuits{nextID: 77}
+	players := newFakeEvaPlayers()
+	players.active[player] = 42
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	rr := doExit(t, srv, player, 43)
+
+	assert.Equal(t, http.StatusConflict, rr.Code)
+	assert.Empty(t, suits.calls, "no suit spawned in the remote sector")
+	assert.Equal(t, domain.ShipID(42), players.active[player], "still flying the same ship")
+}
+
+// TASK-194: active_ship_id is NULL for accounts that never switched ships; the
+// min-id fallback keeps their exit legal. Ship 42 is the min-id one here, 43 is
+// the parked second hull.
+func TestUnit_Eva_ExitShip_NoActiveShipID_MinIDFallback(t *testing.T) {
+	t.Parallel()
+	const player = domain.PlayerID(100)
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{42: 1, 43: 40},
+		ships: map[domain.SectorID][]domain.Ship{
+			1:  {{ID: 42, PlayerID: player, SectorID: 1}},
+			40: {{ID: 43, PlayerID: player, SectorID: 40}},
+		},
+	}
+	suits := &fakeEvaSuits{nextID: 77}
+	srv := newEvaTest(pool, suits, newFakeEvaPlayers(), &fakeEvaBus{}) // no active_ship_id at all
+
+	require.Equal(t, http.StatusOK, doExit(t, srv, player, 42).Code)
+	require.Len(t, suits.calls, 1)
+	assert.Equal(t, domain.SectorID(1), suits.calls[0].sector)
+
+	// the parked hull is refused for the same account (fresh server: the player
+	// is back in ship 42, still without an explicit active_ship_id)
+	parkedSuits := &fakeEvaSuits{nextID: 78}
+	parked := newEvaTest(pool, parkedSuits, newFakeEvaPlayers(), &fakeEvaBus{})
+	assert.Equal(t, http.StatusConflict, doExit(t, parked, player, 43).Code)
+	assert.Empty(t, parkedSuits.calls)
+}
+
+// TASK-194: a passenger flies nothing of their own — exit-ship must not resolve
+// them onto a hull they left parked elsewhere. Their way out is disembark.
+func TestUnit_Eva_ExitShip_Passenger_Rejected(t *testing.T) {
+	t.Parallel()
+	const player = domain.PlayerID(100)
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{42: 1, 70: 3},
+		ships: map[domain.SectorID][]domain.Ship{
+			1: {{ID: 42, PlayerID: player, SectorID: 1}},
+			3: {{ID: 70, PlayerID: testNPC, SectorID: 3}},
+		},
+	}
+	suits := &fakeEvaSuits{nextID: 77}
+	players := newFakeEvaPlayers()
+	players.passenger[player] = 70
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	rr := doExit(t, srv, player, 42)
+
 	assert.Equal(t, http.StatusConflict, rr.Code)
 	assert.Empty(t, suits.calls)
+}
+
+// TASK-194: a failed active_ship_id write must not leave the suit behind — the
+// retry would otherwise mint another one.
+func TestUnit_Eva_ExitShip_SetActiveFails_SuitRemoved(t *testing.T) {
+	t.Parallel()
+	const player = domain.PlayerID(100)
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{42: 2},
+		ships:      map[domain.SectorID][]domain.Ship{2: {{ID: 42, PlayerID: player, SectorID: 2}}},
+	}
+	suits := &fakeEvaSuits{nextID: 99}
+	players := newFakeEvaPlayers()
+	players.active[player] = 42
+	players.setActiveErr = errors.New("db down")
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	rr := doExit(t, srv, player, 42)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.True(t, shipRemoved(pool, 99), "the spawned suit is rolled back")
+}
+
+func decodeExit(t *testing.T, rr *httptest.ResponseRecorder) exitShipResponse {
+	t.Helper()
+	var resp exitShipResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	return resp
+}
+
+// shipRemoved reports whether a RemoveShipCommand for shipID reached the pool.
+func shipRemoved(pool *fakeEvaPool, shipID domain.ShipID) bool {
+	for _, c := range pool.sent {
+		if rc, ok := c.(sector.RemoveShipCommand); ok && rc.ShipID == shipID {
+			return true
+		}
+	}
+	return false
 }
 
 func TestUnit_Eva_ExitShip_OtherPlayer_Forbidden(t *testing.T) {
@@ -371,6 +590,48 @@ func TestUnit_Eva_Disembark_SpawnsSuitAtHost(t *testing.T) {
 		}
 	}
 	assert.True(t, removed, "removed from host passenger mirror")
+}
+
+// disembarkScene wires player 100 riding NPC host 70 in sector 3.
+func disembarkScene() (*fakeEvaPool, *fakeEvaPlayers, *fakeEvaSuits) {
+	host := domain.Ship{ID: 70, PlayerID: testNPC, SectorID: 3, Pos: domain.Vec2{X: 4, Y: 5}, PassengerPlayers: []domain.PlayerID{100}}
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{70: 3},
+		ships:      map[domain.SectorID][]domain.Ship{3: {host}},
+	}
+	players := newFakeEvaPlayers()
+	players.passenger[100] = 70
+	return pool, players, &fakeEvaSuits{nextID: 88}
+}
+
+// TASK-194 / AC-2: the old code logged the failed SetPassengerHost and still
+// answered 200, leaving the player a passenger with a stray suit in the world.
+func TestUnit_Eva_Disembark_ClearHostFails_NotOK(t *testing.T) {
+	t.Parallel()
+	pool, players, suits := disembarkScene()
+	players.setHostErr = errors.New("db down")
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	rr := doDisembark(t, srv, 100)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Equal(t, domain.ShipID(70), players.passenger[100], "still riding the host")
+	assert.True(t, shipRemoved(pool, 88), "the spawned suit is rolled back")
+}
+
+// TASK-194: same for the active_ship_id write, which runs before the passenger
+// link is cleared, so the rollback restores the exact pre-call state.
+func TestUnit_Eva_Disembark_SetActiveFails_NotOK(t *testing.T) {
+	t.Parallel()
+	pool, players, suits := disembarkScene()
+	players.setActiveErr = errors.New("db down")
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	rr := doDisembark(t, srv, 100)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Equal(t, domain.ShipID(70), players.passenger[100], "still riding the host")
+	assert.True(t, shipRemoved(pool, 88), "the spawned suit is rolled back")
 }
 
 func TestUnit_Eva_Disembark_NotPassenger_Rejected(t *testing.T) {

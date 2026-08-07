@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"spaceempire/back/internal/domain"
 	"spaceempire/back/internal/pkg/database"
 )
@@ -567,6 +569,25 @@ func (r *Repository) Delete(ctx context.Context, id domain.ShipID) error {
 		return ErrShipNotFound
 	}
 	return nil
+}
+
+const isSpacesuitSQL = `SELECT is_spacesuit FROM ships WHERE id = $1`
+
+// IsSpacesuit reports whether the ship is a spacesuit. Read from the DB rather
+// than from a worker snapshot because the EVA gate (TASK-194) has to see a suit
+// that was inserted during the current tick — the worker republishes its
+// snapshot only on the next one, and until then the row is invisible in RAM.
+// Missing rows return ErrShipNotFound.
+func (r *Repository) IsSpacesuit(ctx context.Context, id domain.ShipID) (bool, error) {
+	var suit bool
+	err := r.exec.QueryRow(ctx, isSpacesuitSQL, int64(id)).Scan(&suit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrShipNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("ship is_spacesuit: %w", err)
+	}
+	return suit, nil
 }
 
 const countByRaceSQL = `SELECT race, COUNT(*) FROM ships GROUP BY race`

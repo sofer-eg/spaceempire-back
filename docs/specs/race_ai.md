@@ -26,11 +26,17 @@ Status, pos_in_order)` и `f_flightgroups(LeaderID, target_id, patrol_*, …)`
 5.1. Приказ (`Order`) — состояние контроллера, не битовая маска.
 
 ### `ai.Action` (расширение 5.1)
-К `Idle`/`MoveTo` добавляется `Attack{Target EntityRef}`. Семантика
-применения в воркере (`applyAIAction`) — «намерение корабля на тик»:
+К `Idle`/`MoveTo` добавляется `Attack{Target EntityRef}` и (TASK-208)
+`MoveAndFire{Target Vec2, Fire EntityRef}`. Семантика применения в воркере
+(`applyAIAction`) — «намерение корабля на тик»:
 - `MoveTo{p}` → `Target=p`, `AttackTarget=nil` (лететь, не драться).
 - `Attack{ref}` → `AttackTarget=ref` и `Target=` позиция цели (сближение +
   огонь; огонь по `AttackTarget` уже реализован в 4.2 `fireLasers`).
+- `MoveAndFire{p, ref}` → `Target=p` И `AttackTarget=ref` — «отступление с
+  отстрелом»: лететь к СВОЕЙ точке (в отличие от `Attack`, `Target` — не
+  позиция жертвы), продолжая стрелять по `ref`. Новой боевой механики не
+  требуется: `fireLasers` бьёт по `AttackTarget` без требования к ориентации
+  носа — гейты только дальность (`combat.FireLaser`) и friendly-fire.
 - `Idle`/nil → no-op.
 
 ### `internal/ai/race`
@@ -102,15 +108,28 @@ warship-классом (`Config.WarshipClassIDs`), включая себя. Ед
 численность звена, виденная при враге в радиусе (`peak = max(peak, alive)`
 каждый такой тик). Если враг в `DetectionRange` И
 `alive < peak × SquadRetreatFraction` (Config, default 0.5) →
-`Order=Retreat`, `MoveTo(anchor)` — даже при полном HP. Когда врага в
-радиусе нет — peak ребейзится к текущему alive (невосполнимые потери не
-запирают звено в вечном ретрите), звено возвращается к патрулю/строю.
-Старый `ai_state` без `squadPeak` совместим: 0 → пик поднимется на первом
-тике с врагом.
+`Order=Retreat`, `MoveAndFire(anchor, ближайший враг)` — даже при полном HP:
+корабль отходит к якорю, отстреливаясь от преследователя (TASK-208 — враг,
+кемпящий якорь, не фармит NPC бесплатно). Личный flee по
+`hp < FleeThreshold` остаётся чистым `MoveTo` (паническое бегство без огня)
+и имеет приоритет над групповым ретритом. Старый `ai_state` без `squadPeak`
+совместим: 0 → пик поднимется на первом тике с врагом.
 
-**Приоритеты на тике.** Враг рядом: личный flee по HP → групповой ретрит по
-потерям → engage с focus-fire (без изменений). Врага нет: ребейз пика →
-патруль (лидер/одиночка) или строй (ведомый).
+**Гистерезис ребейза пика (TASK-208).** Peak ребейзится к текущему alive
+только после `PeakRebaseTicks` (Config, default 10) ПОСЛЕДОВАТЕЛЬНЫХ тиков
+без врага в `DetectionRange`. Счётчик — `noEnemyTicks` в `ai_state`
+(`omitempty`; старый JSON без ключа → 0), инкрементируется в тик без врага
+(клампится на `PeakRebaseTicks`), любой тик с врагом сбрасывает в 0. До
+гистерезиса peak схлопывался мгновенно: отход выводил врага за радиус на
+один тик → пик = alive → враг снова в радиусе → одиночка разворачивался на
+превосходящую силу (кайт-осцилляция retreat↔engage на границе радиуса).
+Невосполнимые потери по-прежнему не запирают звено в вечном ретрите — просто
+ребейз наступает через N спокойных тиков.
+
+**Приоритеты на тике.** Враг рядом: сброс `noEnemyTicks` → личный flee по HP
+(чистый `MoveTo`) → групповой ретрит по потерям (`MoveAndFire`) → engage с
+focus-fire. Врага нет: инкремент `noEnemyTicks`, ребейз пика после
+`PeakRebaseTicks` → патруль (лидер/одиночка) или строй (ведомый).
 
 Focus-fire (`allyFocusTarget`) намеренно шире звена: ally = любой
 не-враждебный по `Targeter` (расы, невраждебные друг другу, сходятся на
@@ -141,10 +160,23 @@ Class ∈ {2,3,4,5,6}) и вызывает
   `TestUnit_Race_FocusFiresAllyTarget` / `FocusFallsBackToNearest`.
 - Звенья (TASK-66): ведомый держит строй-офсет; лидер патрулирует как
   раньше; мирный той же расы не в звене; групповой ретрит при потере доли
-  (пик переживает rebuild из `ai_state`); ребейз пика после ухода врага —
+  (пик переживает rebuild из `ai_state`) —
   `TestUnit_Race_FollowerHoldsFormationOffset` / `LeaderPatrolsWithFollowers`
-  / `CivilianSameRaceNotInSquad` / `SquadRetreatsOnLosses` /
-  `PeakRebasesAfterEnemyLeaves`.
+  / `CivilianSameRaceNotInSquad` / `SquadRetreatsOnLosses`; ведомый при враге
+  в радиусе атакует, а не строится; чередование сторон клина rank ≥ 2;
+  мёртвый союзник (HP ≤ 0) вне звена —
+  `TestUnit_Race_WingmanEngagesHostileNotFormation` /
+  `WedgeAlternatesSidesByRank` / `DeadAllyExcludedFromSquad`.
+- Гистерезис и отступление с отстрелом (TASK-208): групповой ретрит =
+  `MoveAndFire` с верными Target (якорь) и Fire (ближайший враг); ретрит
+  держится при мигании врага в/из радиуса; ребейз после N спокойных тиков
+  (счётчик переживает rebuild из `ai_state`); тик с врагом сбрасывает
+  счётчик; личный flee остаётся чистым `MoveTo` —
+  `TestUnit_Race_SquadRetreatsOnLosses` / `RetreatHoldsThroughEnemyFlicker` /
+  `PeakRebasesAfterQuietTicks` / `EnemyTickResetsRebaseCounter` /
+  `PersonalFleeStaysPureMoveTo`; воркер-семантика `MoveAndFire` (waypoint =
+  своя точка, огонь идёт, корабль отходит) —
+  `TestUnit_Worker_AIMoveAndFire_RetreatsWhileFiring` (sector).
 - Standalone (TASK-207): не становится ведомым при однорасовом лидере с
   меньшим ID (флаг переживает rebuild из `ai_state`); не уходит в групповой
   ретрит; личный flee сохранён; старый `ai_state` без ключа → обычный член

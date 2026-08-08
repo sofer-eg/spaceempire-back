@@ -82,6 +82,15 @@ func (w *Worker) applyAIAction(ctx context.Context, s *sectorState, ship *domain
 			}
 		}
 		s.markDirty(ship.ID)
+	case ai.MoveAndFire:
+		// Fighting withdrawal (TASK-208): fly to the action's own waypoint —
+		// unlike Attack, Target is NOT the victim's position — while the
+		// laser tick keeps firing at Fire.
+		target := a.Target
+		fire := a.Fire
+		ship.Target = &target
+		ship.AttackTarget = &fire
+		s.markDirty(ship.ID)
 	case ai.SetCourse:
 		// Arm the autopilot for a (possibly cross-sector) destination. The
 		// existing resolveAutopilot/tryAutoJump steps take over from here.

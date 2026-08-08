@@ -231,17 +231,59 @@ func TestUnit_Race_SquadRetreatsOnLosses(t *testing.T) {
 	require.NoError(t, err)
 	c2 := newController(t, playersHostile, squadCfg(), saved)
 
-	// Both allies are gone (1 < 3×0.5): retreat to the anchor at full hull.
+	// Both allies are gone (1 < 3×0.5): fall back to the anchor at full hull,
+	// firing at the pursuer on the way (TASK-208).
 	act = c2.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
-	mv, ok := act.(ai.MoveTo)
-	require.True(t, ok, "expected MoveTo (group retreat), got %T", act)
+	mf, ok := act.(ai.MoveAndFire)
+	require.True(t, ok, "expected MoveAndFire (group retreat), got %T", act)
 	assert.Equal(t, race.OrderRetreat, c2.CurrentOrder())
-	assert.Equal(t, domain.Vec2{X: 0, Y: 0}, mv.Target, "group retreat heads to the anchor")
+	assert.Equal(t, domain.Vec2{X: 0, Y: 0}, mf.Target, "group retreat heads to the anchor")
+	assert.Equal(t, domain.EntityKindShip, mf.Fire.Kind)
+	assert.Equal(t, int64(9), mf.Fire.ID, "fires at the nearest hostile while withdrawing")
 }
 
-func TestUnit_Race_PeakRebasesAfterEnemyLeaves(t *testing.T) {
+// TestUnit_Race_RetreatHoldsThroughEnemyFlicker is the TASK-208 kite guard:
+// with the default PeakRebaseTicks (10), an enemy dipping out of
+// DetectionRange for one tick must not collapse the peak — when it comes
+// back, the lone survivor keeps retreating instead of turning to re-engage
+// a superior force (the retreat↔engage oscillation on the radius edge).
+func TestUnit_Race_RetreatHoldsThroughEnemyFlicker(t *testing.T) {
 	t.Parallel()
 	c := newController(t, playersHostile, squadCfg(), nil)
+	self := warship(1, 1, domain.Vec2{X: 0, Y: 0})
+	ally2 := warship(2, 1, domain.Vec2{X: 60, Y: 0})
+	ally3 := warship(3, 1, domain.Vec2{X: 0, Y: 60})
+	enemy := domain.Ship{ID: 9, PlayerID: 99, Pos: domain.Vec2{X: 100, Y: 0}, HP: 100, MaxHP: 100}
+
+	// Peak = 3, then the allies die: group retreat.
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, ally2, ally3, enemy}})
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	_, ok := act.(ai.MoveAndFire)
+	require.True(t, ok, "expected MoveAndFire (group retreat), got %T", act)
+
+	// The withdrawal takes the enemy out of range for one tick.
+	act = c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
+	_, ok = act.(ai.MoveTo)
+	require.True(t, ok, "expected MoveTo (patrol) with no enemy around, got %T", act)
+
+	// Enemy back in range: the peak must still be 3 (1 < 3×0.5) — retreat,
+	// never a turn-around attack.
+	act = c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	mf, ok := act.(ai.MoveAndFire)
+	require.True(t, ok, "peak must survive a one-tick flicker: expected MoveAndFire, got %T", act)
+	assert.Equal(t, race.OrderRetreat, c.CurrentOrder())
+	assert.Equal(t, domain.Vec2{X: 0, Y: 0}, mf.Target)
+	assert.Equal(t, int64(9), mf.Fire.ID)
+}
+
+// TestUnit_Race_PeakRebasesAfterQuietTicks: the peak rebases to the current
+// live count only after PeakRebaseTicks consecutive enemy-free ticks, and the
+// tick counter itself lives in ai_state (survives a snapshot/rebuild).
+func TestUnit_Race_PeakRebasesAfterQuietTicks(t *testing.T) {
+	t.Parallel()
+	cfg := squadCfg()
+	cfg.PeakRebaseTicks = 3
+	c := newController(t, playersHostile, cfg, nil)
 	self := warship(1, 1, domain.Vec2{X: 0, Y: 0})
 	ally2 := warship(2, 1, domain.Vec2{X: 60, Y: 0})
 	ally3 := warship(3, 1, domain.Vec2{X: 0, Y: 60})
@@ -250,17 +292,136 @@ func TestUnit_Race_PeakRebasesAfterEnemyLeaves(t *testing.T) {
 	// Peak = 3 while the enemy is around.
 	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, ally2, ally3, enemy}})
 
-	// Enemy gone, allies lost for good: the peak rebases to the current 1.
-	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
-	_, ok := act.(ai.MoveTo)
-	require.True(t, ok, "expected MoveTo (patrol), got %T", act)
-	assert.Equal(t, race.OrderPatrol, c.CurrentOrder())
+	// Two quiet ticks (counter 2 of 3), then a snapshot/rebuild mid-count.
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
+	saved, err := c.MarshalState()
+	require.NoError(t, err)
+	c2 := newController(t, playersHostile, cfg, saved)
+
+	// Third consecutive quiet tick completes the hysteresis: peak → 1.
+	c2.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
 
 	// Enemy returns: 1 ≥ 1×0.5 — the lone survivor engages, no eternal retreat.
-	act = c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
-	_, ok = act.(ai.Attack)
+	act := c2.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	_, ok := act.(ai.Attack)
 	require.True(t, ok, "rebased squad must engage again, got %T", act)
+	assert.Equal(t, race.OrderEngage, c2.CurrentOrder())
+}
+
+// TestUnit_Race_EnemyTickResetsRebaseCounter: a tick with a hostile in range
+// zeroes the quiet-tick counter — the hysteresis needs N ticks in a row, not
+// N ticks total.
+func TestUnit_Race_EnemyTickResetsRebaseCounter(t *testing.T) {
+	t.Parallel()
+	cfg := squadCfg()
+	cfg.PeakRebaseTicks = 3
+	c := newController(t, playersHostile, cfg, nil)
+	self := warship(1, 1, domain.Vec2{X: 0, Y: 0})
+	ally2 := warship(2, 1, domain.Vec2{X: 60, Y: 0})
+	ally3 := warship(3, 1, domain.Vec2{X: 0, Y: 60})
+	enemy := domain.Ship{ID: 9, PlayerID: 99, Pos: domain.Vec2{X: 100, Y: 0}, HP: 100, MaxHP: 100}
+
+	// Peak = 3; two quiet ticks bring the counter to 2 of 3.
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, ally2, ally3, enemy}})
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
+
+	// Enemy pops back in: counter resets, and the peak (still 3) keeps the
+	// survivor in retreat.
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	_, ok := act.(ai.MoveAndFire)
+	require.True(t, ok, "expected MoveAndFire (retreat), got %T", act)
+
+	// Two more quiet ticks reach only 2 of 3 again — the peak must hold.
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self}})
+	act = c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	_, ok = act.(ai.MoveAndFire)
+	require.True(t, ok, "counter must reset on an enemy tick: expected MoveAndFire, got %T", act)
+	assert.Equal(t, race.OrderRetreat, c.CurrentOrder())
+}
+
+// TestUnit_Race_PersonalFleeStaysPureMoveTo: the HP-threshold flee is panic,
+// not a fighting withdrawal — it must remain a plain MoveTo even when the
+// squad is also past its group-retreat threshold (TASK-208 AC #3).
+func TestUnit_Race_PersonalFleeStaysPureMoveTo(t *testing.T) {
+	t.Parallel()
+	c := newController(t, playersHostile, squadCfg(), nil)
+	self := warship(1, 1, domain.Vec2{X: 0, Y: 0})
+	ally2 := warship(2, 1, domain.Vec2{X: 60, Y: 0})
+	ally3 := warship(3, 1, domain.Vec2{X: 0, Y: 60})
+	enemy := domain.Ship{ID: 9, PlayerID: 99, Pos: domain.Vec2{X: 100, Y: 0}, HP: 100, MaxHP: 100}
+
+	// Peak = 3, then the allies die AND self drops below FleeThreshold.
+	c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, ally2, ally3, enemy}})
+	self.HP = 20 // 20% < default 30%
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	mv, ok := act.(ai.MoveTo)
+	require.True(t, ok, "personal flee must stay a pure MoveTo, got %T", act)
+	assert.Equal(t, race.OrderRetreat, c.CurrentOrder())
+	assert.Less(t, mv.Target.X, 0.0, "flees away from the threat")
+}
+
+// TestUnit_Race_WingmanEngagesHostileNotFormation: with a hostile in range a
+// wingman fights (Attack) — the formation slot applies on patrol only.
+func TestUnit_Race_WingmanEngagesHostileNotFormation(t *testing.T) {
+	t.Parallel()
+	c := newController(t, playersHostile, squadCfg(), nil)
+	self := warship(2, 1, domain.Vec2{X: 0, Y: 0})
+	leader := warship(1, 1, domain.Vec2{X: 100, Y: 0})
+	enemy := domain.Ship{ID: 9, PlayerID: 99, Pos: domain.Vec2{X: 50, Y: 0}, HP: 100, MaxHP: 100}
+
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, leader, enemy}})
+	atk, ok := act.(ai.Attack)
+	require.True(t, ok, "wingman with an enemy in range must attack, not hold formation, got %T", act)
+	assert.Equal(t, int64(9), atk.Target.ID)
 	assert.Equal(t, race.OrderEngage, c.CurrentOrder())
+}
+
+// TestUnit_Race_WedgeAlternatesSidesByRank: ranks 1..4 take the alternating
+// wedge slots (-s,+s), (-s,-s), (-2s,+2s), (-2s,-2s) behind the leader.
+func TestUnit_Race_WedgeAlternatesSidesByRank(t *testing.T) {
+	t.Parallel()
+	leaderPos := domain.Vec2{X: 100, Y: 0}
+	squad := []domain.Ship{
+		warship(1, 1, leaderPos), // lowest ID → leader
+		warship(2, 1, domain.Vec2{X: 0, Y: 0}),
+		warship(3, 1, domain.Vec2{X: 0, Y: 10}),
+		warship(4, 1, domain.Vec2{X: 0, Y: 20}),
+		warship(5, 1, domain.Vec2{X: 0, Y: 30}),
+	}
+	wantBySelf := map[int64]domain.Vec2{
+		2: {X: 50, Y: 50},  // rank 1: row 1, +Y
+		3: {X: 50, Y: -50}, // rank 2: row 1, -Y
+		4: {X: 0, Y: 100},  // rank 3: row 2, +Y
+		5: {X: 0, Y: -100}, // rank 4: row 2, -Y
+	}
+	for selfID, want := range wantBySelf {
+		c := newController(t, noHostile, squadCfg(), nil)
+		self := squad[selfID-1]
+		act := c.Tick(context.Background(), fakeWorld{self: self, ships: squad})
+		mv, ok := act.(ai.MoveTo)
+		require.True(t, ok, "ship %d: expected MoveTo (formation), got %T", selfID, act)
+		assert.Equal(t, want, mv.Target, "ship %d wedge slot", selfID)
+	}
+}
+
+// TestUnit_Race_DeadAllyExcludedFromSquad: a dead (HP ≤ 0) same-race warship
+// is not a squad member — a lone survivor patrols solo instead of flying a
+// formation slot on the wreck.
+func TestUnit_Race_DeadAllyExcludedFromSquad(t *testing.T) {
+	t.Parallel()
+	c := newController(t, noHostile, squadCfg(), nil)
+	self := warship(2, 1, domain.Vec2{X: 0, Y: 0})
+	dead := warship(1, 1, domain.Vec2{X: 300, Y: 0}) // lower ID: would lead if counted
+	dead.HP = 0
+
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, dead}})
+	mv, ok := act.(ai.MoveTo)
+	require.True(t, ok, "expected MoveTo (solo patrol), got %T", act)
+	assert.InDelta(t, 150.0, mv.Target.Length(), 1e-6,
+		"solo patrol circle around own anchor, not a formation slot on the dead leader")
 }
 
 // --- Standalone controllers (TASK-207): quest NPCs stay out of squads ---

@@ -53,6 +53,12 @@ type Config struct {
 	// SquadRetreatFraction: with a hostile in range, the squad retreats to
 	// the anchor once its live count drops below peak × fraction.
 	SquadRetreatFraction float64
+	// PeakRebaseTicks is the rebase hysteresis (TASK-208): the squad peak
+	// drops to the current live count only after this many consecutive ticks
+	// with no hostile in DetectionRange. A hostile flickering on the radius
+	// edge therefore cannot collapse the peak and flip a group retreat back
+	// into engagement (the kite oscillation).
+	PeakRebaseTicks int
 	// WarshipClassIDs marks the ship classes that count as squad members
 	// (M2..M6 in production wiring, balance.ShipClass.IsWarship — npc_spawner
 	// gives civilian TS a race too, so Race alone cannot define membership).
@@ -79,6 +85,9 @@ func (c Config) withDefaults() Config {
 	if c.SquadRetreatFraction <= 0 {
 		c.SquadRetreatFraction = 0.5
 	}
+	if c.PeakRebaseTicks <= 0 {
+		c.PeakRebaseTicks = 10
+	}
 	return c
 }
 
@@ -99,9 +108,14 @@ type state struct {
 	Phase     float64     `json:"phase"`
 	// SquadPeak is the highest live squad size seen while a hostile was in
 	// range (TASK-66 group retreat). Rebases to the current size once no
-	// hostile is around. Absent in pre-TASK-66 snapshots → 0, raised on the
-	// first tick.
+	// hostile has been around for PeakRebaseTicks consecutive ticks
+	// (TASK-208). Absent in pre-TASK-66 snapshots → 0, raised on the first
+	// tick.
 	SquadPeak int `json:"squadPeak,omitempty"`
+	// NoEnemyTicks counts consecutive ticks with no hostile in range, clamped
+	// at PeakRebaseTicks (the TASK-208 rebase hysteresis). Any tick with a
+	// hostile in range resets it. Absent in pre-TASK-208 snapshots → 0.
+	NoEnemyTicks int `json:"noEnemyTicks,omitempty"`
 	// Standalone (TASK-207) marks a ship that never joins emergent squads —
 	// quest NPCs (escorted traders, protect targets) share the race controller
 	// but must not become wingmen of a same-race navy or follow its group
@@ -127,7 +141,8 @@ func (c *Controller) CurrentOrder() Order { return c.st.Order }
 
 // Tick decides the ship's action for this tick. With a hostile in range:
 // personal flee on low hull, then group retreat on squad losses, then engage
-// with focus-fire. Without one: rebase the squad peak and patrol — the leader
+// with focus-fire. Without one: rebase the squad peak (only after
+// PeakRebaseTicks consecutive quiet ticks, TASK-208) and patrol — the leader
 // (and any solo ship) circles the anchor, wingmen hold a formation offset.
 func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 	self := view.Self()
@@ -141,6 +156,7 @@ func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 	nearest, found := c.nearestHostile(self, ships)
 
 	if found {
+		c.st.NoEnemyTicks = 0
 		if len(squad) > c.st.SquadPeak {
 			c.st.SquadPeak = len(squad)
 		}
@@ -149,10 +165,15 @@ func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 			return ai.MoveTo{Target: c.fleePoint(self.Pos, nearest.Pos)}
 		}
 		// Group retreat (TASK-66): the squad has lost too many ships since
-		// the fight started — fall back to the anchor even at full hull.
+		// the fight started — fall back to the anchor even at full hull,
+		// firing at the nearest hostile on the way (TASK-208: an enemy
+		// camping the anchor gets no free farm).
 		if float64(len(squad)) < float64(c.st.SquadPeak)*c.cfg.SquadRetreatFraction {
 			c.st.Order = OrderRetreat
-			return ai.MoveTo{Target: c.st.Anchor}
+			return ai.MoveAndFire{
+				Target: c.st.Anchor,
+				Fire:   domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(nearest.ID)},
+			}
 		}
 		// Focus-fire (8.4): if an ally is already engaging a hostile in range,
 		// converge on it instead of the nearest — race ships pack onto one
@@ -165,9 +186,17 @@ func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 		return ai.Attack{Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(target.ID)}}
 	}
 
-	// No hostile around: rebase the peak to the current size so irreplaceable
-	// losses do not lock the squad into an eternal retreat.
-	c.st.SquadPeak = len(squad)
+	// No hostile around: after PeakRebaseTicks consecutive quiet ticks,
+	// rebase the peak to the current size so irreplaceable losses do not lock
+	// the squad into an eternal retreat. The hysteresis (TASK-208) keeps a
+	// hostile flickering on the detection edge from collapsing the peak
+	// mid-retreat.
+	if c.st.NoEnemyTicks < c.cfg.PeakRebaseTicks {
+		c.st.NoEnemyTicks++
+	}
+	if c.st.NoEnemyTicks >= c.cfg.PeakRebaseTicks {
+		c.st.SquadPeak = len(squad)
+	}
 	c.st.Order = OrderPatrol
 	if leaderPos, rank, wingman := c.formationSlot(self, squad, ships); wingman {
 		return ai.MoveTo{Target: leaderPos.Add(c.formationOffset(rank))}

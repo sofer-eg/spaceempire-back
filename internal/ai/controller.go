@@ -75,6 +75,20 @@ type Attack struct {
 
 func (Attack) isAction() {}
 
+// MoveAndFire is a fighting withdrawal: the worker sets the ship's waypoint
+// to Target AND arms AttackTarget with Fire, so the ship flies to its own
+// point (unlike Attack, the waypoint is not the victim's position) while the
+// laser tick (4.2 fireLasers) keeps shooting at Fire — lasers have no facing
+// requirement, only range. TASK-208 — issued by the race controller's group
+// retreat so a ship falling back to its anchor is not free farm for a
+// pursuer camping the anchor.
+type MoveAndFire struct {
+	Target domain.Vec2
+	Fire   domain.EntityRef
+}
+
+func (MoveAndFire) isAction() {}
+
 // SetCourse arms the autopilot: the worker writes ship.FinalTarget so the
 // existing cross-sector machinery (resolveAutopilot + tryAutoJump, phases
 // 2.4/2.5) routes the ship hop-by-hop through gates and parks it at the

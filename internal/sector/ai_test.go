@@ -370,3 +370,75 @@ func TestUnit_Worker_RaceAI_EngagesHostile(t *testing.T) {
 	require.True(t, ok)
 	assert.Less(t, enemySnap.Shield+enemySnap.HP, 400, "enemy should have taken laser damage")
 }
+
+// moveAndFireController always orders a fighting withdrawal: waypoint at
+// (-300,0) while firing at ship 2 — the applyAIAction wiring double for
+// ai.MoveAndFire (TASK-208).
+type moveAndFireController struct{}
+
+func (moveAndFireController) Kind() string { return "movefire" }
+
+func (moveAndFireController) Tick(_ context.Context, _ ai.WorldView) ai.Action {
+	return ai.MoveAndFire{
+		Target: domain.Vec2{X: -300, Y: 0},
+		Fire:   domain.EntityRef{Kind: domain.EntityKindShip, ID: 2},
+	}
+}
+
+func (moveAndFireController) MarshalState() ([]byte, error) { return nil, nil }
+
+// TestUnit_Worker_AIMoveAndFire_RetreatsWhileFiring checks the worker-side
+// semantics of ai.MoveAndFire: the ship's waypoint is the action's own Target
+// (not the victim's position, unlike Attack), AttackTarget is armed, and the
+// laser tick keeps chipping the enemy while the ship pulls away from it.
+func TestUnit_Worker_AIMoveAndFire_RetreatsWhileFiring(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	npc := domain.Ship{
+		ID: 1, PlayerID: 0, SectorID: testSector,
+		Pos: domain.Vec2{X: 0, Y: 0}, Direction: domain.Vec2{X: 1, Y: 0},
+		MaxSpeed: 50, Acceleration: 50, TurnRate: math.Pi,
+		HP: 100, MaxHP: 100,
+		Energy: 100, MaxEnergy: 100, EnergyRecharge: 50,
+		LaserDamage: 20, LaserRange: 400, LaserEnergyCost: 5,
+	}
+	enemy := domain.Ship{
+		ID: 2, PlayerID: 200, SectorID: testSector,
+		Pos: domain.Vec2{X: 60, Y: 0}, Direction: domain.Vec2{X: 1, Y: 0},
+		HP: 300, MaxHP: 300, Shield: 100, MaxShield: 100,
+	}
+
+	registry := ai.NewRegistry()
+	registry.Register("movefire", func(_ []byte) (ai.Controller, error) {
+		return moveAndFireController{}, nil
+	})
+
+	w := sector.NewWorker(0,
+		sector.Config{TickInterval: time.Second, AOIRadius: 5000},
+		clock.NewRealClock(), nil, nil,
+		map[domain.SectorID][]domain.Ship{testSector: {npc, enemy}},
+		sector.WithAI(registry, nil, map[domain.SectorID][]domain.AIState{testSector: {
+			{ShipID: 1, SectorID: testSector, ControllerKind: "movefire", StateJSON: nil},
+		}}),
+	)
+
+	for i := 0; i < 4; i++ {
+		w.Tick(ctx)
+	}
+
+	snap := w.Snapshot(testSector)
+	npcSnap, ok := snapshotShipByID(snap, 1)
+	require.True(t, ok)
+	require.NotNil(t, npcSnap.AttackTarget, "MoveAndFire must arm AttackTarget")
+	assert.Equal(t, domain.EntityKindShip, npcSnap.AttackTarget.Kind)
+	assert.Equal(t, int64(2), npcSnap.AttackTarget.ID)
+	require.NotNil(t, npcSnap.Target, "MoveAndFire must set the waypoint")
+	assert.Equal(t, domain.Vec2{X: -300, Y: 0}, *npcSnap.Target,
+		"waypoint is the action's own point, not the victim's position")
+	assert.Less(t, npcSnap.Pos.X, 0.0, "ship pulls away from the enemy toward its waypoint")
+
+	enemySnap, ok := snapshotShipByID(snap, 2)
+	require.True(t, ok)
+	assert.Less(t, enemySnap.Shield+enemySnap.HP, 400, "enemy keeps taking laser damage during the withdrawal")
+}

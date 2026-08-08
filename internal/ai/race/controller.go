@@ -3,8 +3,11 @@
 // anchor, engages hostile ships in detection range, and retreats when its
 // hull drops below a threshold — the MVP of the old FleetAI (CFleet::Turn).
 // Phase 8.4 adds emergent focus-fire: a ship prefers a hostile an ally is
-// already engaging, so race ships pack onto one target. Formal fleet/flight-
-// group structures (a coordinator, formations) remain deferred; see
+// already engaging, so race ships pack onto one target. TASK-66 adds emergent
+// squads: same-race warships of the sector form a flight group (leader =
+// lowest ShipID), wingmen hold a wedge formation on patrol, and the whole
+// squad retreats to the anchor when it has lost too many ships — all derived
+// per tick from the WorldView, without a coordinator or fleet tables; see
 // back/docs/specs/race_ai.md.
 package race
 
@@ -12,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"slices"
 
 	"spaceempire/back/internal/ai"
 	"spaceempire/back/internal/domain"
@@ -43,6 +47,17 @@ type Config struct {
 	PatrolRadius float64
 	// PatrolStep is the patrol angle advanced per tick (radians).
 	PatrolStep float64
+	// FormationSpacing is the wedge spacing (world units) between formation
+	// rows behind the squad leader (TASK-66, the pos_in_order successor).
+	FormationSpacing float64
+	// SquadRetreatFraction: with a hostile in range, the squad retreats to
+	// the anchor once its live count drops below peak × fraction.
+	SquadRetreatFraction float64
+	// WarshipClassIDs marks the ship classes that count as squad members
+	// (M3/M4/M6 in production wiring — npc_spawner gives civilian TS a race
+	// too, so Race alone cannot define membership). nil/empty → no squads,
+	// every ship behaves solo as before TASK-66.
+	WarshipClassIDs map[domain.ShipClassID]bool
 }
 
 func (c Config) withDefaults() Config {
@@ -57,6 +72,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.PatrolStep <= 0 {
 		c.PatrolStep = 0.1
+	}
+	if c.FormationSpacing <= 0 {
+		c.FormationSpacing = 50
+	}
+	if c.SquadRetreatFraction <= 0 {
+		c.SquadRetreatFraction = 0.5
 	}
 	return c
 }
@@ -76,6 +97,11 @@ type state struct {
 	Anchor    domain.Vec2 `json:"anchor"`
 	HasAnchor bool        `json:"hasAnchor"`
 	Phase     float64     `json:"phase"`
+	// SquadPeak is the highest live squad size seen while a hostile was in
+	// range (TASK-66 group retreat). Rebases to the current size once no
+	// hostile is around. Absent in pre-TASK-66 snapshots → 0, raised on the
+	// first tick.
+	SquadPeak int `json:"squadPeak,omitempty"`
 }
 
 // Controller is one race ship's reactive AI.
@@ -93,8 +119,10 @@ func (c *Controller) MarshalState() ([]byte, error) { return json.Marshal(c.st) 
 // Order reports the controller's current behaviour (test/inspection helper).
 func (c *Controller) CurrentOrder() Order { return c.st.Order }
 
-// Tick decides the ship's action for this tick: engage the nearest hostile
-// in range, retreat when the hull is low, otherwise patrol around the anchor.
+// Tick decides the ship's action for this tick. With a hostile in range:
+// personal flee on low hull, then group retreat on squad losses, then engage
+// with focus-fire. Without one: rebase the squad peak and patrol — the leader
+// (and any solo ship) circles the anchor, wingmen hold a formation offset.
 func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 	self := view.Self()
 	if !c.st.HasAnchor {
@@ -103,12 +131,22 @@ func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 	}
 
 	ships := view.Ships()
+	squad := c.squad(self, ships)
 	nearest, found := c.nearestHostile(self, ships)
 
 	if found {
+		if len(squad) > c.st.SquadPeak {
+			c.st.SquadPeak = len(squad)
+		}
 		if c.hullFraction(self) < c.cfg.FleeThreshold {
 			c.st.Order = OrderRetreat
 			return ai.MoveTo{Target: c.fleePoint(self.Pos, nearest.Pos)}
+		}
+		// Group retreat (TASK-66): the squad has lost too many ships since
+		// the fight started — fall back to the anchor even at full hull.
+		if float64(len(squad)) < float64(c.st.SquadPeak)*c.cfg.SquadRetreatFraction {
+			c.st.Order = OrderRetreat
+			return ai.MoveTo{Target: c.st.Anchor}
 		}
 		// Focus-fire (8.4): if an ally is already engaging a hostile in range,
 		// converge on it instead of the nearest — race ships pack onto one
@@ -121,9 +159,68 @@ func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 		return ai.Attack{Target: domain.EntityRef{Kind: domain.EntityKindShip, ID: int64(target.ID)}}
 	}
 
+	// No hostile around: rebase the peak to the current size so irreplaceable
+	// losses do not lock the squad into an eternal retreat.
+	c.st.SquadPeak = len(squad)
 	c.st.Order = OrderPatrol
+	if leaderPos, rank, wingman := c.formationSlot(self, squad, ships); wingman {
+		return ai.MoveTo{Target: leaderPos.Add(c.formationOffset(rank))}
+	}
 	c.st.Phase += c.cfg.PatrolStep
 	return ai.MoveTo{Target: c.patrolPoint()}
+}
+
+// squad returns the ID-sorted flight group self belongs to: the sector's live
+// same-race warships (WarshipClassIDs), self included. Empty when self is not
+// a warship (civilians of the race never join; ShipClassID 0 — spacesuits /
+// legacy rows — is never a warship class).
+func (c *Controller) squad(self domain.Ship, ships []domain.Ship) []domain.ShipID {
+	if !c.cfg.WarshipClassIDs[self.ShipClassID] {
+		return nil
+	}
+	ids := []domain.ShipID{self.ID}
+	for _, o := range ships {
+		if o.ID == self.ID || o.HP <= 0 || o.Race != self.Race || !c.cfg.WarshipClassIDs[o.ShipClassID] {
+			continue
+		}
+		ids = append(ids, o.ID)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// formationSlot resolves self's place in the squad formation. The leader
+// (lowest ShipID) and single-ship squads get wingman=false — they patrol the
+// anchor circle as before. A wingman gets the leader's position plus its
+// 1-based rank in the ID-sorted squad (the pos_in_order successor).
+func (c *Controller) formationSlot(self domain.Ship, squad []domain.ShipID, ships []domain.Ship) (leaderPos domain.Vec2, rank int, wingman bool) {
+	if len(squad) < 2 || squad[0] == self.ID {
+		return domain.Vec2{}, 0, false
+	}
+	rank, _ = slices.BinarySearch(squad, self.ID)
+	for _, o := range ships {
+		if o.ID == squad[0] {
+			return o.Pos, rank, true
+		}
+	}
+	// Unreachable: a non-self leader always comes from the ships slice.
+	return domain.Vec2{}, 0, false
+}
+
+// formationOffset is the deterministic wedge slot for a wingman: ranks 1 and 2
+// sit one FormationSpacing row behind the leader on alternating sides, ranks
+// 3 and 4 two rows behind, and so on. "Behind" is world -X — the wedge is a
+// fixed-axis formation, deterministic regardless of the leader's heading.
+func (c *Controller) formationOffset(rank int) domain.Vec2 {
+	row := float64((rank + 1) / 2)
+	side := 1.0
+	if rank%2 == 0 {
+		side = -1
+	}
+	return domain.Vec2{
+		X: -row * c.cfg.FormationSpacing,
+		Y: side * row * c.cfg.FormationSpacing,
+	}
 }
 
 // allyFocusTarget returns the nearest in-range hostile that a same-side ally

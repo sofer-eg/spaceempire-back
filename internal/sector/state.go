@@ -407,6 +407,41 @@ func (s *sectorState) collectDirtyDestructibles() []domain.DestructibleStatic {
 	return out
 }
 
+// withLiveStatics returns base plus the live combat record of every ref in refs
+// that base does not already carry. It is how a static that just re-entered a
+// subscriber's radar window gets its hp/shield back (TASK-193): the layout ships
+// in StaticsAdded with its SPAWN numbers, while the client dropped the live
+// record when the object left the window (StaticsRemoved) — so without this the
+// object sits at "no data" (панель «Бой» печатает «Состояние цели недоступно.»,
+// щитовой бар пропадает) until its next dirty event, which for an intact object
+// never comes.
+//
+// The result is always a fresh slice: base is the per-tick dirty set that every
+// subscriber's patch shares, so appending into it would leak one subscriber's
+// top-up into another subscriber's patch. A ref already in base (the object
+// entered the window AND took damage in the same tick) is left alone rather than
+// duplicated, and a ref with no live record — not every visible static is
+// destructible — is skipped.
+func (s *sectorState) withLiveStatics(base []domain.DestructibleStatic, refs []domain.EntityRef) []domain.DestructibleStatic {
+	have := make(map[domain.EntityRef]struct{}, len(base))
+	for _, d := range base {
+		have[d.Ref] = struct{}{}
+	}
+	out := make([]domain.DestructibleStatic, 0, len(base)+len(refs))
+	out = append(out, base...)
+	for _, ref := range refs {
+		if _, dup := have[ref]; dup {
+			continue
+		}
+		d, ok := s.destructibles[ref]
+		if !ok {
+			continue
+		}
+		out = append(out, *d)
+	}
+	return out
+}
+
 // snapshotDestructibles returns value copies of every live destructible,
 // sorted by (kind, id) for determinism. Published in the Snapshot so
 // /api/state and the AI/tests can read static combat state.
@@ -613,13 +648,25 @@ func cloneEquipment(eq []domain.InstalledEquipment) []domain.InstalledEquipment 
 	return append([]domain.InstalledEquipment(nil), eq...)
 }
 
-// liveStaticRefs returns the set of refs for every static still alive (phase
-// 10.20 L2). A fresh subscription seeds lastSentStatics with this so the first
-// per-tick diff trims the welcome's full statics down to the big-radar window.
-func (s *sectorState) liveStaticRefs() map[domain.EntityRef]struct{} {
-	out := make(map[domain.EntityRef]struct{}, len(s.destructibles))
-	for ref := range s.destructibles {
-		out[ref] = struct{}{}
+// publishedStaticRefs returns the set of refs the welcome StaticsMessage will
+// carry: the destructibles of the LAST PUBLISHED snapshot (phase 10.20 L2). A
+// fresh subscription seeds lastSentStatics with this so the first per-tick diff
+// trims the welcome's full statics down to the big-radar window.
+//
+// It reads the snapshot rather than the live map on purpose (TASK-193 AC-5). The
+// snapshot is republished only at the end of a tick, while an install command
+// (satellite, jammer) puts its object into the live map the moment it applies —
+// so between the two there is a window where they disagree. Seeding from the
+// live map in that window marks an object as already-delivered that the welcome
+// frame never carried, and the diff then has nothing to add: the client stays
+// blind to it for the whole session. Seeding from the snapshot cannot lose an
+// object; at worst the frame is a tick newer than the seed and the first patch
+// re-sends something the client already has, which it merges by ref.
+func (s *sectorState) publishedStaticRefs() map[domain.EntityRef]struct{} {
+	snap := s.snap.Load()
+	out := make(map[domain.EntityRef]struct{}, len(snap.Destructibles))
+	for _, d := range snap.Destructibles {
+		out[d.Ref] = struct{}{}
 	}
 	return out
 }

@@ -44,9 +44,9 @@ type Subscription struct {
 	lastSentContainer map[domain.ContainerID]domain.Container
 	lastSentAsteroid  map[domain.AsteroidID]domain.Asteroid
 	// lastSentStatics is the set of static refs the subscriber currently has
-	// (phase 10.20 L2). Seeded at subscribe with every live static (the welcome
-	// StaticsMessage sends them all); the per-tick big-radar diff then adds /
-	// removes statics as the player moves.
+	// (phase 10.20 L2). Seeded at subscribe from the published snapshot the
+	// welcome StaticsMessage is built from (publishedStaticRefs); the per-tick
+	// big-radar diff then adds / removes statics as the player moves.
 	lastSentStatics map[domain.EntityRef]struct{}
 }
 
@@ -66,9 +66,10 @@ func (c subscribeCommand) apply(w *Worker, s *sectorState) {
 		Radius:   w.cfg.AOIRadius,
 		id:       id,
 		patchOut: out,
-		// The welcome StaticsMessage delivers every static, so seed the seen-set
-		// with all of them; the first big-radar diff trims to the window (10.20).
-		lastSentStatics: s.liveStaticRefs(),
+		// The welcome StaticsMessage delivers every static of the last published
+		// snapshot, so seed the seen-set from that same snapshot; the first
+		// big-radar diff trims to the window (10.20).
+		lastSentStatics: s.publishedStaticRefs(),
 	}
 	s.subs[sub.id] = sub
 	select {

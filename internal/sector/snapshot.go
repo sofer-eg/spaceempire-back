@@ -284,6 +284,14 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 		subStaticsRemoved = append(subStaticsRemoved, diffStaticRefs(currStatics, sub.lastSentStatics)...)
 		if len(addedRefs) > 0 {
 			patch.StaticsAdded = s.collectStaticsByRefs(addedRefs)
+			// The layout alone is not enough: when the object left the window the
+			// client dropped its live combat record (StaticsRemoved), and an intact
+			// object never produces another dirty event — so it would sit at "no
+			// data" forever. Top this subscriber's combat delta up with the live
+			// hp/shield of everything that just re-entered (TASK-193). Gates carry
+			// no layout at all (they are topology, not SectorStatics), so for them
+			// this top-up IS the whole delivery.
+			patch.StaticsUpdated = s.withLiveStatics(staticUpdates, addedRefs)
 		}
 		patch.StaticsRemoved = subStaticsRemoved
 		patch.TimeScale = s.timeScale

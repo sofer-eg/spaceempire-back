@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"spaceempire/back/internal/domain"
 )
 
-// Clan name/tag length bounds (after trimming surrounding whitespace).
+// Clan name/tag length bounds, in characters (runes) — not bytes, so a
+// Cyrillic tag gets the same allowance as a Latin one. Applied after
+// trimming surrounding whitespace.
 const (
 	minNameLen = 3
 	maxNameLen = 32
@@ -57,10 +60,10 @@ func NewService(repo Repo) *Service {
 func (s *Service) Create(ctx context.Context, leader domain.PlayerID, name, tag string) (Clan, error) {
 	name = strings.TrimSpace(name)
 	tag = strings.TrimSpace(tag)
-	if l := len(name); l < minNameLen || l > maxNameLen {
+	if l := utf8.RuneCountInString(name); l < minNameLen || l > maxNameLen {
 		return Clan{}, fmt.Errorf("%w: длина названия должна быть от %d до %d символов", ErrInvalidInput, minNameLen, maxNameLen)
 	}
-	if l := len(tag); l < minTagLen || l > maxTagLen {
+	if l := utf8.RuneCountInString(tag); l < minTagLen || l > maxTagLen {
 		return Clan{}, fmt.Errorf("%w: длина тега должна быть от %d до %d символов", ErrInvalidInput, minTagLen, maxTagLen)
 	}
 

@@ -2,6 +2,7 @@ package clans_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -219,6 +220,57 @@ func TestUnit_Clans_Create_Validation(t *testing.T) {
 			svc, _ := newService(t)
 			_, err := svc.Create(context.Background(), leaderID, tt.clanName, tt.tag)
 			assert.ErrorIs(t, err, clans.ErrInvalidInput)
+		})
+	}
+}
+
+// TestUnit_Clans_Create_LengthInRunesNotBytes pins the name/tag bounds to
+// characters. Cyrillic takes 2 bytes per rune in UTF-8, so a byte-based check
+// halves every advertised limit: "ФЛОТ" (4 chars, 8 bytes) would be rejected
+// while "FLEET" passes, and a one-letter Cyrillic tag (2 bytes) would sneak
+// past the two-character minimum.
+func TestUnit_Clans_Create_LengthInRunesNotBytes(t *testing.T) {
+	t.Parallel()
+	const ru = "я" // 2 bytes in UTF-8
+
+	tests := []struct {
+		name     string
+		clanName string
+		tag      string
+		ok       bool
+	}{
+		// Tag bounds are 2..6 characters.
+		{"cyrillic tag of 4", "Русский Клан", "ФЛОТ", true},
+		{"cyrillic tag of 5", "Русский Клан", "СОЮЗЫ", true},
+		{"cyrillic tag of 6", "Русский Клан", strings.Repeat(ru, 6), true},
+		{"cyrillic tag of 7", "Русский Клан", strings.Repeat(ru, 7), false},
+		{"cyrillic tag of 1", "Русский Клан", ru, false},
+		{"cyrillic tag of 2", "Русский Клан", strings.Repeat(ru, 2), true},
+		// Name bounds are 3..32 characters.
+		{"cyrillic name of 32", strings.Repeat(ru, 32), "ТЕГ", true},
+		{"cyrillic name of 33", strings.Repeat(ru, 33), "ТЕГ", false},
+		{"cyrillic name of 2", strings.Repeat(ru, 2), "ТЕГ", false},
+		{"cyrillic name of 3", strings.Repeat(ru, 3), "ТЕГ", true},
+		// Latin input keeps behaving exactly as before (regression).
+		{"latin tag of 6", "Argon Federation", "AGNAGN", true},
+		{"latin tag of 7", "Argon Federation", "AGNAGNX", false},
+		{"latin tag of 1", "Argon Federation", "A", false},
+		{"latin name of 32", strings.Repeat("a", 32), "AGN", true},
+		{"latin name of 33", strings.Repeat("a", 33), "AGN", false},
+		{"latin name of 2", "ab", "AGN", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newService(t)
+			clan, err := svc.Create(context.Background(), leaderID, tt.clanName, tt.tag)
+			if !tt.ok {
+				assert.ErrorIs(t, err, clans.ErrInvalidInput)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.clanName, clan.Name)
+			assert.Equal(t, tt.tag, clan.Tag)
 		})
 	}
 }

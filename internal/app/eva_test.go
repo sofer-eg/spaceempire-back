@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,9 @@ import (
 type fakeEvaPool struct {
 	shipSector map[domain.ShipID]domain.SectorID
 	ships      map[domain.SectorID][]domain.Ship
-	sent       []sector.Command
+
+	mu   sync.Mutex // guards sent: the concurrency test drives two requests at once
+	sent []sector.Command
 }
 
 func (f *fakeEvaPool) LookupShipSector(id domain.ShipID) (domain.SectorID, bool) {
@@ -50,7 +53,9 @@ func (f *fakeEvaPool) Snapshot(sec domain.SectorID) sector.Snapshot {
 }
 
 func (f *fakeEvaPool) Send(_ domain.SectorID, cmd sector.Command) error {
+	f.mu.Lock()
 	f.sent = append(f.sent, cmd)
+	f.mu.Unlock()
 	// Reply to commands that carry a reply channel so callers don't block.
 	switch c := cmd.(type) {
 	case sector.RemoveShipCommand:
@@ -78,22 +83,54 @@ type suitCall struct {
 
 type fakeEvaSuits struct {
 	nextID domain.ShipID
-	calls  []suitCall
+	// gate, when set, runs inside the spawn — the concurrency test uses it to
+	// hold every caller until they have all spawned, reproducing the real
+	// window (the spawner waits for a worker ack) instead of hoping for a
+	// scheduling coincidence.
+	gate func()
+
+	mu    sync.Mutex
+	calls []suitCall
 	// spawned mirrors the DB rows the spawner inserted — they exist before the
 	// worker republishes its snapshot, so fakeEvaShips can answer for them.
 	spawned map[domain.ShipID]bool
 }
 
 func (f *fakeEvaSuits) SpawnSpacesuit(_ context.Context, p domain.PlayerID, s domain.SectorID, pos domain.Vec2, docked *domain.EntityRef) (domain.ShipID, error) {
+	f.mu.Lock()
+	// Each spawn is a fresh row, exactly like the INSERT ... RETURNING id it
+	// stands for.
+	id := f.nextID + domain.ShipID(len(f.calls))
 	f.calls = append(f.calls, suitCall{p, s, pos, docked})
 	if f.spawned == nil {
 		f.spawned = map[domain.ShipID]bool{}
 	}
-	f.spawned[f.nextID] = true
-	return f.nextID, nil
+	f.spawned[id] = true
+	f.mu.Unlock()
+	if f.gate != nil {
+		f.gate()
+	}
+	return id, nil
 }
 
+func (f *fakeEvaSuits) spawnCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func (f *fakeEvaSuits) isSpawned(id domain.ShipID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.spawned[id]
+}
+
+// fakeEvaPlayers stands in for the players table. The mutex is the row lock,
+// not a way to serialize the handler: every method takes it for the duration of
+// one statement only, so two concurrent requests interleave freely everywhere
+// except inside a single compare-and-set — which is exactly what Postgres does.
 type fakeEvaPlayers struct {
+	mu        sync.Mutex
 	active    map[domain.PlayerID]domain.ShipID
 	passenger map[domain.PlayerID]domain.ShipID
 	// injected failures for the compensation paths (TASK-194)
@@ -106,11 +143,15 @@ func newFakeEvaPlayers() *fakeEvaPlayers {
 }
 
 func (f *fakeEvaPlayers) ActiveShip(_ context.Context, p domain.PlayerID) (domain.ShipID, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	id, ok := f.active[p]
 	return id, ok && id != 0, nil
 }
 
 func (f *fakeEvaPlayers) SetActiveShip(_ context.Context, p domain.PlayerID, id domain.ShipID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.setActiveErr != nil {
 		return f.setActiveErr
 	}
@@ -118,17 +159,41 @@ func (f *fakeEvaPlayers) SetActiveShip(_ context.Context, p domain.PlayerID, id 
 	return nil
 }
 
+func (f *fakeEvaPlayers) CompareAndSetActiveShip(_ context.Context, p domain.PlayerID, expected, next domain.ShipID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.setActiveErr != nil {
+		return false, f.setActiveErr
+	}
+	if f.active[p] != expected {
+		return false, nil
+	}
+	f.active[p] = next
+	return true, nil
+}
+
 func (f *fakeEvaPlayers) PassengerHost(_ context.Context, p domain.PlayerID) (domain.ShipID, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	id, ok := f.passenger[p]
 	return id, ok && id != 0, nil
 }
 
 func (f *fakeEvaPlayers) SetPassengerHost(_ context.Context, p domain.PlayerID, host domain.ShipID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.setHostErr != nil {
 		return f.setHostErr
 	}
 	f.passenger[p] = host
 	return nil
+}
+
+// activeShip reads the pointer for assertions.
+func (f *fakeEvaPlayers) activeShip(p domain.PlayerID) domain.ShipID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.active[p]
 }
 
 // fakeEvaShips answers is_spacesuit from the DB's point of view: the ships the
@@ -148,7 +213,7 @@ func (f *fakeEvaShips) IsSpacesuit(_ context.Context, id domain.ShipID) (bool, e
 	if suit, ok := f.dbOnly[id]; ok {
 		return suit, nil
 	}
-	if f.suits != nil && f.suits.spawned[id] {
+	if f.suits != nil && f.suits.isSpawned(id) {
 		return true, nil
 	}
 	if f.pool != nil {
@@ -304,6 +369,66 @@ func TestUnit_Eva_ExitShip_RepeatBeforeSnapshotRepublish_SameSuit(t *testing.T) 
 	assert.Empty(t, suits.calls, "no second suit while the snapshot is stale")
 }
 
+// TASK-194: two exit-ship requests genuinely running at the same time (the
+// double-click). Both get past the "not in a suit" read and both spawn — the
+// gate that has to hold is the conditional write on active_ship_id: exactly one
+// claims the pointer, the loser deletes its own suit and reports the winner's.
+// The spawner gate holds both callers until they have both spawned, so the
+// overlap is forced rather than hoped for.
+func TestUnit_Eva_ExitShip_ConcurrentRequests_OneSuitSurvives(t *testing.T) {
+	t.Parallel()
+	const (
+		player   = domain.PlayerID(100)
+		attempts = 2
+	)
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{42: 2},
+		ships:      map[domain.SectorID][]domain.Ship{2: {{ID: 42, PlayerID: player, SectorID: 2}}},
+	}
+	var spawnedAll sync.WaitGroup
+	spawnedAll.Add(attempts)
+	suits := &fakeEvaSuits{nextID: 90, gate: func() {
+		spawnedAll.Done()
+		spawnedAll.Wait()
+	}}
+	players := newFakeEvaPlayers()
+	players.active[player] = 42
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	codes := make([]int, attempts)
+	bodies := make([]int64, attempts)
+	var running sync.WaitGroup
+	running.Add(attempts)
+	for i := range attempts {
+		go func() {
+			defer running.Done()
+			rr := doExit(t, srv, player, 42)
+			codes[i] = rr.Code
+			var resp exitShipResponse
+			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+			bodies[i] = resp.ShipID
+		}()
+	}
+	running.Wait()
+
+	winner := players.activeShip(player)
+	assert.Equal(t, attempts, suits.spawnCount(), "both attempts raced past the read, as they do live")
+	for i := range attempts {
+		assert.Equalf(t, http.StatusOK, codes[i], "attempt %d", i)
+		assert.Equalf(t, int64(winner), bodies[i], "attempt %d reports the suit that actually stuck", i)
+	}
+	// Every suit except the winner must have been removed again.
+	removed := 0
+	for _, c := range pool.sent {
+		if rc, ok := c.(sector.RemoveShipCommand); ok {
+			assert.NotEqual(t, winner, rc.ShipID, "the winning suit is never removed")
+			removed++
+		}
+	}
+	assert.Equal(t, attempts-1, removed, "exactly the losing suits are rolled back")
+	assert.True(t, winner == 90 || winner == 91, "the winner is one of the spawned suits, got %d", winner)
+}
+
 // TASK-194 / AC-7: exiting a ship the player owns but does not fly is the
 // teleport hole — the suit would spawn at that ship's position, in another
 // sector, and become active.
@@ -418,11 +543,18 @@ func shipRemoved(pool *fakeEvaPool, shipID domain.ShipID) bool {
 	return false
 }
 
+// The caller flies their own ship 41 and names someone else's hull. (Since
+// TASK-194 the controlled ship is resolved first, so a caller with no ship at
+// all is answered «нет активного корабля» before ownership is even looked at —
+// there is nothing for them to exit either way.)
 func TestUnit_Eva_ExitShip_OtherPlayer_Forbidden(t *testing.T) {
 	t.Parallel()
 	pool := &fakeEvaPool{
-		shipSector: map[domain.ShipID]domain.SectorID{42: 2},
-		ships:      map[domain.SectorID][]domain.Ship{2: {{ID: 42, PlayerID: 999, SectorID: 2}}},
+		shipSector: map[domain.ShipID]domain.SectorID{41: 2, 42: 2},
+		ships: map[domain.SectorID][]domain.Ship{2: {
+			{ID: 41, PlayerID: 100, SectorID: 2},
+			{ID: 42, PlayerID: 999, SectorID: 2},
+		}},
 	}
 	suits := &fakeEvaSuits{}
 	srv := newEvaTest(pool, suits, newFakeEvaPlayers(), &fakeEvaBus{})
@@ -435,9 +567,24 @@ func TestUnit_Eva_ExitShip_OtherPlayer_Forbidden(t *testing.T) {
 
 func TestUnit_Eva_ExitShip_Unknown_NotFound(t *testing.T) {
 	t.Parallel()
-	srv := newEvaTest(&fakeEvaPool{}, &fakeEvaSuits{}, newFakeEvaPlayers(), &fakeEvaBus{})
+	pool := &fakeEvaPool{
+		shipSector: map[domain.ShipID]domain.SectorID{41: 2},
+		ships:      map[domain.SectorID][]domain.Ship{2: {{ID: 41, PlayerID: 100, SectorID: 2}}},
+	}
+	srv := newEvaTest(pool, &fakeEvaSuits{}, newFakeEvaPlayers(), &fakeEvaBus{})
 	rr := doExit(t, srv, domain.PlayerID(100), 12345)
 	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+// TASK-194: a caller with no ship in the world at all is refused before the
+// ownership lookup — the resolution has nothing to hand back.
+func TestUnit_Eva_ExitShip_NoShipAtAll_Conflict(t *testing.T) {
+	t.Parallel()
+	suits := &fakeEvaSuits{}
+	srv := newEvaTest(&fakeEvaPool{}, suits, newFakeEvaPlayers(), &fakeEvaBus{})
+	rr := doExit(t, srv, domain.PlayerID(100), 12345)
+	assert.Equal(t, http.StatusConflict, rr.Code)
+	assert.Empty(t, suits.calls)
 }
 
 // --- board ------------------------------------------------------------------
@@ -604,6 +751,52 @@ func disembarkScene() (*fakeEvaPool, *fakeEvaPlayers, *fakeEvaSuits) {
 	return pool, players, &fakeEvaSuits{nextID: 88}
 }
 
+// TASK-194: two concurrent disembarks of the same rider — same conditional
+// write, same outcome: one suit survives, both callers are told which.
+func TestUnit_Eva_Disembark_ConcurrentRequests_OneSuitSurvives(t *testing.T) {
+	t.Parallel()
+	const attempts = 2
+	pool, players, suits := disembarkScene()
+	var spawnedAll sync.WaitGroup
+	spawnedAll.Add(attempts)
+	suits.gate = func() {
+		spawnedAll.Done()
+		spawnedAll.Wait()
+	}
+	srv := newEvaTest(pool, suits, players, &fakeEvaBus{})
+
+	codes := make([]int, attempts)
+	bodies := make([]int64, attempts)
+	var running sync.WaitGroup
+	running.Add(attempts)
+	for i := range attempts {
+		go func() {
+			defer running.Done()
+			rr := doDisembark(t, srv, 100)
+			codes[i] = rr.Code
+			var resp disembarkResponse
+			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+			bodies[i] = resp.ShipID
+		}()
+	}
+	running.Wait()
+
+	winner := players.activeShip(100)
+	assert.Equal(t, attempts, suits.spawnCount())
+	for i := range attempts {
+		assert.Equalf(t, http.StatusOK, codes[i], "attempt %d", i)
+		assert.Equalf(t, int64(winner), bodies[i], "attempt %d reports the surviving suit", i)
+	}
+	removed := 0
+	for _, c := range pool.sent {
+		if rc, ok := c.(sector.RemoveShipCommand); ok {
+			assert.NotEqual(t, winner, rc.ShipID)
+			removed++
+		}
+	}
+	assert.Equal(t, attempts-1, removed, "exactly the losing suits are rolled back")
+}
+
 // TASK-194 / AC-2: the old code logged the failed SetPassengerHost and still
 // answered 200, leaving the player a passenger with a stray suit in the world.
 func TestUnit_Eva_Disembark_ClearHostFails_NotOK(t *testing.T) {
@@ -617,6 +810,9 @@ func TestUnit_Eva_Disembark_ClearHostFails_NotOK(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 	assert.Equal(t, domain.ShipID(70), players.passenger[100], "still riding the host")
 	assert.True(t, shipRemoved(pool, 88), "the spawned suit is rolled back")
+	// The pointer is put back by hand, not left to the FK's ON DELETE SET NULL:
+	// the remove is fire-and-forget and the worker only logs a failed row delete.
+	assert.Equal(t, domain.ShipID(0), players.activeShip(100), "active_ship_id restored to the passenger's NULL")
 }
 
 // TASK-194: same for the active_ship_id write, which runs before the passenger

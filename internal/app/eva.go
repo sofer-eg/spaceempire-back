@@ -63,6 +63,9 @@ type spacesuitSpawner interface {
 type evaPlayers interface {
 	ActiveShip(ctx context.Context, player domain.PlayerID) (domain.ShipID, bool, error)
 	SetActiveShip(ctx context.Context, player domain.PlayerID, shipID domain.ShipID) error
+	// CompareAndSetActiveShip claims the pointer only while it still holds
+	// expected, so two overlapping exits cannot both spawn a suit (TASK-194).
+	CompareAndSetActiveShip(ctx context.Context, player domain.PlayerID, expected, next domain.ShipID) (bool, error)
 	PassengerHost(ctx context.Context, player domain.PlayerID) (domain.ShipID, bool, error)
 	SetPassengerHost(ctx context.Context, player domain.PlayerID, hostID domain.ShipID) error
 }
@@ -146,6 +149,19 @@ func (s *evaServer) handleDisembark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The pointer this handler is about to claim, read before anything is
+	// created so the conditional write below can tell «still as I found it»
+	// from «someone else got here first». A passenger normally carries NULL.
+	prevActive, hasActive, err := s.players.ActiveShip(r.Context(), player)
+	if err != nil {
+		s.logger.Error("disembark: active ship", "err", err, "player", int64(player))
+		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
+		return
+	}
+	if !hasActive {
+		prevActive = 0
+	}
+
 	suitID, err := s.suits.SpawnSpacesuit(r.Context(), player, host.SectorID, host.Pos, host.Docked)
 	if err != nil {
 		s.logger.Error("disembark: spawn suit", "err", err, "player", int64(player))
@@ -155,21 +171,37 @@ func (s *evaServer) handleDisembark(w http.ResponseWriter, r *http.Request) {
 	// Write order matters (TASK-194). The player resolution order is
 	// passenger -> active_ship_id -> min-id, so clearing the passenger link is
 	// the commit point of the whole transition and goes last. Anything failing
-	// before it is compensated by deleting the freshly spawned suit, which
-	// leaves the player exactly as they were — still riding the host — instead
-	// of answering 200 over a half-applied state (the old code logged both
-	// errors and reported success anyway).
-	if err := s.players.SetActiveShip(r.Context(), player, suitID); err != nil {
+	// before it is compensated by deleting the freshly spawned suit AND putting
+	// the pointer back by hand, which leaves the player exactly as they were —
+	// still riding the host — instead of answering 200 over a half-applied
+	// state (the old code logged both errors and reported success anyway).
+	won, err := s.players.CompareAndSetActiveShip(r.Context(), player, prevActive, suitID)
+	if err != nil {
 		s.logger.Error("disembark: set active", "err", err, "player", int64(player))
 		s.mirrorRemoveShip(host.SectorID, suitID)
 		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
 		return
 	}
+	if !won {
+		// A concurrent disembark already put this player into a suit.
+		s.mirrorRemoveShip(host.SectorID, suitID)
+		winner, has, err := s.players.ActiveShip(r.Context(), player)
+		if err != nil || !has {
+			s.logger.Error("disembark: reread active", "err", err, "player", int64(player))
+			writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
+			return
+		}
+		writeJSON(w, disembarkResponse{OK: true, ShipID: int64(winner)})
+		return
+	}
 	if err := s.players.SetPassengerHost(r.Context(), player, 0); err != nil {
 		s.logger.Error("disembark: clear host", "err", err, "player", int64(player))
-		// Dropping the suit also resets active_ship_id: the FK on
-		// players.active_ship_id is ON DELETE SET NULL (migration 0048), which
-		// is exactly the value a passenger carries.
+		// Undo the pointer explicitly rather than leaning on the FK's
+		// ON DELETE SET NULL: mirrorRemoveShip does not report back, and the
+		// worker only logs a failed row delete (sector/command.go).
+		if err := s.players.SetActiveShip(r.Context(), player, prevActive); err != nil {
+			s.logger.Error("disembark: restore active", "err", err, "player", int64(player))
+		}
 		s.mirrorRemoveShip(host.SectorID, suitID)
 		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
 		return
@@ -271,10 +303,6 @@ func (s *evaServer) handleExitShip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ship, _, ok := s.findOwnedShip(w, player, domain.ShipID(req.ShipID))
-	if !ok {
-		return
-	}
 	flown, ok := s.resolveControlledShip(w, r.Context(), player)
 	if !ok {
 		return
@@ -283,15 +311,25 @@ func (s *evaServer) handleExitShip(w http.ResponseWriter, r *http.Request) {
 	// exit they asked for has happened — answer the same suit instead of
 	// spawning a second one. A retry after a lost ack therefore looks like a
 	// plain success and the SPA picks the right ship up from refreshPlayer.
+	// Checked before the ship lookup below on purpose: the retry names the hull
+	// the player stepped out of, and that hull may already be destroyed, which
+	// would turn the promised idempotent 200 into a 404.
 	if flown.isSuit {
 		writeJSON(w, exitShipResponse{OK: true, ShipID: int64(flown.id)})
 		return
 	}
+	ship, _, ok := s.findOwnedShip(w, player, domain.ShipID(req.ShipID))
+	if !ok {
+		return
+	}
 	// Gate (TASK-194): you may only step out of the hull you are actually
 	// flying. Ownership alone was not enough — the suit spawns at the position
-	// of the NAMED ship and becomes active, so any owned ship parked anywhere in
-	// the galaxy was a free cross-sector teleport (no fuel, no gate, no jump
-	// drive), and every call minted another suit row.
+	// of the NAMED ship and becomes active, so exiting a hull parked elsewhere
+	// moved the player there while their previous ship stayed flown-but-
+	// abandoned, and every call minted another suit row. (Switching to a remote
+	// owned ship is a legal move on its own — POST /api/ship/{id}/activate,
+	// phase 10.14a — so this is about keeping the two pointers consistent, not
+	// about the travel.)
 	if ship.ID != flown.id {
 		writeJSONError(w, http.StatusConflict, "это не тот корабль, которым вы управляете")
 		return
@@ -303,13 +341,30 @@ func (s *evaServer) handleExitShip(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
 		return
 	}
-	if err := s.players.SetActiveShip(r.Context(), player, suitID); err != nil {
+	// Conditional write (TASK-194): the read above and this write are not one
+	// transaction, and the spawn between them waits for a worker ack — wide
+	// enough for a second click to slip through. Claim the pointer only if it
+	// still holds what we read; the loser of the race drops its own suit and
+	// reports the one that stuck.
+	won, err := s.players.CompareAndSetActiveShip(r.Context(), player, flown.prev, suitID)
+	if err != nil {
 		s.logger.Error("exit-ship: set active", "err", err, "player", int64(player), "suit", int64(suitID))
 		// Compensate: drop the suit we just spawned, otherwise the failed call
 		// leaves an orphan hull and the retry (active_ship_id still points at
 		// the old ship) mints yet another one.
 		s.mirrorRemoveShip(ship.SectorID, suitID)
 		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
+		return
+	}
+	if !won {
+		s.mirrorRemoveShip(ship.SectorID, suitID)
+		winner, has, err := s.players.ActiveShip(r.Context(), player)
+		if err != nil || !has {
+			s.logger.Error("exit-ship: reread active", "err", err, "player", int64(player))
+			writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
+			return
+		}
+		writeJSON(w, exitShipResponse{OK: true, ShipID: int64(winner)})
 		return
 	}
 	writeJSON(w, exitShipResponse{OK: true, ShipID: int64(suitID)})
@@ -528,21 +583,32 @@ func (s *evaServer) shipByID(shipID domain.ShipID) (domain.Ship, domain.SectorID
 	return domain.Ship{}, 0, false
 }
 
-// controlled is the hull the player currently flies: its id plus whether it is
-// already a spacesuit.
+// controlled is the hull the player currently flies: its id, whether it is
+// already a spacesuit, and the raw active_ship_id the decision was read from
+// (0 for NULL) — the expected value for the conditional write that follows.
 type controlled struct {
 	id     domain.ShipID
 	isSuit bool
+	prev   domain.ShipID
 }
 
 // resolveControlledShip returns the ship the player currently flies, following
-// the project-wide order passenger -> active_ship_id -> lowest-id owned ship
-// (same as api.resolveActiveShip and the WS subscribe path, so the gate agrees
-// with what the SPA shows as «own ship»). The min-id fallback has to stay:
-// accounts that never switched ships carry active_ship_id NULL, and refusing
-// their exit would break a legal action. A passenger flies nothing at all — the
-// hull under them is someone else's — so they are refused here; their way out
-// is POST /api/cmd/disembark.
+// the order passenger -> active_ship_id -> lowest-id owned ship. A passenger
+// flies nothing at all — the hull under them is someone else's — so they are
+// refused here; their way out is POST /api/cmd/disembark. The min-id fallback
+// has to stay: accounts that never switched ships carry active_ship_id NULL,
+// and refusing their exit would break a legal action.
+//
+// Two deliberate differences from the other resolvers, both making this one
+// stricter (it gates a mutation, they only pick a camera/trade subject):
+//
+//   - api.resolveActiveShip (api/market_scan.go) and the WS subscribe path
+//     (api/ws.go) drop a non-NULL active_ship_id that is missing from RAM and
+//     fall back to min-id. Here that fallback would hand the caller a different
+//     hull than the one they are flying, which is the very thing this gate
+//     exists to refuse, so a set active_ship_id is used as-is.
+//   - the SPA (front/src/GameLayout.tsx) computes its min-id over the ships of
+//     the subscribed sector only; this one runs over every sector in RAM.
 //
 // isSuit comes from the DB, not from a worker snapshot: a suit spawned by an
 // exit is invisible in RAM until the worker republishes (up to a full
@@ -567,7 +633,9 @@ func (s *evaServer) resolveControlledShip(w http.ResponseWriter, ctx context.Con
 		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
 		return controlled{}, false
 	}
+	prev := shipID
 	if !has || shipID == 0 {
+		prev = 0
 		id, _, ok := s.pool.LookupPrimaryShipByPlayer(player)
 		if !ok {
 			writeJSONError(w, http.StatusConflict, "нет активного корабля")
@@ -581,5 +649,5 @@ func (s *evaServer) resolveControlledShip(w http.ResponseWriter, ctx context.Con
 		writeJSONError(w, http.StatusInternalServerError, "внутренняя ошибка")
 		return controlled{}, false
 	}
-	return controlled{id: shipID, isSuit: isSuit}, true
+	return controlled{id: shipID, isSuit: isSuit, prev: prev}, true
 }

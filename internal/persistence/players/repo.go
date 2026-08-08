@@ -109,15 +109,39 @@ const setActiveShipSQL = `UPDATE players SET active_ship_id = $2 WHERE id = $1`
 // A zero shipID stores NULL, reverting to the lowest-id fallback (used when a
 // player becomes a passenger and has no own ship in the world).
 func (r *Repository) SetActiveShip(ctx context.Context, playerID domain.PlayerID, shipID domain.ShipID) error {
-	var arg *int64
-	if shipID != 0 {
-		v := int64(shipID)
-		arg = &v
-	}
-	if _, err := r.exec.Exec(ctx, setActiveShipSQL, int64(playerID), arg); err != nil {
+	if _, err := r.exec.Exec(ctx, setActiveShipSQL, int64(playerID), shipIDArg(shipID)); err != nil {
 		return fmt.Errorf("set active ship: %w", err)
 	}
 	return nil
+}
+
+const casActiveShipSQL = `
+UPDATE players SET active_ship_id = $2
+WHERE id = $1 AND active_ship_id IS NOT DISTINCT FROM $3
+`
+
+// CompareAndSetActiveShip points the player at next only while active_ship_id
+// still holds expected (0 means NULL on both sides). ok=false means a
+// concurrent request moved the pointer first — the caller must undo whatever it
+// created for this attempt. Added for TASK-194: two overlapping exit-ship calls
+// used to read the same "not in a suit" state, spawn a suit each and let the
+// last write win, leaving the loser's suit orphaned behind a live player.
+func (r *Repository) CompareAndSetActiveShip(ctx context.Context, playerID domain.PlayerID, expected, next domain.ShipID) (bool, error) {
+	tag, err := r.exec.Exec(ctx, casActiveShipSQL, int64(playerID), shipIDArg(next), shipIDArg(expected))
+	if err != nil {
+		return false, fmt.Errorf("cas active ship: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// shipIDArg maps the zero id to a SQL NULL, the encoding active_ship_id uses
+// for "no explicit ship".
+func shipIDArg(id domain.ShipID) *int64 {
+	if id == 0 {
+		return nil
+	}
+	v := int64(id)
+	return &v
 }
 
 // Reputation is a player's standing on the two single-value rating axes ported

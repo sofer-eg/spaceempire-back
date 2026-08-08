@@ -24,9 +24,11 @@ type fakeSuitSpawner struct {
 	respawns []domain.PlayerID
 }
 
+// SpawnSpacesuit hands out a distinct id per call (500, 501, …) so callers that
+// repoint active_ship_id at the new suit can be asserted on.
 func (f *fakeSuitSpawner) SpawnSpacesuit(_ context.Context, p domain.PlayerID, s domain.SectorID, pos domain.Vec2, _ *domain.EntityRef) (domain.ShipID, error) {
 	f.suits = append(f.suits, spawnSuitCall{p, s, pos})
-	return 0, nil
+	return domain.ShipID(499 + len(f.suits)), nil
 }
 
 func (f *fakeSuitSpawner) SpawnFor(_ context.Context, p domain.PlayerID) error {
@@ -42,7 +44,13 @@ func (f *fakeBus) Publish(_ context.Context, topic string, _ []byte) error {
 }
 
 func newRespawner(sp *fakeSuitSpawner, b *fakeBus) spacesuitRespawner {
-	return spacesuitRespawner{spawner: sp, bus: b, npc: 99, home: domain.SectorID(1), logger: slog.New(slog.DiscardHandler)}
+	return newRespawnerWith(sp, b, newFakeEjector())
+}
+
+func newRespawnerWith(sp *fakeSuitSpawner, b *fakeBus, ej *fakeEjector) spacesuitRespawner {
+	return spacesuitRespawner{
+		spawner: sp, bus: b, players: ej, npc: 99, home: domain.SectorID(1), logger: slog.New(slog.DiscardHandler),
+	}
 }
 
 func shipKill(player domain.PlayerID, suit bool) sector.EntityKilledEvent {
@@ -59,11 +67,18 @@ func TestUnit_Respawn_NormalShipDeath_SpawnsSpacesuitAtDeathSpot(t *testing.T) {
 	t.Parallel()
 	sp := &fakeSuitSpawner{}
 	b := &fakeBus{}
-	newRespawner(sp, b).OnKill(context.Background(), shipKill(100, false))
+	ej := newFakeEjector()
+	ej.active[100] = 42 // flying the hull that just died
+	newRespawnerWith(sp, b, ej).OnKill(context.Background(), shipKill(100, false))
 
 	require.Equal(t, []spawnSuitCall{{player: 100, sector: 5, pos: domain.Vec2{X: 10, Y: 20}}}, sp.suits)
 	assert.Empty(t, sp.respawns, "a normal death does not respawn at home")
 	assert.Empty(t, b.topics, "no handoff for the in-place suit spawn")
+	// TASK-194: the dead hull's row is deleted and the FK nulls active_ship_id,
+	// so the killed pilot must be repointed at the suit. Without this the
+	// «which ship do you fly» resolution falls back to the lowest-id rule and
+	// picks a hull the player parked somewhere else entirely.
+	assert.Equal(t, domain.ShipID(500), ej.active[100], "killed pilot now flies the spacesuit")
 }
 
 func TestUnit_Respawn_SpacesuitDeath_RespawnsHomeWithHandoff(t *testing.T) {
@@ -189,7 +204,8 @@ func TestUnit_Capture_EjectsPilotAndPassengers(t *testing.T) {
 	assert.True(t, players[100] && players[101], "passengers ejected")
 	assert.Len(t, sp.suits, 3)
 	assert.Empty(t, sp.respawns, "capture never respawns a ship at home")
-	assert.Equal(t, domain.ShipID(0), ej.active[7], "ejected pilot repointed to the new suit (id 0 from fake spawner)")
+	// passengers are ejected first (suits 500, 501), the old pilot last (502)
+	assert.Equal(t, domain.ShipID(502), ej.active[7], "ejected pilot repointed to the new suit")
 }
 
 // The NPC/unowned old pilot is not a player — no eject for them, but riders

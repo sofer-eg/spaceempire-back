@@ -61,8 +61,25 @@ func (r spacesuitRespawner) OnKill(ctx context.Context, ev sector.EntityKilledEv
 		return
 	}
 	if !ev.VictimIsSpacesuit {
-		if _, err := r.spawner.SpawnSpacesuit(ctx, ev.VictimPlayer, ev.SectorID, ev.Pos, nil); err != nil {
+		suitID, err := r.spawner.SpawnSpacesuit(ctx, ev.VictimPlayer, ev.SectorID, ev.Pos, nil)
+		if err != nil {
 			r.logger.ErrorContext(ctx, "spacesuit: spawn", "err", err, "player", int64(ev.VictimPlayer))
+			return
+		}
+		// Point the player at the suit, exactly as ejectPassenger does
+		// (TASK-194). The dead hull's row is gone and the FK on
+		// players.active_ship_id (ON DELETE SET NULL, migration 0048) has just
+		// nulled the pointer, so without this every «which ship does this
+		// player fly» resolution falls through to the lowest-id rule and lands
+		// on whatever hull they left parked elsewhere — including in another
+		// sector.
+		//
+		// No handoff is published here: the suit is in the sector the player's
+		// WS is already on, and wsPushLoop skips same-sector handoffs anyway
+		// (internal/api/ws.go:600). ejectPassenger publishes one because it is
+		// also reused by the capture path.
+		if err := r.players.SetActiveShip(ctx, ev.VictimPlayer, suitID); err != nil {
+			r.logger.ErrorContext(ctx, "spacesuit: set active", "err", err, "player", int64(ev.VictimPlayer))
 		}
 		return
 	}

@@ -2,6 +2,7 @@ package players_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -110,6 +111,80 @@ func TestIntegration_PlayersRepository_SetActiveShip_ZeroClears(t *testing.T) {
 	_, ok, err := repo.ActiveShip(context.Background(), pid)
 	require.NoError(t, err)
 	assert.False(t, ok)
+}
+
+// TASK-194: the conditional write behind the EVA exit gate. Both the NULL and
+// the set case must compare, hence IS NOT DISTINCT FROM rather than =.
+func TestIntegration_PlayersRepository_CompareAndSetActiveShip_MatchesExpected(t *testing.T) {
+	t.Parallel()
+	pool := testdb.Setup(t)
+	repo := players.New(pool)
+	ctx := context.Background()
+
+	pid := seedPlayer(t, pool)
+	first := seedShip(t, pool, pid)
+	second := seedShip(t, pool, pid)
+
+	// NULL -> first: expected 0 matches the NULL the row starts with.
+	ok, err := repo.CompareAndSetActiveShip(ctx, pid, 0, first)
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	// the same call again no longer matches: the pointer moved.
+	ok, err = repo.CompareAndSetActiveShip(ctx, pid, 0, second)
+	require.NoError(t, err)
+	assert.False(t, ok, "stale expectation is refused")
+
+	got, has, err := repo.ActiveShip(ctx, pid)
+	require.NoError(t, err)
+	require.True(t, has)
+	assert.Equal(t, first, got, "the refused write changed nothing")
+
+	// first -> second with the right expectation goes through.
+	ok, err = repo.CompareAndSetActiveShip(ctx, pid, first, second)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+// TASK-194: two writers racing for the same pointer — the DB, not the caller,
+// decides. Exactly one UPDATE may report a row.
+func TestIntegration_PlayersRepository_CompareAndSetActiveShip_ParallelOneWinner(t *testing.T) {
+	t.Parallel()
+	pool := testdb.Setup(t)
+	repo := players.New(pool)
+	ctx := context.Background()
+
+	pid := seedPlayer(t, pool)
+	candidates := []domain.ShipID{seedShip(t, pool, pid), seedShip(t, pool, pid)}
+
+	results := make([]bool, len(candidates))
+	errs := make([]error, len(candidates))
+	var start, done sync.WaitGroup
+	start.Add(1)
+	done.Add(len(candidates))
+	for i, ship := range candidates {
+		go func() {
+			defer done.Done()
+			start.Wait()
+			results[i], errs[i] = repo.CompareAndSetActiveShip(ctx, pid, 0, ship)
+		}()
+	}
+	start.Done()
+	done.Wait()
+
+	winners := 0
+	for i := range candidates {
+		require.NoError(t, errs[i])
+		if results[i] {
+			winners++
+		}
+	}
+	assert.Equal(t, 1, winners, "exactly one concurrent claim succeeds")
+
+	got, has, err := repo.ActiveShip(ctx, pid)
+	require.NoError(t, err)
+	require.True(t, has)
+	assert.Contains(t, candidates, got)
 }
 
 func TestIntegration_PlayersRepository_GetCash_ReturnsDefault(t *testing.T) {

@@ -54,9 +54,9 @@ type Config struct {
 	// the anchor once its live count drops below peak × fraction.
 	SquadRetreatFraction float64
 	// WarshipClassIDs marks the ship classes that count as squad members
-	// (M3/M4/M6 in production wiring — npc_spawner gives civilian TS a race
-	// too, so Race alone cannot define membership). nil/empty → no squads,
-	// every ship behaves solo as before TASK-66.
+	// (M2..M6 in production wiring, balance.ShipClass.IsWarship — npc_spawner
+	// gives civilian TS a race too, so Race alone cannot define membership).
+	// nil/empty → no squads, every ship behaves solo as before TASK-66.
 	WarshipClassIDs map[domain.ShipClassID]bool
 }
 
@@ -102,6 +102,12 @@ type state struct {
 	// hostile is around. Absent in pre-TASK-66 snapshots → 0, raised on the
 	// first tick.
 	SquadPeak int `json:"squadPeak,omitempty"`
+	// Standalone (TASK-207) marks a ship that never joins emergent squads —
+	// quest NPCs (escorted traders, protect targets) share the race controller
+	// but must not become wingmen of a same-race navy or follow its group
+	// retreat. Set by NewInitialStandaloneState; absent in older snapshots →
+	// false (a normal squad member).
+	Standalone bool `json:"standalone,omitempty"`
 }
 
 // Controller is one race ship's reactive AI.
@@ -173,9 +179,11 @@ func (c *Controller) Tick(_ context.Context, view ai.WorldView) ai.Action {
 // squad returns the ID-sorted flight group self belongs to: the sector's live
 // same-race warships (WarshipClassIDs), self included. Empty when self is not
 // a warship (civilians of the race never join; ShipClassID 0 — spacesuits /
-// legacy rows — is never a warship class).
+// legacy rows — is never a warship class) or is standalone (TASK-207: quest
+// NPCs behave solo — the pre-TASK-66 patrol/engage/flee, no formation, no
+// group retreat).
 func (c *Controller) squad(self domain.Ship, ships []domain.Ship) []domain.ShipID {
-	if !c.cfg.WarshipClassIDs[self.ShipClassID] {
+	if c.st.Standalone || !c.cfg.WarshipClassIDs[self.ShipClassID] {
 		return nil
 	}
 	ids := []domain.ShipID{self.ID}

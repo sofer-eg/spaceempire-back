@@ -58,12 +58,37 @@ Status, pos_in_order)` и `f_flightgroups(LeaderID, target_id, patrol_*, …)`
 состояние не нужно.
 
 **Звено (squad).** Живые корабли сектора с `Ship.Race == self.Race` И
-warship-классом (`Config.WarshipClassIDs`; в проде — M3/M4/M6, тот же набор,
-что спавнит `race_fleet_spawner`), включая себя. Фильтр по классу обязателен:
-`npc_spawner` присваивает `Race` и мирным TS/шахтёрам/пассажирам — по одной
-расе они в звено не попадают. `ShipClassID == 0` (скафандр/legacy) — не
-warship. Если сам корабль не warship (или `WarshipClassIDs` пуст) — звена
-нет, поведение одиночное (до-TASK-66). Лидер = минимальный `ShipID` звена.
+warship-классом (`Config.WarshipClassIDs`), включая себя. Единый источник
+набора боевых классов (TASK-207) — `balance.ShipClass.IsWarship`:
+`Class ∈ {2,3,4,5,6}` (M2/M3/M4/M5/M6). Членство в звене шире спавн-наборов
+спавнеров (нава спавнит {3,4,6}, инвазии — ксеноны {3,4,5} и каак {2,3}) —
+спавн-фильтры это спавн-политика и остаются своими литералами, но class-5
+ксеноны и class-2 каак входят в звенья своих групп. Фильтр по классу
+обязателен: `npc_spawner` присваивает `Race` и мирным TS/шахтёрам/пассажирам
+— по одной расе они в звено не попадают. `ShipClassID == 0`
+(скафандр/legacy) — не warship. Если сам корабль не warship (или
+`WarshipClassIDs` пуст) — звена нет, поведение одиночное (до-TASK-66).
+Лидер = минимальный `ShipID` звена.
+
+**Standalone-контроллеры (TASK-207).** В `ai_state` — флаг `standalone`
+(`json:"standalone,omitempty"`; старый снапшот без ключа → `false`,
+обычный член звена). Ставится конструктором
+`race.NewInitialStandaloneState(raceID, anchor)`; используется
+`quest_spawner` для квестовых NPC (эскортируемый торговец / цель защиты) —
+иначе warship-класс той же расы, что нава сектора, становился бы ведомым и
+улетал от игрока в клин-офсет к лидеру навы. При `standalone` `squad()`
+возвращает `nil`: корабль ведёт себя соло как до TASK-66 — патруль вокруг
+своего anchor, engage с focus-fire, личный flee по HP; строй и групповой
+ретрит к нему не применяются. Нава (`race_fleet_spawner`) и инвазии
+(`invasion_spawner`) — обычный `NewInitialState`: звенья внутри инвазионной
+группы желательны.
+
+**Принятая асимметрия (TASK-207).** Членство других кораблей вычисляется из
+видимых полей `domain.Ship` (Race + класс) — поле-маркер на `domain.Ship`
+сознательно не заводится (4 слоя провязки + ловушка handoff-survival).
+Поэтому нава по-прежнему считает standalone-корабль своей расы в своём
+звене/`squadPeak`. Это принятый мелкий шум: пик самокорректируется ребейзом,
+как только врага в радиусе нет.
 
 **Строй в патруле** (наследник `pos_in_order`). Лидер и одиночный корабль
 патрулируют круг вокруг anchor как раньше. Ведомый ранга `r` (1-based позиция
@@ -94,9 +119,12 @@ Focus-fire (`allyFocusTarget`) намеренно шире звена: ally = л
 ### Wiring
 `app.go`: строит `relations.Service` + `Precount`, адаптер `Targeter`
 (9.1: `raceMatrixTargeter` по `DefaultStanding`; 9.4: поверх —
-`wantedOverlayTargeter`), вычисляет `WarshipClassIDs` из
-`shipClasses.AllShipClasses()` (Class ∈ {3,4,6}) и вызывает
+`wantedOverlayTargeter`), вычисляет `WarshipClassIDs` через
+`raceWarshipClassIDs(shipClasses)` (`balance.ShipClass.IsWarship`,
+Class ∈ {2,3,4,5,6}) и вызывает
 `race.Register(registry, targeter, race.Config{WarshipClassIDs: …})`.
+`quest_spawner` пишет `ai_state` через `NewInitialStandaloneState`;
+`race_fleet_spawner` и `invasion_spawner` — обычный `NewInitialState`.
 
 ## Отложено
 - Персистентный per-sector FleetAI-координатор и формальные
@@ -117,5 +145,13 @@ Focus-fire (`allyFocusTarget`) намеренно шире звена: ally = л
   `TestUnit_Race_FollowerHoldsFormationOffset` / `LeaderPatrolsWithFollowers`
   / `CivilianSameRaceNotInSquad` / `SquadRetreatsOnLosses` /
   `PeakRebasesAfterEnemyLeaves`.
+- Standalone (TASK-207): не становится ведомым при однорасовом лидере с
+  меньшим ID (флаг переживает rebuild из `ai_state`); не уходит в групповой
+  ретрит; личный flee сохранён; старый `ai_state` без ключа → обычный член
+  звена — `TestUnit_Race_StandaloneNotWingman` / `StandaloneNoGroupRetreat`
+  / `StandaloneKeepsPersonalFlee` / `OldStateWithoutStandaloneJoinsSquad`.
+- Единый набор боевых классов: `TestUnit_ShipClass_IsWarship` (balance,
+  M2..M6) и `TestUnit_RaceWarshipClassIDs` (app: class-5/class-2 в наборе
+  членства, TS/M1 — нет).
 - Реакция end-to-end на рантайме: sector-тест (race-контроллер через
   реестр → `AttackTarget` выставлен, враг получает урон).

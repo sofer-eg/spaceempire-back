@@ -104,6 +104,17 @@ func (s ShipClass) Category() ShipClassCategory {
 // CategoryLabel returns the Russian label for a category (empty if unknown).
 func CategoryLabel(c ShipClassCategory) string { return categoryLabel[c] }
 
+// warshipClassNumbers is the single source of the gameplay class numbers that
+// count as combat classes: M2 destroyer, M3 heavy fighter, M4 fighter, M5
+// scout, M6 corvette (TASK-207). Race-AI squad membership is keyed off this
+// set; the spawners' per-race class filters are spawn policy and stay their
+// own literals.
+var warshipClassNumbers = map[int]bool{2: true, 3: true, 4: true, 5: true, 6: true}
+
+// IsWarship reports whether this ship class is a combat class (M2..M6) — the
+// membership predicate for Race-AI flight groups.
+func (s ShipClass) IsWarship() bool { return warshipClassNumbers[s.Class] }
+
 // radarByCategory is the default personal radar radius per gameplay category
 // (phase 10.20). Re-calibrated (TASK-123) to the real sector geometry — the map
 // content sits within ~±1000 units — so the radar is a genuine visibility limit

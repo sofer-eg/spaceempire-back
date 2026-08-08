@@ -263,6 +263,93 @@ func TestUnit_Race_PeakRebasesAfterEnemyLeaves(t *testing.T) {
 	assert.Equal(t, race.OrderEngage, c.CurrentOrder())
 }
 
+// --- Standalone controllers (TASK-207): quest NPCs stay out of squads ---
+
+func standaloneState(t *testing.T, raceID int) []byte {
+	t.Helper()
+	st, err := race.NewInitialStandaloneState(raceID, domain.Vec2{})
+	require.NoError(t, err)
+	return st
+}
+
+func TestUnit_Race_StandaloneNotWingman(t *testing.T) {
+	t.Parallel()
+	c := newController(t, noHostile, squadCfg(), standaloneState(t, 1))
+	self := warship(2, 1, domain.Vec2{X: 0, Y: 0})
+	// Same race, warship class, lower ID: a squad member would fly the {50,50}
+	// formation slot behind this leader. A standalone ship must not.
+	leader := warship(1, 1, domain.Vec2{X: 100, Y: 0})
+
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, leader}})
+	mv, ok := act.(ai.MoveTo)
+	require.True(t, ok, "expected MoveTo (solo patrol), got %T", act)
+	assert.InDelta(t, 150.0, mv.Target.Length(), 1e-6,
+		"solo patrol circle around own anchor, not a formation offset")
+
+	// The flag survives an ai_state snapshot/rebuild.
+	saved, err := c.MarshalState()
+	require.NoError(t, err)
+	c2 := newController(t, noHostile, squadCfg(), saved)
+	act = c2.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, leader}})
+	mv, ok = act.(ai.MoveTo)
+	require.True(t, ok, "expected MoveTo after rebuild, got %T", act)
+	assert.InDelta(t, 150.0, mv.Target.Length(), 1e-6,
+		"standalone persisted through MarshalState")
+}
+
+func TestUnit_Race_StandaloneNoGroupRetreat(t *testing.T) {
+	t.Parallel()
+	c := newController(t, playersHostile, squadCfg(), standaloneState(t, 1))
+	self := warship(1, 1, domain.Vec2{X: 0, Y: 0})
+	ally2 := warship(2, 1, domain.Vec2{X: 60, Y: 0})
+	ally3 := warship(3, 1, domain.Vec2{X: 0, Y: 60})
+	enemy := domain.Ship{ID: 9, PlayerID: 99, Pos: domain.Vec2{X: 100, Y: 0}, HP: 100, MaxHP: 100}
+
+	// Two same-race warships around: a squad member would record peak 3 here.
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, ally2, ally3, enemy}})
+	_, ok := act.(ai.Attack)
+	require.True(t, ok, "standalone engages, got %T", act)
+
+	// Both gone: a squad member would group-retreat (1 < 3×0.5). Standalone
+	// keeps fighting — the navy's losses are not its losses.
+	act = c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	_, ok = act.(ai.Attack)
+	require.True(t, ok, "standalone must not group-retreat, got %T", act)
+	assert.Equal(t, race.OrderEngage, c.CurrentOrder())
+}
+
+func TestUnit_Race_StandaloneKeepsPersonalFlee(t *testing.T) {
+	t.Parallel()
+	c := newController(t, allHostile, squadCfg(), standaloneState(t, 1))
+	self := warship(1, 1, domain.Vec2{X: 0, Y: 0})
+	self.HP = 20 // 20% hull < default FleeThreshold 0.3
+	enemy := ship(9, domain.Vec2{X: 100, Y: 0}, 100, 100)
+
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, enemy}})
+	mv, ok := act.(ai.MoveTo)
+	require.True(t, ok, "expected MoveTo (personal flee), got %T", act)
+	assert.Equal(t, race.OrderRetreat, c.CurrentOrder())
+	assert.Less(t, mv.Target.X, 0.0, "flees away from the threat")
+}
+
+func TestUnit_Race_OldStateWithoutStandaloneJoinsSquad(t *testing.T) {
+	t.Parallel()
+	// Pre-TASK-207 snapshot: NewInitialState never wrote a standalone key.
+	old, err := race.NewInitialState(1, domain.Vec2{})
+	require.NoError(t, err)
+	require.NotContains(t, string(old), "standalone")
+
+	c := newController(t, noHostile, squadCfg(), old)
+	self := warship(2, 1, domain.Vec2{X: 0, Y: 0})
+	leader := warship(1, 1, domain.Vec2{X: 100, Y: 0})
+
+	act := c.Tick(context.Background(), fakeWorld{self: self, ships: []domain.Ship{self, leader}})
+	mv, ok := act.(ai.MoveTo)
+	require.True(t, ok, "expected MoveTo (formation), got %T", act)
+	// standalone defaults to false → a normal squad member holding formation.
+	assert.Equal(t, domain.Vec2{X: 50, Y: 50}, mv.Target)
+}
+
 func TestUnit_Race_StateSurvivesRebuild(t *testing.T) {
 	t.Parallel()
 	cfg := race.Config{PatrolRadius: 150}

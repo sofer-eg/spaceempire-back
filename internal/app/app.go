@@ -333,21 +333,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// not player/clan relations (all NPC factions share the __npc__ owner).
 	// 9.4: the wanted overlay adds "a main race attacks a wanted player" on top
 	// of the matrix, so navy/police engage players flagged by contraband busts.
-	// TASK-66: squad membership needs the warship classes (M3/M4/M6, the same
-	// set race_fleet_spawner spawns) — npc_spawner gives civilian TS a race
-	// too, so Race alone would pull traders/miners into flight groups.
-	warshipClassIDs := make(map[domain.ShipClassID]bool)
-	for _, sc := range shipClasses.AllShipClasses() {
-		switch sc.Class {
-		case 3, 4, 6: // M3 heavy fighter, M4 fighter, M6 corvette
-			warshipClassIDs[sc.ID] = true
-		}
-	}
+	// TASK-66: squad membership needs the warship classes — npc_spawner gives
+	// civilian TS a race too, so Race alone would pull traders/miners into
+	// flight groups. TASK-207: the set is the full combat taxonomy M2..M6
+	// (balance.ShipClass.IsWarship), so invasion class-5 Xenon and class-2
+	// Kha'ak join their group's squads.
 	race.Register(aiRegistry, wantedOverlayTargeter{
 		base:     raceMatrixTargeter{},
 		standing: standingSvc,
 		npc:      npcPlayerID,
-	}, race.Config{WarshipClassIDs: warshipClassIDs})
+	}, race.Config{WarshipClassIDs: raceWarshipClassIDs(shipClasses)})
 	// 5.3: NPC TS traders. ArriveRadius must exceed the autopilot's park
 	// distance (DockRange/2) so a parked trader is recognised as arrived.
 	trader.Register(aiRegistry, trader.Config{ArriveRadius: cfg.Sector.DockRange * 2})

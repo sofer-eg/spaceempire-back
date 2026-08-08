@@ -119,3 +119,14 @@ func TestUnit_ScoutForRace(t *testing.T) {
 	_, ok = c.ScoutForRace(9) // race with no scout in the catalog
 	assert.False(t, ok)
 }
+
+func TestUnit_ShipClass_IsWarship(t *testing.T) {
+	// Combat classes for Race-AI squad membership (TASK-207): M2..M6.
+	for _, class := range []int{2, 3, 4, 5, 6} {
+		assert.True(t, balance.ShipClass{Class: class}.IsWarship(), "class %d is a warship", class)
+	}
+	// M1 carrier, TL, special, TS and the classless (spacesuit/legacy) 0 are not.
+	for _, class := range []int{0, 1, 7, 8, 9} {
+		assert.False(t, balance.ShipClass{Class: class}.IsWarship(), "class %d is not a warship", class)
+	}
+}

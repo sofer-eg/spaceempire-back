@@ -71,7 +71,10 @@ func (q *questSpawner) Spawn(ctx context.Context, spec quest.QuestSpawn) ([]doma
 		}
 		ship.ID = id
 
-		stateJSON, err := race.NewInitialState(int(spec.Race), anchor)
+		// Standalone (TASK-207): quest NPCs must not join same-race navy
+		// squads — an escorted trader would otherwise wing up and fly away
+		// from the player toward the navy leader.
+		stateJSON, err := race.NewInitialStandaloneState(int(spec.Race), anchor)
 		if err != nil {
 			return ids, fmt.Errorf("quest npc state: %w", err)
 		}

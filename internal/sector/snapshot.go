@@ -270,6 +270,12 @@ func broadcastPatches(logger *slog.Logger, s *sectorState, cellSize float64, ap 
 		patch.AsteroidsAdded = aAdded
 		patch.AsteroidsUpdated = aUpdated
 		patch.AsteroidsRemoved = aRemoved
+		// READ-ONLY: this slice is shared by every subscriber's patch, and
+		// collectDirtyDestructibles routinely leaves it with spare capacity (it
+		// sizes by the dirty count and skips refs already removed), so a direct
+		// append here would write into another subscriber's patch — the exact
+		// cross-player leak TASK-193 was written to avoid. Add through
+		// withLiveStatics, which always returns a fresh slice.
 		patch.StaticsUpdated = staticUpdates
 		// Static visibility (TASK-117): stations/shipyards/TS/pirbases are always
 		// visible; laser towers and satellites are gated on the personal radar

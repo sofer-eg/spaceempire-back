@@ -420,8 +420,13 @@ func (s *sectorState) collectDirtyDestructibles() []domain.DestructibleStatic {
 // subscriber's patch shares, so appending into it would leak one subscriber's
 // top-up into another subscriber's patch. A ref already in base (the object
 // entered the window AND took damage in the same tick) is left alone rather than
-// duplicated, and a ref with no live record — not every visible static is
-// destructible — is skipped.
+// duplicated.
+//
+// The "no live record" branch is defensive, not a live case: refs reaching here
+// from broadcastPatches derive from visibleStaticRefs, which iterates
+// s.destructibles, so today it cannot fire. It stays because the helper would
+// otherwise be a landmine for a caller that assembles refs some other way — the
+// tolerance costs one map lookup and is exercised by a direct unit test.
 func (s *sectorState) withLiveStatics(base []domain.DestructibleStatic, refs []domain.EntityRef) []domain.DestructibleStatic {
 	have := make(map[domain.EntityRef]struct{}, len(base))
 	for _, d := range base {
